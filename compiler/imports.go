@@ -67,7 +67,9 @@ func init() {
 	registerModule("url", "net/url", "url", map[string]string{
 		"format": "String",
 	})
-	registerModule("util", "fmt", "fmt", nil)
+	registerModule("util", "fmt", "fmt", map[string]string{
+		"format": "Sprintf",
+	})
 	registerModule("events", "sync", "sync", nil)
 	registerModule("stream", "io", "io", nil)
 	registerModule("buffer", "bytes", "bytes", nil)

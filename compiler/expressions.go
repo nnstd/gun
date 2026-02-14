@@ -366,6 +366,25 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 		}
 	}
 
+	// process.X → Go equivalents
+	if objNode.Kind() == "identifier" && objNode.Utf8Text(t.source) == "process" {
+		if r := transformProcessMember(prop, t.addImport); r != nil {
+			return r
+		}
+	}
+
+	// process.env.X → os.Getenv("X")
+	if objNode.Kind() == "member_expression" {
+		innerObj := objNode.ChildByFieldName("object")
+		innerProp := objNode.ChildByFieldName("property")
+		if innerObj != nil && innerProp != nil &&
+			innerObj.Utf8Text(t.source) == "process" &&
+			innerProp.Utf8Text(t.source) == "env" {
+			t.addImport("os")
+			return callExpr(selectorExpr(ident("os"), "Getenv"), stringLit(prop))
+		}
+	}
+
 	obj := t.transformExpr(objNode)
 
 	if prop == "length" {

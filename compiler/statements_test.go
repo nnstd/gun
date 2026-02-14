@@ -132,6 +132,17 @@ console.log("hello");`
 	assertContains(t, out, "hello")
 }
 
+func TestNilExpressionStatementsSkipped(t *testing.T) {
+	ts := `function f(): void {
+	undefined;
+	null;
+	console.log("ok");
+}`
+	out := compile(t, ts)
+	assertContains(t, out, `"ok"`)
+	assertNotContains(t, out, "\tnil\n")
+}
+
 func TestModuleExportsFunction(t *testing.T) {
 	ts := `module.exports = function getCallerFile(position) {
 		return position;

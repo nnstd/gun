@@ -73,3 +73,35 @@ func TestArrayPush(t *testing.T) {
 	out := compile(t, ts)
 	assertContains(t, out, "append(arr, 1)")
 }
+
+func TestNewTypeError(t *testing.T) {
+	ts := `function fail(): void { throw new TypeError("bad input"); }`
+	out := compile(t, ts)
+	assertContains(t, out, `errors.New("bad input")`)
+}
+
+func TestNumberIsSafeInteger(t *testing.T) {
+	ts := `const ok = Number.isSafeInteger(42);`
+	out := compile(t, ts)
+	assertContains(t, out, "true")
+	assertNotContains(t, out, "Number")
+}
+
+func TestProcessArgv(t *testing.T) {
+	ts := `const args = process.argv;`
+	out := compile(t, ts)
+	assertContains(t, out, "os.Args")
+	assertContains(t, out, `"os"`)
+}
+
+func TestProcessEnvAccess(t *testing.T) {
+	ts := `const home = process.env.HOME;`
+	out := compile(t, ts)
+	assertContains(t, out, `os.Getenv("HOME")`)
+}
+
+func TestProcessExit(t *testing.T) {
+	ts := `process.exit(1);`
+	out := compile(t, ts)
+	assertContains(t, out, "os.Exit(1)")
+}

@@ -80,6 +80,10 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 			if expr == nil {
 				return nil
 			}
+			// Skip bare nil expression statements (from undefined/null)
+			if id, ok := expr.(*ast.Ident); ok && id.Name == "nil" {
+				return nil
+			}
 			return exprStmt(expr)
 		}
 		return nil
@@ -142,9 +146,16 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 	case "block", "statement_block":
 		return t.transformBlock(node)
 
+	case "comment", "line_comment", "block_comment":
+		return nil
+
 	default:
 		// Try as expression
 		if e := t.transformExpr(node); e != nil {
+			// Skip bare nil expression statements (from undefined/null/comments)
+			if id, ok := e.(*ast.Ident); ok && id.Name == "nil" {
+				return nil
+			}
 			return exprStmt(e)
 		}
 		return nil

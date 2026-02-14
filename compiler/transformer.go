@@ -227,6 +227,9 @@ func (t *Transformer) transformExportDefault(node *sitter.Node) {
 			if nameNode != nil {
 				if d := t.transformFuncDecl(child, true); d != nil {
 					t.decls = append(t.decls, d)
+					// Also create a Default alias so importers can find it
+					goName := capitalize(nameNode.Utf8Text(t.source))
+					t.decls = append(t.decls, varDecl("Default", nil, ident(goName)))
 				}
 			} else {
 				if d := t.transformAnonFuncAsDefault(child); d != nil {
