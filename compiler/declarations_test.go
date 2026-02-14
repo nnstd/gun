@@ -262,6 +262,30 @@ func TestGoBuiltinParamSanitized(t *testing.T) {
 	assertNotContains(t, out, "string *jsvalue")
 }
 
+func TestDestructuringParamWithDefault(t *testing.T) {
+	ts := `export default function ansiRegex({onlyFirst = false} = {}) {
+		return onlyFirst;
+	}`
+	out := compile(t, ts)
+	// Parameter should be variadic so callers can omit it
+	assertContains(t, out, "...*jsvalue.JSValue")
+	// Should extract from variadic args
+	assertContains(t, out, "if len(_args0) > 0")
+	// Destructuring default should still be emitted
+	assertContains(t, out, "onlyFirst := false")
+	// Synthetic param should be referenced to avoid unused error
+	assertContains(t, out, "_ = _param0")
+}
+
+func TestDestructuringParamWithoutDefault(t *testing.T) {
+	ts := `function f({name, age}) { return name; }`
+	out := compile(t, ts)
+	// No default value — should NOT be variadic
+	assertNotContains(t, out, "...")
+	assertContains(t, out, "_param0")
+	assertContains(t, out, "name := _param0.Name")
+}
+
 func TestRestPatternParam(t *testing.T) {
 	ts := `export function foo(...args) { return args; }`
 	out := compile(t, ts)

@@ -182,6 +182,7 @@ func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.
 		case "required_parameter", "optional_parameter":
 			nameNode := param.ChildByFieldName("pattern")
 			typeNode := param.ChildByFieldName("type")
+			valueNode := param.ChildByFieldName("value")
 
 			var pType ast.Expr
 			if typeNode != nil {
@@ -228,12 +229,47 @@ func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.
 			// Handle destructuring patterns in parameters
 			if nameNode != nil && (nameNode.Kind() == "object_pattern" || nameNode.Kind() == "array_pattern") {
 				syntheticName := fmt.Sprintf("_param%d", i)
-				fields = append(fields, field(syntheticName, pType))
-				// Create a synthetic sitter node isn't possible, so build
-				// the destructuring stmts manually using the pattern and
-				// a Go identifier as the value expression.
+
+				// Parameters with default values become variadic so callers
+				// can omit them (JS allows calling with fewer args).
+				if valueNode != nil {
+					variadicName := fmt.Sprintf("_args%d", i)
+					fields = append(fields, field(variadicName, &ast.Ellipsis{Elt: pType}))
+					// var _param0 Type; if len(_args0) > 0 { _param0 = _args0[0] }
+					destructureStmts = append(destructureStmts,
+						&ast.DeclStmt{Decl: varDecl(syntheticName, pType, nil)},
+						&ast.IfStmt{
+							Cond: &ast.BinaryExpr{
+								X:  callExpr(ident("len"), ident(variadicName)),
+								Op: token.GTR,
+								Y:  intLit("0"),
+							},
+							Body: blockStmt(
+								&ast.AssignStmt{
+									Lhs: []ast.Expr{ident(syntheticName)},
+									Tok: token.ASSIGN,
+									Rhs: []ast.Expr{&ast.IndexExpr{X: ident(variadicName), Index: intLit("0")}},
+								},
+							),
+						},
+					)
+				} else {
+					fields = append(fields, field(syntheticName, pType))
+				}
+
 				stmts := t.transformDestructuringFromExpr(nameNode, ident(syntheticName))
 				destructureStmts = append(destructureStmts, stmts...)
+				// Ensure the synthetic param is referenced even when all
+				// destructured properties use defaults (avoids "declared and not used").
+				if valueNode != nil {
+					destructureStmts = append(destructureStmts,
+						&ast.AssignStmt{
+							Lhs: []ast.Expr{ident("_")},
+							Tok: token.ASSIGN,
+							Rhs: []ast.Expr{ident(syntheticName)},
+						},
+					)
+				}
 				continue
 			}
 
