@@ -48,6 +48,44 @@ func TestNewExpression(t *testing.T) {
 	assertContains(t, out, "time.Now()")
 }
 
+func TestRegexLiteral(t *testing.T) {
+	ts := `const re = /^file:\/\//;`
+	out := compile(t, ts)
+	assertContains(t, out, "regexp.MustCompile")
+	assertContains(t, out, "`^file:\\/\\/`")
+}
+
+func TestRegexStripsFlagsAndDelimiters(t *testing.T) {
+	ts := `const re = /hello/gi;`
+	out := compile(t, ts)
+	assertContains(t, out, "`hello`")
+	assertNotContains(t, out, "/hello/")
+}
+
+func TestStringWithEmbeddedDoubleQuotes(t *testing.T) {
+	ts := `const msg = '"version" is reserved';`
+	out := compile(t, ts)
+	assertContains(t, out, `\"version\" is reserved`)
+}
+
+func TestAssignmentExpressionInIIFE(t *testing.T) {
+	ts := `function f(a: any, b: any): any { return a = b; }`
+	out := compile(t, ts)
+	// Assignment-as-expression should be wrapped in an IIFE
+	assertContains(t, out, "func() any")
+	assertNotContains(t, out, "= =")
+}
+
+func TestDollarSignInIdentifier(t *testing.T) {
+	ts := `let $0 = "bin";
+let default$0 = "node";
+console.log($0);`
+	out := compile(t, ts)
+	assertContains(t, out, "_0")
+	assertContains(t, out, "default_0")
+	assertNotContains(t, out, "$")
+}
+
 func TestAwaitStripped(t *testing.T) {
 	ts := `async function load(): Promise<string> { return await fetch(); }`
 	out := compile(t, ts)

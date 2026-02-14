@@ -351,9 +351,12 @@ var goKeywords = map[string]bool{
 	"select": true, "struct": true, "switch": true, "type": true, "var": true,
 }
 
-// sanitizeIdent appends an underscore to Go reserved keywords so they can be
-// used as variable or parameter names.
+// sanitizeIdent makes a JS identifier safe for use as a Go identifier by
+// replacing illegal characters and escaping reserved keywords.
 func sanitizeIdent(name string) string {
+	if strings.ContainsRune(name, '$') {
+		name = strings.ReplaceAll(name, "$", "_")
+	}
 	if goKeywords[name] {
 		return name + "_"
 	}

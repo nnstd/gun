@@ -140,6 +140,47 @@ func TestNonMainPackageUsesInit(t *testing.T) {
 	assertNotContains(t, s, "func main()")
 }
 
+func TestVarNoTypeNoValue(t *testing.T) {
+	ts := `var _foo, _bar;`
+	out := compile(t, ts)
+	assertContains(t, out, "*jsvalue.JSValue")
+	assertContains(t, out, "var _foo")
+	assertContains(t, out, "var _bar")
+}
+
+func TestParamGoKeywordMap(t *testing.T) {
+	ts := `function f(map: string): void {}`
+	out := compile(t, ts)
+	assertContains(t, out, "map_ string")
+}
+
+func TestParamGoKeywordRange(t *testing.T) {
+	ts := `function f(range: number): void {}`
+	out := compile(t, ts)
+	assertContains(t, out, "range_ float64")
+}
+
+func TestClassComputedMethodSkipped(t *testing.T) {
+	ts := `const sym = Symbol('test');
+class Foo {
+	name: string;
+	[sym]() { return 1; }
+	greet(): string { return this.name; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "type Foo struct")
+	assertContains(t, out, "func (f *Foo) Greet() string")
+	assertNotContains(t, out, "[sym]")
+	assertNotContains(t, out, "func (f *Foo) Sym")
+}
+
+func TestExportStringAliasDoubleQuote(t *testing.T) {
+	ts := `const X = 1;
+export {X as "default"}`
+	out := compile(t, ts)
+	assertNotContains(t, out, "default")
+}
+
 func TestEmptyInput(t *testing.T) {
 	out, err := Compile([]byte(""), "main", "")
 	if err != nil {

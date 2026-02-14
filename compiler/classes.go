@@ -46,6 +46,10 @@ func (t *Transformer) transformClassDecl(node *sitter.Node) []ast.Decl {
 				if nameN == nil {
 					continue
 				}
+				// Skip computed property names like [Symbol] methods — no Go equivalent
+				if nameN.Kind() == "computed_property_name" {
+					continue
+				}
 				mName := nameN.Utf8Text(t.source)
 
 				if mName == "constructor" {

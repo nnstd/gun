@@ -23,8 +23,16 @@ func (t *Transformer) transformExpr(node *sitter.Node) ast.Expr {
 		return basicLit(numberTokenKind(text), text)
 
 	case "string", "string_fragment":
-		text := strings.Trim(node.Utf8Text(t.source), "'\"")
-		return stringLit(text)
+		text := node.Utf8Text(t.source)
+		// Strip only the outer quote delimiters (not Trim, which eats multiple)
+		if len(text) >= 2 && (text[0] == '\'' || text[0] == '"') {
+			text = text[1 : len(text)-1]
+		}
+		// Escape unescaped double quotes for Go string literal
+		text = strings.ReplaceAll(text, `\"`, "\x00ESCAPED_DQ\x00")
+		text = strings.ReplaceAll(text, `"`, `\"`)
+		text = strings.ReplaceAll(text, "\x00ESCAPED_DQ\x00", `\"`)
+		return basicLit(token.STRING, `"`+text+`"`)
 
 	case "template_string":
 		return t.transformTemplateString(node)
@@ -238,7 +246,20 @@ func (t *Transformer) transformAssignmentExpr(node *sitter.Node) ast.Expr {
 	if left == nil || right == nil {
 		return ident("nil")
 	}
-	return &ast.BinaryExpr{X: left, Op: token.ASSIGN, Y: right}
+	// In JS, assignment is an expression that returns the assigned value.
+	// In Go, assignment is a statement. Wrap in an IIFE to preserve semantics.
+	return &ast.CallExpr{
+		Fun: &ast.FuncLit{
+			Type: &ast.FuncType{
+				Params:  fieldList(),
+				Results: fieldList(field("", ident("any"))),
+			},
+			Body: blockStmt(
+				&ast.AssignStmt{Lhs: []ast.Expr{left}, Tok: token.ASSIGN, Rhs: []ast.Expr{right}},
+				returnStmt(right),
+			),
+		},
+	}
 }
 
 func (t *Transformer) transformAugmentedAssignment(node *sitter.Node) ast.Expr {
@@ -336,7 +357,7 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 	}
 
 	obj := t.transformExpr(objNode)
-	prop := propNode.Utf8Text(t.source)
+	prop := sanitizeIdent(propNode.Utf8Text(t.source))
 
 	if prop == "length" {
 		return callExpr(ident("len"), obj)

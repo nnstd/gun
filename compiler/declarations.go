@@ -36,7 +36,7 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 			continue
 		}
 
-		name := nameNode.Utf8Text(t.source)
+		name := sanitizeIdent(nameNode.Utf8Text(t.source))
 
 		// Handle destructuring patterns
 		if nameNode.Kind() == "object_pattern" || nameNode.Kind() == "array_pattern" {
@@ -72,6 +72,12 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 					t.varTypes[name] = imp.goPkgName
 				}
 			}
+		}
+
+		// No type and no value → default to *jsvalue.JSValue
+		if typ == nil && value == nil {
+			typ = ptrType(selectorExpr(ident("jsvalue"), "JSValue"))
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		}
 
 		// If const with simple literal value, use Go const
