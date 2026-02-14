@@ -53,6 +53,9 @@ func TestStringMethods(t *testing.T) {
 		{"toUpperCase", `function f(s: string): any { return s.toUpperCase(); }`, `strings.ToUpper(s)`},
 		{"startsWith", `function f(s: string): any { return s.startsWith("a"); }`, `strings.HasPrefix(s, "a")`},
 		{"endsWith", `function f(s: string): any { return s.endsWith("z"); }`, `strings.HasSuffix(s, "z")`},
+		{"repeat", `function f(s: string): any { return s.repeat(3); }`, `strings.Repeat(s, 3)`},
+		{"trimStart", `function f(s: string): any { return s.trimStart(); }`, `strings.TrimLeft(s, " \t\n\r")`},
+		{"trimEnd", `function f(s: string): any { return s.trimEnd(); }`, `strings.TrimRight(s, " \t\n\r")`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -25,6 +25,17 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 	case "trim":
 		addImport("strings")
 		return callExpr(selectorExpr(ident("strings"), "TrimSpace"), obj)
+	case "trimStart", "trimLeft":
+		addImport("strings")
+		return callExpr(selectorExpr(ident("strings"), "TrimLeft"), obj, stringLit(" \\t\\n\\r"))
+	case "trimEnd", "trimRight":
+		addImport("strings")
+		return callExpr(selectorExpr(ident("strings"), "TrimRight"), obj, stringLit(" \\t\\n\\r"))
+	case "repeat":
+		addImport("strings")
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("strings"), "Repeat"), obj, args[0])
+		}
 	case "toLowerCase":
 		addImport("strings")
 		return callExpr(selectorExpr(ident("strings"), "ToLower"), obj)
