@@ -134,6 +134,22 @@ export default { readFileSync };`
 	assertContains(t, out, "fs.ReadFileSync")
 }
 
+func TestTranspiledImportArgsWrappedWithJSValue(t *testing.T) {
+	ts := `import { eastAsianWidth } from "get-east-asian-width";
+const w = eastAsianWidth(42, {wide: true});`
+	out := compileWithModule(t, ts, "myapp")
+	assertContains(t, out, "jsvalue.From(42)")
+	assertContains(t, out, "jsvalue.From(map[string]")
+}
+
+func TestKnownModuleArgsNotWrapped(t *testing.T) {
+	ts := `import { readFileSync } from "fs";
+const data = readFileSync("hello.txt");`
+	out := compile(t, ts)
+	assertContains(t, out, `fs.ReadFileSync("hello.txt")`)
+	assertNotContains(t, out, "jsvalue.From")
+}
+
 func TestConsoleErrorStillUsesStdlibOS(t *testing.T) {
 	ts := `console.error("fail");`
 	out := compile(t, ts)

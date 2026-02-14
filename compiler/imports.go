@@ -14,6 +14,7 @@ type resolvedImport struct {
 	goImportPath string // Go import path (e.g. "os", "path/filepath")
 	goPkgName    string // Go package identifier (e.g. "os", "filepath")
 	goSymbol     string // Go symbol name (e.g. "ReadFile"); empty for namespace imports
+	isTranspiled bool   // true when the module is transpiled from source (not a known/runtime module)
 }
 
 // moduleMapping maps a TS module to a Go package.
@@ -137,7 +138,7 @@ func (t *Transformer) transformImport(node *sitter.Node) {
 		child := clauseNode.NamedChild(i)
 		switch child.Kind() {
 		case "named_imports":
-			t.processNamedImports(child, modulePath, mod, typeOnly)
+			t.processNamedImports(child, modulePath, mod, typeOnly, !isKnown)
 
 		case "namespace_import":
 			// import * as X from "mod" → X becomes a package alias
@@ -151,6 +152,7 @@ func (t *Transformer) transformImport(node *sitter.Node) {
 				t.importedNames[alias] = resolvedImport{
 					goImportPath: mod.goPath,
 					goPkgName:    mod.goName,
+					isTranspiled: !isKnown,
 				}
 			}
 
@@ -161,6 +163,7 @@ func (t *Transformer) transformImport(node *sitter.Node) {
 			ri := resolvedImport{
 				goImportPath: mod.goPath,
 				goPkgName:    mod.goName,
+				isTranspiled: !isKnown,
 			}
 			// Check for explicit default symbol mapping in knownSymbols
 			if symTable := knownSymbols[modulePath]; symTable != nil {
@@ -177,7 +180,7 @@ func (t *Transformer) transformImport(node *sitter.Node) {
 	}
 }
 
-func (t *Transformer) processNamedImports(node *sitter.Node, modulePath string, mod moduleMapping, typeOnly bool) {
+func (t *Transformer) processNamedImports(node *sitter.Node, modulePath string, mod moduleMapping, typeOnly bool, isTranspiled bool) {
 	symTable := knownSymbols[modulePath]
 
 	for i := uint(0); i < node.NamedChildCount(); i++ {
@@ -211,6 +214,7 @@ func (t *Transformer) processNamedImports(node *sitter.Node, modulePath string, 
 			goImportPath: mod.goPath,
 			goPkgName:    mod.goName,
 			goSymbol:     capitalize(origName),
+			isTranspiled: isTranspiled,
 		}
 
 		// For type-only imports, also register the capitalized form

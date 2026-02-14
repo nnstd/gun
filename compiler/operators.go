@@ -71,3 +71,20 @@ func mapAugmentedOp(op string) token.Token {
 		return token.ADD_ASSIGN
 	}
 }
+
+func isComparisonOp(op token.Token) bool {
+	switch op {
+	case token.EQL, token.NEQ, token.LSS, token.GTR, token.LEQ, token.GEQ:
+		return true
+	}
+	return false
+}
+
+func isArithmeticOp(op token.Token) bool {
+	switch op {
+	case token.ADD, token.SUB, token.MUL, token.QUO, token.REM,
+		token.AND, token.OR, token.XOR, token.SHL, token.SHR:
+		return true
+	}
+	return false
+}

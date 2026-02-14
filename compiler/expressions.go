@@ -180,7 +180,22 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 		return &ast.BinaryExpr{X: left, Op: token.NEQ, Y: ident("nil")}
 	}
 
-	return &ast.BinaryExpr{X: left, Op: mapBinaryOp(opText), Y: right}
+	op := mapBinaryOp(opText)
+
+	// When an untyped local (JSValue param) is compared or used in arithmetic
+	// with a numeric literal, extract the int value so Go types match.
+	if isComparisonOp(op) || isArithmeticOp(op) {
+		leftIsJSValue := leftNode != nil && leftNode.Kind() == "identifier" && t.isUntypedLocal(leftNode.Utf8Text(t.source))
+		rightIsJSValue := rightNode != nil && rightNode.Kind() == "identifier" && t.isUntypedLocal(rightNode.Utf8Text(t.source))
+		if leftIsJSValue && isNumericLit(right) {
+			left = callExpr(ident("int"), callExpr(selectorExpr(left, "Number")))
+		}
+		if rightIsJSValue && isNumericLit(left) {
+			right = callExpr(ident("int"), callExpr(selectorExpr(right, "Number")))
+		}
+	}
+
+	return &ast.BinaryExpr{X: left, Op: op, Y: right}
 }
 
 func (t *Transformer) transformUnaryExpr(node *sitter.Node) ast.Expr {
@@ -353,6 +368,20 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 		}
 	}
 
+	// When calling a function imported from a transpiled (non-runtime) module,
+	// wrap each argument with jsvalue.From() since all params are *jsvalue.JSValue.
+	if fnNode.Kind() == "identifier" {
+		name := fnNode.Utf8Text(t.source)
+		if imp, ok := t.importedNames[name]; ok && imp.isTranspiled && imp.goSymbol != "" {
+			fun := t.transformExpr(fnNode)
+			args := t.transformArgs(argsNode)
+			for i, arg := range args {
+				args[i] = t.wrapAsJSValue(arg)
+			}
+			return callExpr(fun, args...)
+		}
+	}
+
 	fun := t.transformExpr(fnNode)
 	args := t.transformArgs(argsNode)
 	return callExpr(fun, args...)
@@ -518,6 +547,14 @@ func (t *Transformer) transformObjectLiteral(node *sitter.Node) ast.Expr {
 }
 
 // isJSValueGet returns true if the expression is a JSValue .Get() call.
+func isNumericLit(expr ast.Expr) bool {
+	lit, ok := expr.(*ast.BasicLit)
+	if !ok {
+		return false
+	}
+	return lit.Kind == token.INT || lit.Kind == token.FLOAT
+}
+
 func isJSValueGet(expr ast.Expr) bool {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
@@ -673,8 +710,12 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 		params = fieldList()
 	}
 
-	// Push parameter names so they shadow imports inside the body
-	t.pushScope(paramNames)
+	// Push a typed scope so isUntypedLocal works correctly inside the body.
+	if paramsNode != nil {
+		t.pushTypedScope(extractParamInfo(paramsNode, t.source))
+	} else {
+		t.pushScope(paramNames)
+	}
 	defer t.popScope()
 
 	var results *ast.FieldList
@@ -724,8 +765,8 @@ func (t *Transformer) transformFuncExpr(node *sitter.Node) ast.Expr {
 	paramsNode := node.ChildByFieldName("parameters")
 	params, paramStmts := t.transformParams(paramsNode)
 
-	// Push parameter names so they shadow imports inside the body
-	t.pushScope(extractParamNames(paramsNode, t.source))
+	// Push a typed scope so isUntypedLocal works correctly inside the body.
+	t.pushTypedScope(extractParamInfo(paramsNode, t.source))
 	defer t.popScope()
 
 	var results *ast.FieldList

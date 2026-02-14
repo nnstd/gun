@@ -264,6 +264,12 @@ func From(v any) *JSValue {
 		return NewBool(val)
 	case func(...*JSValue) *JSValue:
 		return NewFunction(val)
+	case map[string]*JSValue:
+		obj := NewObject()
+		for k, v := range val {
+			obj.Set(k, v)
+		}
+		return obj
 	default:
 		return NewString(fmt.Sprint(val))
 	}
