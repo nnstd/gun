@@ -80,6 +80,16 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		}
 
+		// JS numbers are always float64. When a non-const variable is
+		// initialized with an integer literal and has no type annotation,
+		// explicitly set the type to float64 so it matches JS semantics
+		// and is compatible with float64 return types.
+		if !isConst && typ == nil && value != nil {
+			if lit, ok := value.(*ast.BasicLit); ok && lit.Kind == token.INT {
+				typ = ident("float64")
+			}
+		}
+
 		// If const with simple literal value, use Go const
 		if isConst && value != nil && isConstCompatible(value) && (typ == nil || isConstType(typ)) {
 			decls = append(decls, constDecl(name, typ, value))

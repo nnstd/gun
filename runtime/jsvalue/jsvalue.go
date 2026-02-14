@@ -2,6 +2,7 @@ package jsvalue
 
 import (
 	"fmt"
+	"regexp"
 	"sync/atomic"
 )
 
@@ -199,6 +200,49 @@ func (v *JSValue) SymbolDesc() string {
 // Array returns the underlying array elements, or nil if not an array.
 func (v *JSValue) Array() []*JSValue {
 	return v.arrayVal
+}
+
+// Len returns the length of the value as an int.
+// For strings, returns the character count; for arrays, the element count;
+// otherwise checks the "length" property.
+func (v *JSValue) Len() int {
+	switch v.typ {
+	case TypeString:
+		return len(v.strVal)
+	case TypeObject:
+		if v.arrayVal != nil {
+			return len(v.arrayVal)
+		}
+	}
+	if prop := v.Get("length"); prop.typ == TypeNumber {
+		return int(prop.numVal)
+	}
+	return 0
+}
+
+// MatchString treats the JSValue as a regex pattern and tests it against s.
+// If the value is a string, it compiles it as a regexp and matches.
+func (v *JSValue) MatchString(s string) bool {
+	if v.typ == TypeString && v.strVal != "" {
+		re, err := regexp.Compile(v.strVal)
+		if err != nil {
+			return false
+		}
+		return re.MatchString(s)
+	}
+	return false
+}
+
+// CodePointAt returns the Unicode code point at the given position.
+func (v *JSValue) CodePointAt(pos int) int {
+	if v.typ != TypeString {
+		return 0
+	}
+	runes := []rune(v.strVal)
+	if pos < 0 || pos >= len(runes) {
+		return 0
+	}
+	return int(runes[pos])
 }
 
 // From wraps an arbitrary Go value as a *JSValue.

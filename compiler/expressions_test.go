@@ -105,12 +105,12 @@ func TestNewMemberExpression(t *testing.T) {
 	ts := `const seg = new Intl.Segmenter();`
 	out := compile(t, ts)
 	assertNotContains(t, out, "Intl.")
-	assertContains(t, out, "IntlSegmenter")
+	assertContains(t, out, "intl.NewSegmenter()")
 }
 
 func TestLengthOnUntypedParam(t *testing.T) {
 	ts := `function f(s) { return s.length; }`
 	out := compile(t, ts)
-	assertContains(t, out, `.Get("length")`)
+	assertContains(t, out, "s.Len()")
 	assertNotContains(t, out, "len(s)")
 }

@@ -420,10 +420,9 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 	obj := t.transformExpr(objNode)
 
 	if prop == "length" {
-		// For JSValue parameters, use dynamic property access instead of len()
+		// For JSValue parameters, use Len() which returns int
 		if objNode.Kind() == "identifier" && t.isUntypedLocal(objNode.Utf8Text(t.source)) {
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-			return callExpr(selectorExpr(obj, "Get"), stringLit("length"))
+			return callExpr(selectorExpr(obj, "Len"))
 		}
 		return callExpr(ident("len"), obj)
 	}
