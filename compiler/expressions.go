@@ -194,9 +194,13 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 		rightIsJSValue := rightNode != nil && rightNode.Kind() == "identifier" && t.isUntypedLocal(rightNode.Utf8Text(t.source))
 		if leftIsJSValue && isNumericLit(right) {
 			left = callExpr(ident("int"), callExpr(selectorExpr(left, "Number")))
-		}
-		if rightIsJSValue && isNumericLit(left) {
+		} else if rightIsJSValue && isNumericLit(left) {
 			right = callExpr(ident("int"), callExpr(selectorExpr(right, "Number")))
+		} else if leftIsJSValue && !rightIsJSValue && isComparisonOp(op) {
+			// JSValue compared with a non-JSValue (likely string) → coerce to string
+			left = callExpr(selectorExpr(left, "String"))
+		} else if rightIsJSValue && !leftIsJSValue && isComparisonOp(op) {
+			right = callExpr(selectorExpr(right, "String"))
 		}
 	}
 
