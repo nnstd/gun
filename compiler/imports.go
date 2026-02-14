@@ -23,76 +23,61 @@ type moduleMapping struct {
 }
 
 // knownModules maps Node.js / TS built-in module names to Go packages.
-var knownModules = map[string]moduleMapping{
-	"fs":            {goPath: "github.com/nnstd/gun/runtime/fs", goName: "fs"},
-	"path":          {goPath: "github.com/nnstd/gun/runtime/path", goName: "nodepath"},
-	"os":            {goPath: "github.com/nnstd/gun/runtime/os", goName: "nodeos"},
-	"http":          {goPath: "net/http", goName: "http"},
-	"https":         {goPath: "net/http", goName: "http"},
-	"url":           {goPath: "net/url", goName: "url"},
-	"util":          {goPath: "fmt", goName: "fmt"},
-	"events":        {goPath: "sync", goName: "sync"},
-	"stream":        {goPath: "io", goName: "io"},
-	"buffer":        {goPath: "bytes", goName: "bytes"},
-	"crypto":        {goPath: "crypto", goName: "crypto"},
-	"child_process": {goPath: "os/exec", goName: "exec"},
-	"assert":        {goPath: "testing", goName: "testing"},
-	"hono":          {goPath: "github.com/nnstd/gun/runtime/hono", goName: "hono"},
-}
+var knownModules = map[string]moduleMapping{}
 
 // knownSymbols maps (module, symbol) pairs to specific Go translations.
-// If a symbol isn't listed here, it gets capitalized and called on the package.
-var knownSymbols = map[string]map[string]resolvedImport{
-	"fs": {
-		"promises":       {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs"},
-		"readFile":       {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs", goSymbol: "ReadFileSync"},
-		"readFileSync":   {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs", goSymbol: "ReadFileSync"},
-		"writeFile":      {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs", goSymbol: "WriteFileSync"},
-		"writeFileSync":  {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs", goSymbol: "WriteFileSync"},
-		"existsSync":     {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs", goSymbol: "ExistsSync"},
-		"mkdirSync":      {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs", goSymbol: "MkdirSync"},
-		"readdirSync":    {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs", goSymbol: "ReaddirSync"},
-		"unlinkSync":     {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs", goSymbol: "UnlinkSync"},
-		"statSync":       {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs", goSymbol: "StatSync"},
-		"rmdirSync":      {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs", goSymbol: "RmdirSync"},
-		"appendFileSync": {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs", goSymbol: "AppendFileSync"},
-		"copyFileSync":   {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs", goSymbol: "CopyFileSync"},
-		"renameSync":     {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs", goSymbol: "RenameSync"},
-	},
-	"path": {
-		"join":       {goImportPath: "github.com/nnstd/gun/runtime/path", goPkgName: "nodepath", goSymbol: "Join"},
-		"resolve":    {goImportPath: "github.com/nnstd/gun/runtime/path", goPkgName: "nodepath", goSymbol: "Resolve"},
-		"basename":   {goImportPath: "github.com/nnstd/gun/runtime/path", goPkgName: "nodepath", goSymbol: "Basename"},
-		"dirname":    {goImportPath: "github.com/nnstd/gun/runtime/path", goPkgName: "nodepath", goSymbol: "Dirname"},
-		"extname":    {goImportPath: "github.com/nnstd/gun/runtime/path", goPkgName: "nodepath", goSymbol: "Extname"},
-		"relative":   {goImportPath: "github.com/nnstd/gun/runtime/path", goPkgName: "nodepath", goSymbol: "Relative"},
-		"isAbsolute": {goImportPath: "github.com/nnstd/gun/runtime/path", goPkgName: "nodepath", goSymbol: "IsAbsolute"},
-		"normalize":  {goImportPath: "github.com/nnstd/gun/runtime/path", goPkgName: "nodepath", goSymbol: "Normalize"},
-		"parse":      {goImportPath: "github.com/nnstd/gun/runtime/path", goPkgName: "nodepath", goSymbol: "Parse"},
-		"sep":        {goImportPath: "github.com/nnstd/gun/runtime/path", goPkgName: "nodepath", goSymbol: "Sep"},
-		"delimiter":  {goImportPath: "github.com/nnstd/gun/runtime/path", goPkgName: "nodepath", goSymbol: "Delimiter"},
-	},
-	"os": {
-		"homedir":  {goImportPath: "github.com/nnstd/gun/runtime/os", goPkgName: "nodeos", goSymbol: "Homedir"},
-		"tmpdir":   {goImportPath: "github.com/nnstd/gun/runtime/os", goPkgName: "nodeos", goSymbol: "Tmpdir"},
-		"hostname": {goImportPath: "github.com/nnstd/gun/runtime/os", goPkgName: "nodeos", goSymbol: "Hostname"},
-		"platform": {goImportPath: "github.com/nnstd/gun/runtime/os", goPkgName: "nodeos", goSymbol: "Platform"},
-		"arch":     {goImportPath: "github.com/nnstd/gun/runtime/os", goPkgName: "nodeos", goSymbol: "Arch"},
-		"cpus":     {goImportPath: "github.com/nnstd/gun/runtime/os", goPkgName: "nodeos", goSymbol: "Cpus"},
-		"EOL":      {goImportPath: "github.com/nnstd/gun/runtime/os", goPkgName: "nodeos", goSymbol: "EOL"},
-	},
-	"url": {
-		"parse":  {goImportPath: "net/url", goPkgName: "url", goSymbol: "Parse"},
-		"format": {goImportPath: "net/url", goPkgName: "url", goSymbol: "String"},
-	},
-	"child_process": {
-		"exec":     {goImportPath: "os/exec", goPkgName: "exec", goSymbol: "Command"},
-		"execSync": {goImportPath: "os/exec", goPkgName: "exec", goSymbol: "Command"},
-		"spawn":    {goImportPath: "os/exec", goPkgName: "exec", goSymbol: "Command"},
-	},
-	"hono": {
-		"Hono": {goImportPath: "github.com/nnstd/gun/runtime/hono", goPkgName: "hono", goSymbol: "Hono"},
-	},
+// Only non-standard mappings are stored here — symbols that just need capitalize()
+// are handled by the default fallback in processNamedImports.
+var knownSymbols = map[string]map[string]resolvedImport{}
+
+// registerModule registers a known Node.js module with its Go package mapping.
+// symbolOverrides contains only non-standard translations where capitalize(tsName)
+// isn't sufficient. Use "" as the Go symbol value to create a namespace import.
+func registerModule(tsModule, goPath, goName string, symbolOverrides map[string]string) {
+	knownModules[tsModule] = moduleMapping{goPath: goPath, goName: goName}
+	if len(symbolOverrides) > 0 {
+		syms := make(map[string]resolvedImport, len(symbolOverrides))
+		for tsName, goSymbol := range symbolOverrides {
+			syms[tsName] = resolvedImport{
+				goImportPath: goPath,
+				goPkgName:    goName,
+				goSymbol:     goSymbol,
+			}
+		}
+		knownSymbols[tsModule] = syms
+	}
+}
+
+func init() {
+	// --- gun runtime modules ---
+
+	registerModule("fs", "github.com/nnstd/gun/runtime/fs", "fs", map[string]string{
+		"promises":  "",              // namespace import (fs/promises → same package)
+		"readFile":  "ReadFileSync",  // async variant → sync
+		"writeFile": "WriteFileSync", // async variant → sync
+	})
+	registerModule("path", "github.com/nnstd/gun/runtime/path", "nodepath", nil)
+	registerModule("os", "github.com/nnstd/gun/runtime/os", "nodeos", nil)
+	registerModule("hono", "github.com/nnstd/gun/runtime/hono", "hono", nil)
+
+	// --- Go stdlib mappings ---
+
+	registerModule("http", "net/http", "http", nil)
+	registerModule("https", "net/http", "http", nil)
+	registerModule("url", "net/url", "url", map[string]string{
+		"format": "String",
+	})
+	registerModule("util", "fmt", "fmt", nil)
+	registerModule("events", "sync", "sync", nil)
+	registerModule("stream", "io", "io", nil)
+	registerModule("buffer", "bytes", "bytes", nil)
+	registerModule("crypto", "crypto", "crypto", nil)
+	registerModule("child_process", "os/exec", "exec", map[string]string{
+		"exec":     "Command",
+		"execSync": "Command",
+		"spawn":    "Command",
+	})
+	registerModule("assert", "testing", "testing", nil)
 }
 
 func (t *Transformer) transformImport(node *sitter.Node) {

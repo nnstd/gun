@@ -78,6 +78,12 @@ type ParsedPath struct {
 	Name string
 }
 
+// MatchesGlob reports whether path matches the glob pattern.
+func MatchesGlob(p, pattern string) bool {
+	matched, _ := filepath.Match(pattern, p)
+	return matched
+}
+
 // Parse returns the parsed components of a path.
 func Parse(p string) ParsedPath {
 	dir := filepath.Dir(p)
