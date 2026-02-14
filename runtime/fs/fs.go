@@ -1,10 +1,26 @@
 package fs
 
-import "os"
+import (
+	"os"
+	"path/filepath"
+)
 
 // ReadFileSync reads the entire contents of a file.
 func ReadFileSync(path string) ([]byte, error) {
 	return os.ReadFile(path)
+}
+
+// Realpath resolves a path to its canonical absolute pathname.
+func Realpath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return abs
+	}
+	return resolved
 }
 
 // WriteFileSync writes data to a file, replacing it if it already exists.

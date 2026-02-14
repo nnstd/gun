@@ -44,6 +44,7 @@ var knownModules = map[string]moduleMapping{
 // If a symbol isn't listed here, it gets capitalized and called on the package.
 var knownSymbols = map[string]map[string]resolvedImport{
 	"fs": {
+		"promises":       {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs"},
 		"readFile":       {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs", goSymbol: "ReadFileSync"},
 		"readFileSync":   {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs", goSymbol: "ReadFileSync"},
 		"writeFile":      {goImportPath: "github.com/nnstd/gun/runtime/fs", goPkgName: "fs", goSymbol: "WriteFileSync"},
@@ -104,6 +105,9 @@ func (t *Transformer) transformImport(node *sitter.Node) {
 	modulePath := sourceNode.Utf8Text(t.source)
 	modulePath = strings.Trim(modulePath, "'\"")
 
+	// Strip node: prefix (e.g. "node:fs" → "fs")
+	modulePath = strings.TrimPrefix(modulePath, "node:")
+
 	// Check for type-only import
 	typeOnly := false
 	for i := uint(0); i < node.ChildCount(); i++ {
@@ -157,10 +161,15 @@ func (t *Transformer) transformImport(node *sitter.Node) {
 		case "identifier":
 			// import X from "mod" → default import
 			localName := child.Utf8Text(t.source)
-			t.importedNames[localName] = resolvedImport{
+			ri := resolvedImport{
 				goImportPath: mod.goPath,
 				goPkgName:    mod.goName,
 			}
+			// For third-party/relative packages, default import maps to the Default symbol
+			if !isKnown {
+				ri.goSymbol = "Default"
+			}
+			t.importedNames[localName] = ri
 		}
 	}
 }
@@ -212,6 +221,22 @@ func (t *Transformer) processNamedImports(node *sitter.Node, modulePath string, 
 	}
 }
 
+// SanitizeGoPkgName converts an npm package name to a valid Go package name.
+// e.g. "temp-dir" → "temp_dir", "@scope/pkg" → "scope_pkg"
+func SanitizeGoPkgName(npmName string) string {
+	name := strings.TrimPrefix(npmName, "@")
+	name = strings.ReplaceAll(name, "/", "_")
+	name = strings.ReplaceAll(name, "-", "_")
+	return name
+}
+
+// IsKnownModule reports whether the given module name is a built-in polyfilled module.
+func IsKnownModule(name string) bool {
+	name = strings.TrimPrefix(name, "node:")
+	_, ok := knownModules[name]
+	return ok
+}
+
 // resolveModulePath converts a TS module path to a Go import path.
 func (t *Transformer) resolveModulePath(modulePath string) moduleMapping {
 	// Relative import: ./foo or ../bar
@@ -231,19 +256,12 @@ func (t *Transformer) resolveModulePath(modulePath string) moduleMapping {
 		return moduleMapping{goPath: goPath, goName: pkgName}
 	}
 
-	// Scoped package: @scope/pkg → scope_pkg
-	if strings.HasPrefix(modulePath, "@") {
-		parts := strings.SplitN(modulePath, "/", 2)
-		if len(parts) == 2 {
-			pkgName := strings.TrimPrefix(parts[0], "@") + "_" + parts[1]
-			return moduleMapping{goPath: modulePath, goName: pkgName}
-		}
+	// Third-party package (including scoped): generate module-relative import path
+	pkgName := SanitizeGoPkgName(modulePath)
+	if t.moduleName != "" {
+		return moduleMapping{goPath: t.moduleName + "/" + pkgName, goName: pkgName}
 	}
-
-	// Third-party: use module name as package name
-	// Strip any subpath for the package name
-	pkgName := path.Base(modulePath)
-	return moduleMapping{goPath: modulePath, goName: pkgName}
+	return moduleMapping{goPath: pkgName, goName: pkgName}
 }
 
 // resolveIdentifier checks if a name was imported from a TS module and returns

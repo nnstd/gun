@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -137,7 +138,7 @@ func transpileProject(input, outDir, pkg string, verbose bool) error {
 		return err
 	}
 
-	moduleName := filepath.Base(outDir)
+	moduleName := "gunrun"
 	goFile := filepath.Join(outDir, strings.TrimSuffix(filepath.Base(input), ".ts")+".go")
 	if err := transpileFile(input, goFile, pkg, moduleName, verbose); err != nil {
 		return err
@@ -148,6 +149,10 @@ func transpileProject(input, outDir, pkg string, verbose bool) error {
 		inputDir = "."
 	}
 	if err := transpileRelativeImports(input, inputDir, outDir, moduleName, verbose); err != nil {
+		return err
+	}
+
+	if err := transpileNodeModuleImports(input, inputDir, outDir, moduleName, verbose); err != nil {
 		return err
 	}
 
@@ -371,22 +376,29 @@ func findRelativeImports(source []byte) []string {
 	return imports
 }
 
-// resolveImportFile resolves a relative import path like ./foo to an actual .ts file.
-// Tries importPath.ts first, then importPath/index.ts.
+// resolveImportFile resolves a relative import path like ./foo to an actual .ts/.js file.
+// Tries extensions in Node/Bun resolution order.
 func resolveImportFile(importPath, fromDir string) (string, error) {
-	// Strip leading ./ or ../
 	clean := importPath
 	clean = strings.TrimSuffix(clean, ".ts")
 	clean = strings.TrimSuffix(clean, ".js")
+	clean = strings.TrimSuffix(clean, ".mjs")
 
-	candidate := filepath.Join(fromDir, clean+".ts")
-	if _, err := os.Stat(candidate); err == nil {
-		return candidate, nil
+	base := filepath.Join(fromDir, clean)
+
+	// Try file extensions in order
+	for _, ext := range []string{".ts", ".js", ".mjs"} {
+		if _, err := os.Stat(base + ext); err == nil {
+			return base + ext, nil
+		}
 	}
 
-	candidate = filepath.Join(fromDir, clean, "index.ts")
-	if _, err := os.Stat(candidate); err == nil {
-		return candidate, nil
+	// Try index files in directory
+	for _, idx := range []string{"index.ts", "index.js"} {
+		candidate := filepath.Join(base, idx)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
 	}
 
 	return "", fmt.Errorf("cannot resolve import %q from %s", importPath, fromDir)
@@ -460,6 +472,295 @@ func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose b
 		}
 	}
 	return nil
+}
+
+// findNodeModuleImports scans TS/JS source for non-relative, non-known imports.
+func findNodeModuleImports(source []byte) []string {
+	var imports []string
+	seen := map[string]bool{}
+	lines := strings.Split(string(source), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		idx := strings.Index(line, "from ")
+		if idx < 0 {
+			continue
+		}
+		rest := strings.TrimSpace(line[idx+5:])
+		if len(rest) < 3 {
+			continue
+		}
+		quote := rest[0]
+		if quote != '\'' && quote != '"' {
+			continue
+		}
+		end := strings.IndexByte(rest[1:], quote)
+		if end < 0 {
+			continue
+		}
+		modPath := rest[1 : end+1]
+		// Skip relative imports
+		if strings.HasPrefix(modPath, ".") {
+			continue
+		}
+		// Strip node: prefix
+		modPath = strings.TrimPrefix(modPath, "node:")
+		// Skip known/polyfilled modules
+		if compiler.IsKnownModule(modPath) {
+			continue
+		}
+		if !seen[modPath] {
+			seen[modPath] = true
+			imports = append(imports, modPath)
+		}
+	}
+	return imports
+}
+
+// resolveNodeModule walks up from fromDir looking for node_modules/<pkgName>/.
+func resolveNodeModule(pkgName, fromDir string) (string, error) {
+	dir, _ := filepath.Abs(fromDir)
+	for {
+		candidate := filepath.Join(dir, "node_modules", pkgName)
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("cannot find node_modules/%s from %s", pkgName, fromDir)
+		}
+		dir = parent
+	}
+}
+
+// getNodeModuleEntry reads package.json and determines the entry point file.
+func getNodeModuleEntry(pkgDir string) (string, error) {
+	pjPath := filepath.Join(pkgDir, "package.json")
+	data, err := os.ReadFile(pjPath)
+	if err != nil {
+		return "", fmt.Errorf("read package.json: %w", err)
+	}
+
+	var pj struct {
+		Exports json.RawMessage `json:"exports"`
+		Module  string          `json:"module"`
+		Main    string          `json:"main"`
+	}
+	if err := json.Unmarshal(data, &pj); err != nil {
+		return "", fmt.Errorf("parse package.json: %w", err)
+	}
+
+	// Try exports field
+	if len(pj.Exports) > 0 {
+		entry := resolveExportsField(pj.Exports)
+		if entry != "" {
+			return filepath.Join(pkgDir, entry), nil
+		}
+	}
+
+	// Try module field
+	if pj.Module != "" {
+		return filepath.Join(pkgDir, pj.Module), nil
+	}
+
+	// Try main field
+	if pj.Main != "" {
+		return filepath.Join(pkgDir, pj.Main), nil
+	}
+
+	// Fallback to index files
+	for _, name := range []string{"index.ts", "index.js"} {
+		candidate := filepath.Join(pkgDir, name)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+
+	return "", fmt.Errorf("cannot determine entry point for %s", pkgDir)
+}
+
+// resolveExportsField extracts an entry path from a package.json "exports" field.
+func resolveExportsField(raw json.RawMessage) string {
+	// Case 1: exports is a string — "exports": "./index.js"
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+
+	// Case 2: exports is an object — check "." key, then "import"/"default"
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil {
+		return ""
+	}
+
+	// Check "." entry (the main export)
+	dot, ok := obj["."]
+	if ok {
+		// "." could be a string or a conditions object
+		var dotStr string
+		if json.Unmarshal(dot, &dotStr) == nil {
+			return dotStr
+		}
+		var conds map[string]json.RawMessage
+		if json.Unmarshal(dot, &conds) == nil {
+			return pickCondition(conds)
+		}
+		return ""
+	}
+
+	// No "." key — the object itself might be conditions
+	return pickCondition(obj)
+}
+
+func pickCondition(conds map[string]json.RawMessage) string {
+	for _, key := range []string{"import", "default", "require"} {
+		raw, ok := conds[key]
+		if !ok {
+			continue
+		}
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			return s
+		}
+	}
+	return ""
+}
+
+// transpileNodeModuleImports discovers and transpiles node_modules dependencies
+// from the entry file and all its relative imports.
+func transpileNodeModuleImports(entryFile, inputDir, tmpDir, moduleName string, verbose bool) error {
+	absInputDir, _ := filepath.Abs(inputDir)
+
+	// Collect all source files (entry + relative imports) to scan
+	sourceFiles := collectAllSourceFiles(entryFile)
+
+	visited := map[string]bool{}
+	return processNodeModuleImports(sourceFiles, absInputDir, tmpDir, moduleName, verbose, visited)
+}
+
+// collectAllSourceFiles returns the entry file plus all transitively-imported relative files.
+func collectAllSourceFiles(entryFile string) []string {
+	var files []string
+	seen := map[string]bool{}
+	var walk func(string)
+	walk = func(tsFile string) {
+		abs, _ := filepath.Abs(tsFile)
+		if seen[abs] {
+			return
+		}
+		seen[abs] = true
+		files = append(files, abs)
+
+		source, err := os.ReadFile(tsFile)
+		if err != nil {
+			return
+		}
+		for _, imp := range findRelativeImports(source) {
+			resolved, err := resolveImportFile(imp, filepath.Dir(tsFile))
+			if err == nil {
+				walk(resolved)
+			}
+		}
+	}
+	walk(entryFile)
+	return files
+}
+
+func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName string, verbose bool, visited map[string]bool) error {
+	var newSourceFiles []string
+
+	for _, srcFile := range sourceFiles {
+		source, err := os.ReadFile(srcFile)
+		if err != nil {
+			continue
+		}
+		nodeImports := findNodeModuleImports(source)
+		for _, pkgName := range nodeImports {
+			if visited[pkgName] {
+				continue
+			}
+			visited[pkgName] = true
+
+			pkgDir, err := resolveNodeModule(pkgName, filepath.Dir(srcFile))
+			if err != nil {
+				return err
+			}
+			entryPath, err := getNodeModuleEntry(pkgDir)
+			if err != nil {
+				return err
+			}
+
+			sanitized := compiler.SanitizeGoPkgName(pkgName)
+			outDir := filepath.Join(tmpDir, sanitized)
+			if err := os.MkdirAll(outDir, 0755); err != nil {
+				return err
+			}
+
+			if verbose {
+				fmt.Fprintf(os.Stderr, "transpiling node_module %s → %s\n", pkgName, sanitized)
+			}
+
+			// Transpile the entry file
+			outFile := filepath.Join(outDir, strings.TrimSuffix(filepath.Base(entryPath), filepath.Ext(entryPath))+".go")
+			if err := transpileFile(entryPath, outFile, sanitized, moduleName, verbose); err != nil {
+				return fmt.Errorf("transpile node_module %s: %w", pkgName, err)
+			}
+
+			// Transpile relative imports within the package
+			pkgSourceFiles, err := transpileNodeModuleRelativeImports(entryPath, outDir, moduleName, sanitized, verbose)
+			if err != nil {
+				return fmt.Errorf("transpile node_module %s relative imports: %w", pkgName, err)
+			}
+
+			// Collect all files from this package for recursive node_module scanning
+			allPkgFiles := append([]string{entryPath}, pkgSourceFiles...)
+			newSourceFiles = append(newSourceFiles, allPkgFiles...)
+		}
+	}
+
+	// Recursively process any node_module imports found in the newly transpiled packages
+	if len(newSourceFiles) > 0 {
+		return processNodeModuleImports(newSourceFiles, inputDir, tmpDir, moduleName, verbose, visited)
+	}
+	return nil
+}
+
+// transpileNodeModuleRelativeImports transpiles relative imports within a node_module package.
+func transpileNodeModuleRelativeImports(entryFile, outDir, moduleName, pkgName string, verbose bool) ([]string, error) {
+	visited := map[string]bool{}
+	var transpiled []string
+	absEntry, _ := filepath.Abs(entryFile)
+	visited[absEntry] = true
+
+	var walk func(string) error
+	walk = func(tsFile string) error {
+		source, err := os.ReadFile(tsFile)
+		if err != nil {
+			return err
+		}
+		for _, imp := range findRelativeImports(source) {
+			resolved, err := resolveImportFile(imp, filepath.Dir(tsFile))
+			if err != nil {
+				return err
+			}
+			absResolved, _ := filepath.Abs(resolved)
+			if visited[absResolved] {
+				continue
+			}
+			visited[absResolved] = true
+			transpiled = append(transpiled, absResolved)
+
+			outFile := filepath.Join(outDir, strings.TrimSuffix(filepath.Base(resolved), filepath.Ext(resolved))+".go")
+			if err := transpileFile(resolved, outFile, pkgName, moduleName, verbose); err != nil {
+				return err
+			}
+			if err := walk(resolved); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	return transpiled, walk(entryFile)
 }
 
 // detectModuleName walks up from the input file to find a go.mod and returns
