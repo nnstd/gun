@@ -103,6 +103,12 @@ console.log($0);`
 	assertNotContains(t, out, "$")
 }
 
+func TestNewExpressionWrapsArgsWithJSValue(t *testing.T) {
+	ts := `const p = new Parser({cwd: "/tmp"});`
+	out := compile(t, ts)
+	assertContains(t, out, "NewParser(jsvalue.From(")
+}
+
 func TestAwaitStripped(t *testing.T) {
 	ts := `async function load(): Promise<string> { return await fetch(); }`
 	out := compile(t, ts)

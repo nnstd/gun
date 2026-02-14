@@ -848,7 +848,11 @@ func (t *Transformer) transformNewExpr(node *sitter.Node) ast.Expr {
 	}
 
 	// Default: new Foo(args) → NewFoo(args) or &Foo{}
+	// Wrap args with jsvalue.From() since user-defined constructors take *jsvalue.JSValue.
 	if len(args) > 0 {
+		for i, arg := range args {
+			args[i] = t.wrapAsJSValue(arg)
+		}
 		return callExpr(ident(fmt.Sprintf("New%s", capitalize(name))), args...)
 	}
 	return addrOf(compositeLit(ident(name)))
