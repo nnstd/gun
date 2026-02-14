@@ -56,6 +56,15 @@ func TestExportWildcard(t *testing.T) {
 	_ = compile(t, ts)
 }
 
+func TestExportStringAliasSkipped(t *testing.T) {
+	// `export {X as 'module.exports'}` is CJS interop — should be silently skipped
+	ts := `const Yargs = 1;
+export {Yargs as 'module.exports'}`
+	out := compile(t, ts)
+	assertNotContains(t, out, "module")
+	assertNotContains(t, out, "exports")
+}
+
 func TestExportDefaultServerPattern(t *testing.T) {
 	ts := `export default { port: 3000, fetch: app.fetch }`
 	out := compile(t, ts)

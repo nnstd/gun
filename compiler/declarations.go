@@ -169,7 +169,7 @@ func (t *Transformer) transformParams(node *sitter.Node) *ast.FieldList {
 
 			pName := "_"
 			if nameNode != nil {
-				pName = nameNode.Utf8Text(t.source)
+				pName = sanitizeIdent(nameNode.Utf8Text(t.source))
 			}
 
 			var pType ast.Expr = ident("any")
@@ -193,7 +193,7 @@ func (t *Transformer) transformParams(node *sitter.Node) *ast.FieldList {
 
 			pName := "args"
 			if nameNode != nil {
-				pName = nameNode.Utf8Text(t.source)
+				pName = sanitizeIdent(nameNode.Utf8Text(t.source))
 			}
 
 			var elemType ast.Expr = ident("any")

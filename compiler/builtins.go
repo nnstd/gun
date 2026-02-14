@@ -77,6 +77,6 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 		addImport("errors")
 		return ident("errors")
 	default:
-		return ident(name)
+		return ident(sanitizeIdent(name))
 	}
 }

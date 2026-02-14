@@ -342,6 +342,24 @@ func wrapExprWithJSValue(expr ast.Expr) ast.Expr {
 		callExpr(selectorExpr(ident("fmt"), "Sprintf"), stringLit("%v"), expr))
 }
 
+// goKeywords is the set of Go reserved words that cannot be used as identifiers.
+var goKeywords = map[string]bool{
+	"break": true, "case": true, "chan": true, "const": true, "continue": true,
+	"default": true, "defer": true, "else": true, "fallthrough": true, "for": true,
+	"func": true, "go": true, "goto": true, "if": true, "import": true,
+	"interface": true, "map": true, "package": true, "range": true, "return": true,
+	"select": true, "struct": true, "switch": true, "type": true, "var": true,
+}
+
+// sanitizeIdent appends an underscore to Go reserved keywords so they can be
+// used as variable or parameter names.
+func sanitizeIdent(name string) string {
+	if goKeywords[name] {
+		return name + "_"
+	}
+	return name
+}
+
 // capitalize returns the string with the first letter uppercased (Go export convention).
 func capitalize(s string) string {
 	if s == "" {

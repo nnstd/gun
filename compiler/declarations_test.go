@@ -93,6 +93,13 @@ func TestTypeAlias(t *testing.T) {
 	assertContains(t, out, "type ID string")
 }
 
+func TestParamGoKeywordEscaped(t *testing.T) {
+	ts := `const emitWarning = (warning: string, type: string) => process.emitWarning(warning, type)`
+	out := compile(t, ts)
+	assertContains(t, out, "type_ string")
+	assertNotContains(t, out, "type string")
+}
+
 func TestRestParameter(t *testing.T) {
 	ts := `function sum(...nums: number[]): number { return 0; }`
 	out := compile(t, ts)

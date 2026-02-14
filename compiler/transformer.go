@@ -350,6 +350,12 @@ func (t *Transformer) transformExportClause(exportNode *sitter.Node, clause *sit
 		if aliasNode != nil {
 			exportedName = aliasNode.Utf8Text(t.source)
 		}
+
+		// Skip string-aliased exports like `export {X as 'module.exports'}` — CJS interop, no Go equivalent
+		if strings.HasPrefix(exportedName, "'") || strings.HasPrefix(exportedName, "\"") {
+			continue
+		}
+
 		goName := capitalize(exportedName)
 
 		if reexportMod != "" {
