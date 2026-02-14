@@ -32,29 +32,29 @@ func transformBuiltinMethod(obj ast.Expr, prop string, args []ast.Expr, addImpor
 
 // transformBuiltinNew handles `new X(args)` for known builtin types.
 // Returns nil if the type is not a known builtin.
-func transformBuiltinNew(name string, args []ast.Expr, addImport func(string)) ast.Expr {
+func transformBuiltinNew(name string, args []ast.Expr, t *Transformer) ast.Expr {
 	switch name {
 	case "Error":
-		addImport("errors")
+		t.addImport("errors")
 		if len(args) > 0 {
 			return callExpr(selectorExpr(ident("errors"), "New"), args[0])
 		}
 		return callExpr(selectorExpr(ident("errors"), "New"), stringLit("error"))
 	case "Map":
-		return callExpr(ident("make"), mapType(ident("any"), ident("any")))
+		return callExpr(ident("make"), mapType(t.jsValueType(), t.jsValueType()))
 	case "Set":
-		return callExpr(ident("make"), mapType(ident("any"), &ast.StructType{Fields: &ast.FieldList{}}))
+		return callExpr(ident("make"), mapType(t.jsValueType(), &ast.StructType{Fields: &ast.FieldList{}}))
 	case "Date":
-		addImport("time")
+		t.addImport("time")
 		return callExpr(selectorExpr(ident("time"), "Now"))
 	case "RegExp":
-		addImport("regexp")
+		t.addImport("regexp")
 		if len(args) > 0 {
 			return callExpr(selectorExpr(ident("regexp"), "MustCompile"), args[0])
 		}
 		return callExpr(selectorExpr(ident("regexp"), "MustCompile"), stringLit(""))
 	case "Hono":
-		addImport("github.com/nnstd/gun/runtime/hono")
+		t.addImport("github.com/nnstd/gun/runtime/hono")
 		return callExpr(selectorExpr(ident("hono"), "New"))
 	}
 	return nil

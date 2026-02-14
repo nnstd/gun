@@ -350,7 +350,7 @@ func (t *Transformer) transformInterfaceAsStruct(name string, body *sitter.Node)
 				continue
 			}
 			pName := capitalize(pNameNode.Utf8Text(t.source))
-			var pType ast.Expr = ident("any")
+			var pType ast.Expr = t.jsValueType()
 			if pTypeNode != nil {
 				mapped := t.getTypeAnnotation(pTypeNode)
 				if mapped != nil {
@@ -484,7 +484,7 @@ func (t *Transformer) transformTypeAlias(node *sitter.Node) ast.Decl {
 	name := capitalize(nameNode.Utf8Text(t.source))
 	typ := t.mapTypeNode(typeNode)
 	if typ == nil {
-		typ = ident("any")
+		typ = t.jsValueType()
 	}
 
 	return typeDecl(name, typ)

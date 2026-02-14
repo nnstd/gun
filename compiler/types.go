@@ -11,7 +11,7 @@ import (
 // mapType converts a tree-sitter TypeScript type annotation node to a go/ast type expression.
 func (t *Transformer) mapTypeNode(node *sitter.Node) ast.Expr {
 	if node == nil {
-		return ident("any")
+		return t.jsValueType()
 	}
 
 	kind := node.Kind()
@@ -19,7 +19,7 @@ func (t *Transformer) mapTypeNode(node *sitter.Node) ast.Expr {
 
 	switch kind {
 	case "predefined_type":
-		return mapPredefinedType(text)
+		return t.mapPredefinedType(text)
 
 	case "type_identifier":
 		return ident(text)
@@ -29,12 +29,12 @@ func (t *Transformer) mapTypeNode(node *sitter.Node) ast.Expr {
 		if node.NamedChildCount() > 0 {
 			return sliceType(t.mapTypeNode(node.NamedChild(0)))
 		}
-		return sliceType(ident("any"))
+		return sliceType(t.jsValueType())
 
 	case "generic_type":
 		nameNode := node.ChildByFieldName("name")
 		if nameNode == nil {
-			return ident("any")
+			return t.jsValueType()
 		}
 		name := nameNode.Utf8Text(t.source)
 		argsNode := node.ChildByFieldName("type_arguments")
@@ -44,37 +44,37 @@ func (t *Transformer) mapTypeNode(node *sitter.Node) ast.Expr {
 			if argsNode != nil && argsNode.NamedChildCount() > 0 {
 				return sliceType(t.mapTypeNode(argsNode.NamedChild(0)))
 			}
-			return sliceType(ident("any"))
+			return sliceType(t.jsValueType())
 		case "Map":
 			if argsNode != nil && argsNode.NamedChildCount() >= 2 {
 				k := t.mapTypeNode(argsNode.NamedChild(0))
 				v := t.mapTypeNode(argsNode.NamedChild(1))
 				return mapType(k, v)
 			}
-			return mapType(ident("string"), ident("any"))
+			return mapType(ident("string"), t.jsValueType())
 		case "Set":
 			if argsNode != nil && argsNode.NamedChildCount() > 0 {
 				k := t.mapTypeNode(argsNode.NamedChild(0))
 				return mapType(k, &ast.StructType{Fields: &ast.FieldList{}})
 			}
-			return mapType(ident("any"), &ast.StructType{Fields: &ast.FieldList{}})
+			return mapType(t.jsValueType(), &ast.StructType{Fields: &ast.FieldList{}})
 		case "Record":
 			if argsNode != nil && argsNode.NamedChildCount() >= 2 {
 				k := t.mapTypeNode(argsNode.NamedChild(0))
 				v := t.mapTypeNode(argsNode.NamedChild(1))
 				return mapType(k, v)
 			}
-			return mapType(ident("string"), ident("any"))
+			return mapType(ident("string"), t.jsValueType())
 		case "Promise":
 			if argsNode != nil && argsNode.NamedChildCount() > 0 {
 				return t.mapTypeNode(argsNode.NamedChild(0))
 			}
-			return ident("any")
+			return t.jsValueType()
 		case "Partial", "Required", "Readonly":
 			if argsNode != nil && argsNode.NamedChildCount() > 0 {
 				return t.mapTypeNode(argsNode.NamedChild(0))
 			}
-			return ident("any")
+			return t.jsValueType()
 		default:
 			return ident(name)
 		}
@@ -87,13 +87,13 @@ func (t *Transformer) mapTypeNode(node *sitter.Node) ast.Expr {
 		if node.NamedChildCount() > 0 {
 			return t.mapTypeNode(node.NamedChild(0))
 		}
-		return ident("any")
+		return t.jsValueType()
 
 	case "parenthesized_type":
 		if node.NamedChildCount() > 0 {
 			return t.mapTypeNode(node.NamedChild(0))
 		}
-		return ident("any")
+		return t.jsValueType()
 
 	case "object_type":
 		return t.mapObjectType(node)
@@ -107,7 +107,7 @@ func (t *Transformer) mapTypeNode(node *sitter.Node) ast.Expr {
 			first := t.mapTypeNode(node.NamedChild(0))
 			return sliceType(first)
 		}
-		return sliceType(ident("any"))
+		return sliceType(t.jsValueType())
 
 	case "literal_type":
 		if node.NamedChildCount() > 0 {
@@ -121,34 +121,34 @@ func (t *Transformer) mapTypeNode(node *sitter.Node) ast.Expr {
 			case "true", "false":
 				return ident("bool")
 			case "null":
-				return ident("any")
+				return t.jsValueType()
 			default:
 				_ = childText
-				return ident("any")
+				return t.jsValueType()
 			}
 		}
-		return ident("any")
+		return t.jsValueType()
 
 	case "type_query":
 		// typeof X → just use the type
-		return ident("any")
+		return t.jsValueType()
 
 	case "index_type_query":
 		return ident("string")
 
 	case "indexed_access_type":
-		return ident("any")
+		return t.jsValueType()
 
 	default:
 		// Fallback: use the text as-is if it looks like an identifier
 		if isSimpleIdent(text) {
 			return ident(text)
 		}
-		return ident("any")
+		return t.jsValueType()
 	}
 }
 
-func mapPredefinedType(text string) ast.Expr {
+func (t *Transformer) mapPredefinedType(text string) ast.Expr {
 	switch text {
 	case "string":
 		return ident("string")
@@ -159,15 +159,15 @@ func mapPredefinedType(text string) ast.Expr {
 	case "void", "undefined", "never":
 		return nil // no return type
 	case "any", "unknown":
-		return ident("any")
+		return t.jsValueType()
 	case "null":
-		return ident("any")
+		return t.jsValueType()
 	case "bigint":
 		return ident("int64")
 	case "symbol":
 		return ident("string")
 	case "object":
-		return mapType(ident("string"), ident("any"))
+		return mapType(ident("string"), t.jsValueType())
 	default:
 		return ident(text)
 	}
@@ -176,7 +176,7 @@ func mapPredefinedType(text string) ast.Expr {
 func (t *Transformer) mapUnionType(node *sitter.Node) ast.Expr {
 	count := node.NamedChildCount()
 	if count == 0 {
-		return ident("any")
+		return t.jsValueType()
 	}
 
 	// Check for T | null / T | undefined → *T
@@ -201,7 +201,7 @@ func (t *Transformer) mapUnionType(node *sitter.Node) ast.Expr {
 	if len(nonNullTypes) > 0 {
 		return nonNullTypes[0]
 	}
-	return ident("any")
+	return t.jsValueType()
 }
 
 func (t *Transformer) mapObjectType(node *sitter.Node) ast.Expr {
@@ -211,7 +211,7 @@ func (t *Transformer) mapObjectType(node *sitter.Node) ast.Expr {
 		child := node.NamedChild(i)
 		if child.Kind() == "index_signature" {
 			// map[K]V
-			return mapType(ident("string"), ident("any"))
+			return mapType(ident("string"), t.jsValueType())
 		}
 	}
 
@@ -224,7 +224,7 @@ func (t *Transformer) mapObjectType(node *sitter.Node) ast.Expr {
 			typeNode := child.ChildByFieldName("type")
 			if nameNode != nil {
 				name := capitalize(nameNode.Utf8Text(t.source))
-				var typ ast.Expr = ident("any")
+				var typ ast.Expr = t.jsValueType()
 				if typeNode != nil {
 					// type_annotation has a child that is the actual type
 					if typeNode.Kind() == "type_annotation" && typeNode.NamedChildCount() > 0 {
@@ -257,7 +257,7 @@ func (t *Transformer) mapFunctionType(node *sitter.Node) ast.Expr {
 				if nameNode != nil {
 					pName = nameNode.Utf8Text(t.source)
 				}
-				var pType ast.Expr = ident("any")
+				var pType ast.Expr = t.jsValueType()
 				typeNode := p.ChildByFieldName("type")
 				if typeNode != nil && typeNode.NamedChildCount() > 0 {
 					pType = t.mapTypeNode(typeNode.NamedChild(0))

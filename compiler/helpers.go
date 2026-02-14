@@ -135,6 +135,11 @@ func ptrType(x ast.Expr) *ast.StarExpr {
 	return &ast.StarExpr{X: x}
 }
 
+// jsValuePtrType returns the AST expression for *jsvalue.JSValue.
+func jsValuePtrType() ast.Expr {
+	return ptrType(selectorExpr(ident("jsvalue"), "JSValue"))
+}
+
 func sliceType(elt ast.Expr) *ast.ArrayType {
 	return &ast.ArrayType{Elt: elt}
 }

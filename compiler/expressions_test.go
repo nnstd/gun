@@ -10,7 +10,7 @@ func TestArrayLiteral(t *testing.T) {
 func TestObjectLiteral(t *testing.T) {
 	ts := `const obj = { name: "go", version: 1 };`
 	out := compile(t, ts)
-	assertContains(t, out, "map[string]any{")
+	assertContains(t, out, "map[string]*jsvalue.JSValue{")
 }
 
 func TestTemplateString(t *testing.T) {

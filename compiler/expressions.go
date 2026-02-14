@@ -386,7 +386,7 @@ func (t *Transformer) transformArrayLiteral(node *sitter.Node) ast.Expr {
 		}
 	}
 
-	var elemType ast.Expr = ident("any")
+	var elemType ast.Expr = t.jsValueType()
 	hasFloat, hasInt, hasString, hasBool := false, false, false, false
 
 	for _, e := range elts {
@@ -443,7 +443,7 @@ func (t *Transformer) transformObjectLiteral(node *sitter.Node) ast.Expr {
 			elts = append(elts, keyValue(stringLit(name), ident(name)))
 		}
 	}
-	return compositeLit(mapType(ident("string"), ident("any")), elts...)
+	return compositeLit(mapType(ident("string"), t.jsValueType()), elts...)
 }
 
 func (t *Transformer) transformTemplateString(node *sitter.Node) ast.Expr {
@@ -617,7 +617,7 @@ func (t *Transformer) transformNewExpr(node *sitter.Node) ast.Expr {
 	args := t.transformArgs(argsNode)
 
 	// Try builtin new expressions first
-	if r := transformBuiltinNew(name, args, t.addImport); r != nil {
+	if r := transformBuiltinNew(name, args, t); r != nil {
 		return r
 	}
 

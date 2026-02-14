@@ -108,7 +108,7 @@ func (t *Transformer) transformClassField(node *sitter.Node) *ast.Field {
 
 	name := capitalize(nameNode.Utf8Text(t.source))
 
-	var typ ast.Expr = ident("any")
+	var typ ast.Expr = t.jsValueType()
 	if typeNode != nil {
 		mapped := t.getTypeAnnotation(typeNode)
 		if mapped != nil {

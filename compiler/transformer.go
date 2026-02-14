@@ -73,6 +73,12 @@ func (t *Transformer) addAliasedImport(pkg, alias string) {
 	t.imports[pkg] = alias
 }
 
+// jsValueType returns *jsvalue.JSValue and registers the import.
+func (t *Transformer) jsValueType() ast.Expr {
+	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	return jsValuePtrType()
+}
+
 func (t *Transformer) transformTopLevel(node *sitter.Node) {
 	switch node.Kind() {
 	case "function_declaration":
