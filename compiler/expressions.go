@@ -518,7 +518,8 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 	if paramsNode != nil {
 		params, paramStmts = t.transformParams(paramsNode)
 	} else if paramNode != nil {
-		params = fieldList(field(paramNode.Utf8Text(t.source), ident("any")))
+		params = fieldList(field(paramNode.Utf8Text(t.source), ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 	} else {
 		params = fieldList()
 	}

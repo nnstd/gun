@@ -178,12 +178,16 @@ func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.
 			nameNode := param.ChildByFieldName("pattern")
 			typeNode := param.ChildByFieldName("type")
 
-			var pType ast.Expr = ident("any")
+			var pType ast.Expr
 			if typeNode != nil {
 				mapped := t.getTypeAnnotation(typeNode)
 				if mapped != nil {
 					pType = mapped
 				}
+			}
+			if pType == nil {
+				pType = ptrType(selectorExpr(ident("jsvalue"), "JSValue"))
+				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 			}
 
 			// Optional params become pointer types
@@ -219,7 +223,7 @@ func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.
 				pName = sanitizeIdent(nameNode.Utf8Text(t.source))
 			}
 
-			var elemType ast.Expr = ident("any")
+			var elemType ast.Expr
 			if typeNode != nil {
 				mapped := t.getTypeAnnotation(typeNode)
 				if mapped != nil {
@@ -230,6 +234,10 @@ func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.
 						elemType = mapped
 					}
 				}
+			}
+			if elemType == nil {
+				elemType = ptrType(selectorExpr(ident("jsvalue"), "JSValue"))
+				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 			}
 
 			fields = append(fields, field(pName, &ast.Ellipsis{Elt: elemType}))

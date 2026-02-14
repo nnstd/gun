@@ -231,7 +231,7 @@ const [first, ...rest] = arr;`
 func TestParamObjectDestructuring(t *testing.T) {
 	ts := `function extract({ name, age }) { return name; }`
 	out := compile(t, ts)
-	assertContains(t, out, "_param0 any")
+	assertContains(t, out, "_param0 *jsvalue.JSValue")
 	assertContains(t, out, "name := _param0.Name")
 	assertContains(t, out, "age := _param0.Age")
 	assertNotContains(t, out, "{ name")
