@@ -261,20 +261,23 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 		if objNode != nil && propNode != nil {
 			objText := objNode.Utf8Text(t.source)
 			prop := propNode.Utf8Text(t.source)
-			args := t.transformArgs(argsNode)
-
-			// Known global objects (console, Math, JSON, Object)
-			if r := transformBuiltinCall(objText, prop, args, t.addImport); r != nil {
-				return r
-			}
 
 			// Module-registered call transformers (e.g. hono route methods)
+			// Check before transformArgs to avoid eagerly transforming callback args
+			// that the module transformer will handle itself.
 			if modType, ok := t.varTypes[objText]; ok {
 				if fn, ok := moduleCallTransformers[modType]; ok {
 					if r := fn(t, objNode, prop, argsNode); r != nil {
 						return r
 					}
 				}
+			}
+
+			args := t.transformArgs(argsNode)
+
+			// Known global objects (console, Math, JSON, Object)
+			if r := transformBuiltinCall(objText, prop, args, t.addImport); r != nil {
+				return r
 			}
 
 			// Method transforms on arbitrary receivers (string/collection methods)
@@ -512,7 +515,14 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 	}
 
 	if results == nil {
-		results = inferReturnType(body)
+		if inferred := inferReturnType(body); inferred != nil {
+			results = inferred
+		} else if hasReturnValue(body) {
+			results = fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addImport("fmt")
+			wrapReturnsWithJSValue(body)
+		}
 	}
 
 	return &ast.FuncLit{
@@ -539,7 +549,14 @@ func (t *Transformer) transformFuncExpr(node *sitter.Node) ast.Expr {
 	}
 
 	if results == nil {
-		results = inferReturnType(body)
+		if inferred := inferReturnType(body); inferred != nil {
+			results = inferred
+		} else if hasReturnValue(body) {
+			results = fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addImport("fmt")
+			wrapReturnsWithJSValue(body)
+		}
 	}
 
 	return &ast.FuncLit{

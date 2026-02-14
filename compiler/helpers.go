@@ -220,7 +220,6 @@ func inferExprType(expr ast.Expr) ast.Expr {
 		case token.EQL, token.NEQ, token.LSS, token.LEQ, token.GTR, token.GEQ, token.LAND, token.LOR:
 			return ident("bool")
 		default:
-			// Arithmetic — check if either operand is a string (concatenation)
 			lt := inferExprType(e.X)
 			rt := inferExprType(e.Y)
 			if isStringType(lt) || isStringType(rt) {
@@ -255,6 +254,92 @@ func isStringType(expr ast.Expr) bool {
 		return id.Name == "string"
 	}
 	return false
+}
+
+// hasReturnValue reports whether the block contains at least one return
+// statement that carries a value.
+func hasReturnValue(body *ast.BlockStmt) bool {
+	if body == nil {
+		return false
+	}
+	return stmtsHaveReturn(body.List)
+}
+
+func stmtsHaveReturn(stmts []ast.Stmt) bool {
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *ast.ReturnStmt:
+			if len(s.Results) > 0 {
+				return true
+			}
+		case *ast.IfStmt:
+			if stmtsHaveReturn(s.Body.List) {
+				return true
+			}
+			if es, ok := s.Else.(*ast.BlockStmt); ok {
+				if stmtsHaveReturn(es.List) {
+					return true
+				}
+			}
+		case *ast.BlockStmt:
+			if stmtsHaveReturn(s.List) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// wrapReturnsWithJSValue rewrites every `return expr` inside body to
+// `return jsvalue.NewString(expr)` for string literals,
+// `return jsvalue.NewNumber(expr)` for numeric literals,
+// `return jsvalue.NewBool(expr)` for boolean idents,
+// and a generic call expression for everything else.
+func wrapReturnsWithJSValue(body *ast.BlockStmt) {
+	if body == nil {
+		return
+	}
+	wrapReturnStmts(body.List)
+}
+
+func wrapReturnStmts(stmts []ast.Stmt) {
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *ast.ReturnStmt:
+			for i, r := range s.Results {
+				s.Results[i] = wrapExprWithJSValue(r)
+			}
+		case *ast.IfStmt:
+			wrapReturnStmts(s.Body.List)
+			if es, ok := s.Else.(*ast.BlockStmt); ok {
+				wrapReturnStmts(es.List)
+			}
+		case *ast.BlockStmt:
+			wrapReturnStmts(s.List)
+		}
+	}
+}
+
+func wrapExprWithJSValue(expr ast.Expr) ast.Expr {
+	switch e := expr.(type) {
+	case *ast.BasicLit:
+		switch e.Kind {
+		case token.STRING:
+			return callExpr(selectorExpr(ident("jsvalue"), "NewString"), e)
+		case token.INT, token.FLOAT:
+			return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), callExpr(ident("float64"), e))
+		}
+	case *ast.Ident:
+		switch e.Name {
+		case "true", "false":
+			return callExpr(selectorExpr(ident("jsvalue"), "NewBool"), e)
+		case "nil":
+			return callExpr(selectorExpr(ident("jsvalue"), "NewNull"))
+		}
+	}
+	// Generic: wrap with NewString(fmt.Sprintf("%v", expr)) as fallback
+	return callExpr(selectorExpr(ident("jsvalue"), "NewString"),
+		callExpr(selectorExpr(ident("fmt"), "Sprintf"), stringLit("%v"), expr))
 }
 
 // capitalize returns the string with the first letter uppercased (Go export convention).

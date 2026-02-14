@@ -13,9 +13,12 @@ go build ./...              # build everything
 go test ./compiler/         # run compiler tests
 go test ./compiler/ -run TestExportDefaultClass   # run a single test
 go test ./...               # run all tests including runtime
-go run . build file.ts      # transpile a .ts file to stdout
-go run . build file.ts -o out.go   # transpile to file
-go run . run file.ts        # transpile, build, and execute
+go run . transpile file.ts            # transpile a .ts file to stdout
+go run . transpile file.ts -o out/    # transpile to directory (out/file.go)
+go run . transpile file.ts --ast      # print tree-sitter AST
+go run . build file.ts                # transpile + compile to ./file binary
+go run . build file.ts -o mybin       # transpile + compile to custom path
+go run . run file.ts                  # transpile, build, and execute
 ```
 
 ## Architecture
@@ -53,6 +56,7 @@ Key design patterns:
 - `runtime/path` — `Join`, `Basename`, etc. wrapping `path/filepath`
 - `runtime/os` — `Homedir`, `Platform`, etc.
 - `runtime/hono` — minimal Hono web framework with routing, `Context`, and `http.Handler` implementation
+- `runtime/jsvalue` — `JSValue` runtime type modeling JavaScript value semantics: typed factories, prototype chain, property descriptors
 
 ## Test conventions
 

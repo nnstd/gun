@@ -141,7 +141,14 @@ func (t *Transformer) transformFuncDecl(node *sitter.Node, exported bool) *ast.F
 	}
 
 	if results == nil {
-		results = inferReturnType(body)
+		if inferred := inferReturnType(body); inferred != nil {
+			results = inferred
+		} else if hasReturnValue(body) {
+			results = fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addImport("fmt")
+			wrapReturnsWithJSValue(body)
+		}
 	}
 
 	return funcDecl(name, params, results, body)

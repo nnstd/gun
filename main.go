@@ -14,13 +14,22 @@ import (
 )
 
 var cli struct {
-	Build BuildCmd `cmd:"" default:"withargs" help:"Transpile TypeScript to Go."`
-	Run   RunCmd   `cmd:"" help:"Transpile, build, and run a TypeScript file."`
+	Transpile TranspileCmd `cmd:"" default:"withargs" help:"Transpile TypeScript to Go source."`
+	Build     BuildCmd     `cmd:"" help:"Transpile and compile TypeScript to a binary."`
+	Run       RunCmd       `cmd:"" help:"Transpile, build, and run a TypeScript file."`
+}
+
+type TranspileCmd struct {
+	Input   string `arg:"" help:"Input .ts file or directory."`
+	Output  string `short:"o" help:"Output directory."`
+	Pkg     string `short:"p" default:"main" help:"Go package name."`
+	Verbose bool   `short:"v" help:"Verbose output."`
+	AST     bool   `help:"Print the tree-sitter AST instead of transpiling."`
 }
 
 type BuildCmd struct {
 	Input   string `arg:"" help:"Input .ts file or directory."`
-	Output  string `short:"o" help:"Output file or directory."`
+	Output  string `short:"o" help:"Output binary path." default:""`
 	Pkg     string `short:"p" default:"main" help:"Go package name."`
 	Verbose bool   `short:"v" help:"Verbose output."`
 }
@@ -32,7 +41,20 @@ type RunCmd struct {
 	Args    []string `arg:"" optional:"" passthrough:"" help:"Arguments to pass to the compiled program."`
 }
 
-func (cmd *BuildCmd) Run() error {
+func (cmd *TranspileCmd) Run() error {
+	if cmd.AST {
+		source, err := os.ReadFile(cmd.Input)
+		if err != nil {
+			return err
+		}
+		out, err := compiler.DumpAST(source)
+		if err != nil {
+			return err
+		}
+		fmt.Print(out)
+		return nil
+	}
+
 	info, err := os.Stat(cmd.Input)
 	if err != nil {
 		return err
@@ -40,7 +62,71 @@ func (cmd *BuildCmd) Run() error {
 	if info.IsDir() {
 		return transpileDir(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose)
 	}
-	return transpileFile(cmd.Input, cmd.Output, cmd.Pkg, "", cmd.Verbose)
+	// -o is always a directory; derive the .go filename from the input
+	outputPath := ""
+	if cmd.Output != "" {
+		if err := os.MkdirAll(cmd.Output, 0755); err != nil {
+			return err
+		}
+		base := strings.TrimSuffix(filepath.Base(cmd.Input), ".ts") + ".go"
+		outputPath = filepath.Join(cmd.Output, base)
+	}
+	return transpileFile(cmd.Input, outputPath, cmd.Pkg, "", cmd.Verbose)
+}
+
+func (cmd *BuildCmd) Run() error {
+	info, err := os.Stat(cmd.Input)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("build command requires a single .ts file, not a directory")
+	}
+
+	// Transpile to temp dir
+	tmpDir, err := os.MkdirTemp("", "gun-build-*")
+	if err != nil {
+		return fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	goFile := filepath.Join(tmpDir, "main.go")
+	if err := transpileFile(cmd.Input, goFile, cmd.Pkg, "gunbuild", cmd.Verbose); err != nil {
+		return err
+	}
+
+	// Transpile relative imports recursively
+	inputDir := filepath.Dir(cmd.Input)
+	if inputDir == "" {
+		inputDir = "."
+	}
+	if err := transpileRelativeImports(cmd.Input, inputDir, tmpDir, "gunbuild", cmd.Verbose); err != nil {
+		return err
+	}
+
+	if err := scaffoldGoMod(tmpDir, cmd.Verbose); err != nil {
+		return err
+	}
+
+	// Determine output binary path
+	binPath := cmd.Output
+	if binPath == "" {
+		binPath = strings.TrimSuffix(filepath.Base(cmd.Input), ".ts")
+	}
+	binPath, _ = filepath.Abs(binPath)
+
+	build := exec.Command("go", "build", "-o", binPath, ".")
+	build.Dir = tmpDir
+	var buildStderr strings.Builder
+	build.Stderr = &buildStderr
+	if cmd.Verbose {
+		fmt.Fprintf(os.Stderr, "building %s\n", goFile)
+	}
+	if err := build.Run(); err != nil {
+		return fmt.Errorf("go build failed:\n%s\ntranspiled source is at %s", buildStderr.String(), goFile)
+	}
+
+	return nil
 }
 
 func (cmd *RunCmd) Run() error {

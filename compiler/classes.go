@@ -187,7 +187,14 @@ func (t *Transformer) transformMethod(node *sitter.Node, className, recv string)
 	}
 
 	if results == nil {
-		results = inferReturnType(body)
+		if inferred := inferReturnType(body); inferred != nil {
+			results = inferred
+		} else if hasReturnValue(body) {
+			results = fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addImport("fmt")
+			wrapReturnsWithJSValue(body)
+		}
 	}
 
 	return methodDecl(recv, mName, ptrType(ident(className)), params, results, body)
