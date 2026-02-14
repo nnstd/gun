@@ -111,6 +111,14 @@ func (t *Transformer) isLocalName(name string) bool {
 	return false
 }
 
+// addToCurrentScope registers a variable name in the current (innermost) scope.
+// typed indicates whether the variable has an explicit type annotation.
+func (t *Transformer) addToCurrentScope(name string, typed bool) {
+	if len(t.localScopes) > 0 {
+		t.localScopes[len(t.localScopes)-1][name] = typed
+	}
+}
+
 // isUntypedLocal returns true if the name is a local variable/parameter without
 // an explicit type annotation (i.e. it defaults to *jsvalue.JSValue).
 func (t *Transformer) isUntypedLocal(name string) bool {

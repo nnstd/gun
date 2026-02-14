@@ -233,6 +233,23 @@ func (v *JSValue) MatchString(s string) bool {
 	return false
 }
 
+// Match implements JS String.prototype.match(regexp).
+// Returns an array JSValue of match strings, or null if no match.
+func (v *JSValue) Match(re *regexp.Regexp) *JSValue {
+	if v.typ != TypeString {
+		return NewNull()
+	}
+	matches := re.FindAllString(v.strVal, -1)
+	if matches == nil {
+		return NewNull()
+	}
+	elems := make([]*JSValue, len(matches))
+	for i, m := range matches {
+		elems[i] = NewString(m)
+	}
+	return NewArray(elems...)
+}
+
 // CodePointAt returns the Unicode code point at the given position.
 func (v *JSValue) CodePointAt(pos int) int {
 	if v.typ != TypeString {
@@ -243,6 +260,47 @@ func (v *JSValue) CodePointAt(pos int) int {
 		return 0
 	}
 	return int(runes[pos])
+}
+
+// Slice implements JS Array.prototype.slice(start, end).
+// Returns a new array JSValue with elements from start to end.
+func (v *JSValue) Slice(args ...int) *JSValue {
+	if v.arrayVal == nil {
+		return NewArray()
+	}
+	n := len(v.arrayVal)
+	start := 0
+	end := n
+	if len(args) > 0 {
+		start = args[0]
+		if start < 0 {
+			start = n + start
+			if start < 0 {
+				start = 0
+			}
+		}
+		if start > n {
+			start = n
+		}
+	}
+	if len(args) > 1 {
+		end = args[1]
+		if end < 0 {
+			end = n + end
+			if end < 0 {
+				end = 0
+			}
+		}
+		if end > n {
+			end = n
+		}
+	}
+	if start >= end {
+		return NewArray()
+	}
+	elems := make([]*JSValue, end-start)
+	copy(elems, v.arrayVal[start:end])
+	return NewArray(elems...)
 }
 
 // From wraps an arbitrary Go value as a *JSValue.

@@ -309,6 +309,47 @@ func wrapReturnsWithJSValue(body *ast.BlockStmt) {
 	wrapReturnStmts(body.List)
 }
 
+// ensureTrailingReturn appends a zero-value return to the body if the last
+// statement is not already a return. This prevents Go "missing return" errors
+// for functions where not all code paths explicitly return.
+func ensureTrailingReturn(body *ast.BlockStmt, results *ast.FieldList) {
+	if body == nil || results == nil || len(results.List) == 0 {
+		return
+	}
+	if len(body.List) > 0 {
+		if _, ok := body.List[len(body.List)-1].(*ast.ReturnStmt); ok {
+			return
+		}
+	}
+	var zeros []ast.Expr
+	for _, f := range results.List {
+		zeros = append(zeros, zeroValueFor(f.Type))
+	}
+	body.List = append(body.List, returnStmt(zeros...))
+}
+
+// zeroValueFor returns the zero-value expression for a Go type expression.
+func zeroValueFor(typ ast.Expr) ast.Expr {
+	switch t := typ.(type) {
+	case *ast.Ident:
+		switch t.Name {
+		case "string":
+			return &ast.BasicLit{Kind: token.STRING, Value: `""`}
+		case "bool":
+			return ident("false")
+		case "int", "float64", "int64", "int32", "byte", "rune":
+			return &ast.BasicLit{Kind: token.INT, Value: "0"}
+		}
+	case *ast.StarExpr:
+		return ident("nil")
+	case *ast.ArrayType:
+		return ident("nil")
+	case *ast.MapType:
+		return ident("nil")
+	}
+	return ident("nil")
+}
+
 func wrapReturnStmts(stmts []ast.Stmt) {
 	for _, stmt := range stmts {
 		switch s := stmt.(type) {

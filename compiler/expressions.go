@@ -615,9 +615,9 @@ func ensureBool(expr ast.Expr) ast.Expr {
 	if isJSValueGet(expr) {
 		return callExpr(selectorExpr(expr, "Bool"))
 	}
-	// Non-boolean identifiers and selectors: treat as truthiness check → != nil
+	// Non-boolean identifiers, selectors, and calls: treat as truthiness check → != nil
 	switch expr.(type) {
-	case *ast.Ident, *ast.SelectorExpr:
+	case *ast.Ident, *ast.SelectorExpr, *ast.CallExpr:
 		return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
 	}
 	return expr
@@ -781,6 +781,8 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 		}
 	}
 
+	ensureTrailingReturn(body, results)
+
 	return &ast.FuncLit{
 		Type: &ast.FuncType{Params: params, Results: results},
 		Body: body,
@@ -823,6 +825,8 @@ func (t *Transformer) transformFuncExpr(node *sitter.Node) ast.Expr {
 			wrapReturnsWithJSValue(body)
 		}
 	}
+
+	ensureTrailingReturn(body, results)
 
 	return &ast.FuncLit{
 		Type: &ast.FuncType{Params: params, Results: results},

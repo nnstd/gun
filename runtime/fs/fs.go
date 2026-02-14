@@ -1,13 +1,17 @@
 package fs
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
 
 // ReadFileSync reads the entire contents of a file.
-func ReadFileSync(path string) ([]byte, error) {
-	return os.ReadFile(path)
+// Accepts any type for path (string or *jsvalue.JSValue) and optional encoding.
+// Returns []byte directly, matching JS single-value semantics.
+func ReadFileSync(path any, opts ...any) []byte {
+	data, _ := os.ReadFile(fmt.Sprint(path))
+	return data
 }
 
 // Realpath resolves a path to its canonical absolute pathname.

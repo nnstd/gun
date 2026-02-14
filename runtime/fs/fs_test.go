@@ -13,10 +13,7 @@ func TestReadWriteFileSync(t *testing.T) {
 	if err := WriteFileSync(p, []byte("hello")); err != nil {
 		t.Fatal(err)
 	}
-	data, err := ReadFileSync(p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	data := ReadFileSync(p)
 	if string(data) != "hello" {
 		t.Errorf("got %q, want %q", data, "hello")
 	}

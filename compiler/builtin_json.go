@@ -11,12 +11,13 @@ func transformJSONCall(prop string, args []ast.Expr, addImport func(string)) ast
 		}
 	case "parse":
 		if len(args) > 0 {
-			// JSON.parse(x) → func() any { var v any; json.Unmarshal([]byte(x), &v); return v }()
+			// JSON.parse(x) → func() *jsvalue.JSValue { var v any; json.Unmarshal([]byte(x), &v); return jsvalue.From(v) }()
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
 			return &ast.CallExpr{
 				Fun: &ast.FuncLit{
 					Type: &ast.FuncType{
 						Params:  fieldList(),
-						Results: fieldList(field("", ident("any"))),
+						Results: fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue")))),
 					},
 					Body: blockStmt(
 						&ast.DeclStmt{Decl: varDecl("v", ident("any"), nil)},
@@ -25,7 +26,7 @@ func transformJSONCall(prop string, args []ast.Expr, addImport func(string)) ast
 							callExpr(ident("[]byte"), args[0]),
 							addrOf(ident("v")),
 						)),
-						returnStmt(ident("v")),
+						returnStmt(callExpr(selectorExpr(ident("jsvalue"), "From"), ident("v"))),
 					),
 				},
 			}

@@ -90,6 +90,10 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 			}
 		}
 
+		// Register the variable in the current scope so property access
+		// on it uses .Get() when appropriate.
+		t.addToCurrentScope(name, typeNode != nil)
+
 		// If const with simple literal value, use Go const
 		if isConst && value != nil && isConstCompatible(value) && (typ == nil || isConstType(typ)) {
 			decls = append(decls, constDecl(name, typ, value))
@@ -175,6 +179,8 @@ func (t *Transformer) transformFuncDecl(node *sitter.Node, exported bool) *ast.F
 			wrapReturnsWithJSValue(body)
 		}
 	}
+
+	ensureTrailingReturn(body, results)
 
 	return funcDecl(name, params, results, body)
 }
