@@ -6,7 +6,7 @@ func TestImportNamedFS(t *testing.T) {
 	ts := `import { readFileSync } from "fs";
 const data = readFileSync("hello.txt");`
 	out := compile(t, ts)
-	assertContains(t, out, `"gun/runtime/fs"`)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/fs"`)
 	assertContains(t, out, "fs.ReadFileSync")
 }
 
@@ -14,7 +14,7 @@ func TestImportNamespacePath(t *testing.T) {
 	ts := `import * as path from "path";
 const p = path.join("a", "b");`
 	out := compile(t, ts)
-	assertContains(t, out, `"gun/runtime/path"`)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/path"`)
 	assertContains(t, out, "nodepath.Join")
 }
 
@@ -22,7 +22,7 @@ func TestImportDefaultModule(t *testing.T) {
 	ts := `import fs from "fs";
 const data = fs.readFileSync("test.txt");`
 	out := compile(t, ts)
-	assertContains(t, out, `"gun/runtime/fs"`)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/fs"`)
 }
 
 func TestImportNamedMultiple(t *testing.T) {
@@ -30,7 +30,7 @@ func TestImportNamedMultiple(t *testing.T) {
 const data = readFileSync("in.txt");
 writeFileSync("out.txt", data);`
 	out := compile(t, ts)
-	assertContains(t, out, `"gun/runtime/fs"`)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/fs"`)
 	assertContains(t, out, "fs.ReadFileSync")
 	assertContains(t, out, "fs.WriteFileSync")
 }
@@ -41,7 +41,7 @@ const p = join("a", "b");
 const b = basename("/foo/bar.ts");
 const e = extname("file.go");`
 	out := compile(t, ts)
-	assertContains(t, out, `"gun/runtime/path"`)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/path"`)
 	assertContains(t, out, "nodepath.Join")
 	assertContains(t, out, "nodepath.Basename")
 	assertContains(t, out, "nodepath.Extname")
@@ -74,7 +74,7 @@ func TestImportOSModule(t *testing.T) {
 const h = homedir();
 const p = platform();`
 	out := compile(t, ts)
-	assertContains(t, out, `"gun/runtime/os"`)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/os"`)
 	assertContains(t, out, "nodeos.Homedir")
 	assertContains(t, out, "nodeos.Platform")
 }
@@ -90,7 +90,7 @@ func TestImportNamespaceOS(t *testing.T) {
 	ts := `import * as os from "os";
 const h = os.homedir();`
 	out := compile(t, ts)
-	assertContains(t, out, `"gun/runtime/os"`)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/os"`)
 	assertContains(t, out, "nodeos.Homedir")
 }
 

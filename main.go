@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gun/compiler"
+	"github.com/nnstd/gun/compiler"
 
 	"github.com/alecthomas/kong"
 )
@@ -57,23 +57,32 @@ func (cmd *RunCmd) Run() error {
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
 
 	goFile := filepath.Join(tmpDir, "main.go")
 	if err := transpileFile(cmd.Input, goFile, cmd.Pkg, cmd.Verbose); err != nil {
+		os.RemoveAll(tmpDir)
+		return err
+	}
+
+	// Set up go.mod so gun/runtime/* imports resolve
+	if err := scaffoldGoMod(tmpDir, cmd.Verbose); err != nil {
+		os.RemoveAll(tmpDir)
 		return err
 	}
 
 	// Build
 	binPath := filepath.Join(tmpDir, "main")
-	build := exec.Command("go", "build", "-o", binPath, goFile)
-	build.Stderr = os.Stderr
+	build := exec.Command("go", "build", "-o", binPath, ".")
+	build.Dir = tmpDir
+	var buildStderr strings.Builder
+	build.Stderr = &buildStderr
 	if cmd.Verbose {
 		fmt.Fprintf(os.Stderr, "building %s\n", goFile)
 	}
 	if err := build.Run(); err != nil {
-		return fmt.Errorf("go build: %w", err)
+		return fmt.Errorf("go build failed:\n%s\ntranspiled source is at %s", buildStderr.String(), goFile)
 	}
+	defer os.RemoveAll(tmpDir)
 
 	// Run
 	run := exec.Command(binPath, cmd.Args...)
@@ -148,6 +157,108 @@ func transpileDir(dirPath, outputDir, pkgName string, verbose bool) error {
 
 		return transpileFile(path, outPath, pkgName, verbose)
 	})
+}
+
+// scaffoldGoMod creates a go.mod in tmpDir so that github.com/nnstd/gun/runtime/*
+// imports resolve during go build.
+//
+// In development (local source tree found): uses a replace directive for instant builds.
+// For distributed binaries (no local source): fetches the module from GitHub.
+func scaffoldGoMod(tmpDir string, verbose bool) error {
+	const modPath = "github.com/nnstd/gun"
+
+	gunRoot, localFound := findGunModuleRoot()
+
+	if localFound {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "using local gun module at %s\n", gunRoot)
+		}
+		gomod := fmt.Sprintf("module gunrun\n\ngo 1.24.0\n\nrequire %s v0.0.0\n\nreplace %s => %s\n", modPath, modPath, gunRoot)
+		if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(gomod), 0644); err != nil {
+			return err
+		}
+		// Copy go.sum so dependency hashes are available
+		if data, err := os.ReadFile(filepath.Join(gunRoot, "go.sum")); err == nil {
+			os.WriteFile(filepath.Join(tmpDir, "go.sum"), data, 0644)
+		}
+		return nil
+	}
+
+	// No local source — fetch from GitHub
+	if verbose {
+		fmt.Fprintf(os.Stderr, "fetching %s from module proxy\n", modPath)
+	}
+	gomod := "module gunrun\n\ngo 1.24.0\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(gomod), 0644); err != nil {
+		return err
+	}
+
+	get := exec.Command("go", "get", modPath+"@latest")
+	get.Dir = tmpDir
+	get.Stderr = os.Stderr
+	if err := get.Run(); err != nil {
+		return fmt.Errorf("go get %s: %w", modPath, err)
+	}
+	return nil
+}
+
+// gunModuleRoot can be set at build time via -ldflags:
+//
+//	go build -ldflags "-X main.gunModuleRoot=$(pwd)" -o gun .
+var gunModuleRoot string
+
+// findGunModuleRoot locates the gun source tree so runtime imports can be
+// resolved via a replace directive. Returns ("", false) when no local source
+// is available — the caller should fall back to fetching from GitHub.
+//
+// Tries in order:
+//  1. Build-time embedded path (gunModuleRoot, set via ldflags)
+//  2. Walk up from the executable (works for `go build . && ./gun`)
+//  3. Walk up from CWD (works for `go run . run ...` during development)
+func findGunModuleRoot() (string, bool) {
+	if gunModuleRoot != "" {
+		return gunModuleRoot, true
+	}
+
+	// Strategy 2: walk up from executable
+	if exe, err := os.Executable(); err == nil {
+		resolved := exe
+		if r, err := filepath.EvalSymlinks(exe); err == nil {
+			resolved = r
+		}
+		if dir, ok := findModuleDir(filepath.Dir(resolved)); ok {
+			return dir, true
+		}
+	}
+
+	// Strategy 3: walk up from CWD
+	if wd, err := os.Getwd(); err == nil {
+		if dir, ok := findModuleDir(wd); ok {
+			return dir, true
+		}
+	}
+
+	return "", false
+}
+
+// findModuleDir walks up from start looking for a go.mod containing
+// "module github.com/nnstd/gun".
+func findModuleDir(start string) (string, bool) {
+	dir, _ := filepath.Abs(start)
+	for {
+		if data, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				if strings.TrimSpace(line) == "module github.com/nnstd/gun" {
+					return dir, true
+				}
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
 }
 
 // detectModuleName walks up from the input file to find a go.mod and returns

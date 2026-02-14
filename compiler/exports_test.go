@@ -47,7 +47,7 @@ func TestExportReexportFromModule(t *testing.T) {
 	ts := `export { readFileSync } from "fs"`
 	out := compile(t, ts)
 	assertContains(t, out, "var ReadFileSync = fs.ReadFileSync")
-	assertContains(t, out, `"gun/runtime/fs"`)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/fs"`)
 }
 
 func TestExportWildcard(t *testing.T) {

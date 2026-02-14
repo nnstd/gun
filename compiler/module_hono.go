@@ -49,7 +49,7 @@ func isHTTPMethod(name string) bool {
 // transformHonoHandler transforms a route handler, rewriting parameter types
 // from `any` to `*hono.Context`.
 func transformHonoHandler(t *Transformer, node *sitter.Node) ast.Expr {
-	t.addImport("gun/runtime/hono")
+	t.addImport("github.com/nnstd/gun/runtime/hono")
 
 	paramsNode := node.ChildByFieldName("parameters")
 	bodyNode := node.ChildByFieldName("body")

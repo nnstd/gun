@@ -1,4 +1,4 @@
-module gun
+module github.com/nnstd/gun
 
 go 1.24.0
 

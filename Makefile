@@ -1,14 +1,15 @@
 BINARY  := gun
 PKG     := ./...
 GOBIN   ?= $(shell go env GOPATH)/bin
+LDFLAGS := -X main.gunModuleRoot=$(CURDIR)
 
 .PHONY: build install clean test
 
 build:
-	go build -o $(BINARY) .
+	go build -ldflags '$(LDFLAGS)' -o $(BINARY) .
 
 install:
-	go install .
+	go install -ldflags '$(LDFLAGS)' .
 
 clean:
 	rm -f $(BINARY)
