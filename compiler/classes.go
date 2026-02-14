@@ -130,7 +130,7 @@ func (t *Transformer) transformConstructor(node *sitter.Node, className, recv st
 	paramsNode := node.ChildByFieldName("parameters")
 	bodyNode := node.ChildByFieldName("body")
 
-	params := t.transformParams(paramsNode)
+	params, paramStmts := t.transformParams(paramsNode)
 
 	// Build constructor body:
 	// recv := &ClassName{}
@@ -142,6 +142,10 @@ func (t *Transformer) transformConstructor(node *sitter.Node, className, recv st
 			Tok: token.DEFINE,
 			Rhs: []ast.Expr{addrOf(compositeLit(ident(className)))},
 		},
+	}
+
+	if len(paramStmts) > 0 {
+		stmts = append(stmts, paramStmts...)
 	}
 
 	if bodyNode != nil {
@@ -167,7 +171,7 @@ func (t *Transformer) transformMethod(node *sitter.Node, className, recv string)
 	}
 
 	mName := capitalize(nameNode.Utf8Text(t.source))
-	params := t.transformParams(paramsNode)
+	params, paramStmts := t.transformParams(paramsNode)
 
 	var results *ast.FieldList
 	if returnTypeNode != nil {
@@ -180,6 +184,9 @@ func (t *Transformer) transformMethod(node *sitter.Node, className, recv string)
 	var body *ast.BlockStmt
 	if bodyNode != nil {
 		body = t.transformBlock(bodyNode)
+		if len(paramStmts) > 0 {
+			body.List = append(paramStmts, body.List...)
+		}
 		// Rewrite this.x → recv.X
 		rewritten := make([]ast.Stmt, len(body.List))
 		for i, stmt := range body.List {

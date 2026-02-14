@@ -130,7 +130,7 @@ func (t *Transformer) transformFuncDecl(node *sitter.Node, exported bool) *ast.F
 		name = capitalize(name)
 	}
 
-	params := t.transformParams(paramsNode)
+	params, paramStmts := t.transformParams(paramsNode)
 	var results *ast.FieldList
 	if returnTypeNode != nil {
 		retType := t.getTypeAnnotation(returnTypeNode)
@@ -144,6 +144,10 @@ func (t *Transformer) transformFuncDecl(node *sitter.Node, exported bool) *ast.F
 		body = t.transformBlock(bodyNode)
 	} else {
 		body = blockStmt()
+	}
+
+	if len(paramStmts) > 0 {
+		body.List = append(paramStmts, body.List...)
 	}
 
 	if results == nil {
@@ -160,23 +164,19 @@ func (t *Transformer) transformFuncDecl(node *sitter.Node, exported bool) *ast.F
 	return funcDecl(name, params, results, body)
 }
 
-func (t *Transformer) transformParams(node *sitter.Node) *ast.FieldList {
+func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.Stmt) {
 	if node == nil {
-		return fieldList()
+		return fieldList(), nil
 	}
 
 	var fields []*ast.Field
+	var destructureStmts []ast.Stmt
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		param := node.NamedChild(i)
 		switch param.Kind() {
 		case "required_parameter", "optional_parameter":
 			nameNode := param.ChildByFieldName("pattern")
 			typeNode := param.ChildByFieldName("type")
-
-			pName := "_"
-			if nameNode != nil {
-				pName = sanitizeIdent(nameNode.Utf8Text(t.source))
-			}
 
 			var pType ast.Expr = ident("any")
 			if typeNode != nil {
@@ -189,6 +189,23 @@ func (t *Transformer) transformParams(node *sitter.Node) *ast.FieldList {
 			// Optional params become pointer types
 			if param.Kind() == "optional_parameter" {
 				pType = ptrType(pType)
+			}
+
+			// Handle destructuring patterns in parameters
+			if nameNode != nil && (nameNode.Kind() == "object_pattern" || nameNode.Kind() == "array_pattern") {
+				syntheticName := fmt.Sprintf("_param%d", i)
+				fields = append(fields, field(syntheticName, pType))
+				// Create a synthetic sitter node isn't possible, so build
+				// the destructuring stmts manually using the pattern and
+				// a Go identifier as the value expression.
+				stmts := t.transformDestructuringFromExpr(nameNode, ident(syntheticName))
+				destructureStmts = append(destructureStmts, stmts...)
+				continue
+			}
+
+			pName := "_"
+			if nameNode != nil {
+				pName = sanitizeIdent(nameNode.Utf8Text(t.source))
 			}
 
 			fields = append(fields, field(pName, pType))
@@ -219,7 +236,7 @@ func (t *Transformer) transformParams(node *sitter.Node) *ast.FieldList {
 		}
 	}
 
-	return fieldList(fields...)
+	return fieldList(fields...), destructureStmts
 }
 
 func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
@@ -294,7 +311,7 @@ func (t *Transformer) transformInterfaceAsGoInterface(name string, body *sitter.
 		}
 
 		mName := capitalize(mNameNode.Utf8Text(t.source))
-		params := t.transformParams(paramsNode)
+		params, _ := t.transformParams(paramsNode)
 
 		var results *ast.FieldList
 		if returnNode != nil {
@@ -351,7 +368,7 @@ func (t *Transformer) transformInterfaceAsStruct(name string, body *sitter.Node)
 				continue
 			}
 			mName := capitalize(mNameNode.Utf8Text(t.source))
-			params := t.transformParams(paramsNode)
+			params, _ := t.transformParams(paramsNode)
 			var results *ast.FieldList
 			if returnNode != nil {
 				retType := t.getTypeAnnotation(returnNode)
@@ -466,7 +483,10 @@ func (t *Transformer) transformTypeAlias(node *sitter.Node) ast.Decl {
 }
 
 func (t *Transformer) transformDestructuring(pattern *sitter.Node, value *sitter.Node) []ast.Stmt {
-	valExpr := t.transformExpr(value)
+	return t.transformDestructuringFromExpr(pattern, t.transformExpr(value))
+}
+
+func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valExpr ast.Expr) []ast.Stmt {
 	var stmts []ast.Stmt
 
 	switch pattern.Kind() {

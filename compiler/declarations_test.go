@@ -228,6 +228,15 @@ const [first, ...rest] = arr;`
 	assertContains(t, out, "var rest = arr[1:]")
 }
 
+func TestParamObjectDestructuring(t *testing.T) {
+	ts := `function extract({ name, age }) { return name; }`
+	out := compile(t, ts)
+	assertContains(t, out, "_param0 any")
+	assertContains(t, out, "name := _param0.Name")
+	assertContains(t, out, "age := _param0.Age")
+	assertNotContains(t, out, "{ name")
+}
+
 func TestEmptyInput(t *testing.T) {
 	out, err := Compile([]byte(""), "main", "")
 	if err != nil {

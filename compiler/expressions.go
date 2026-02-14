@@ -514,8 +514,9 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 	paramNode := node.ChildByFieldName("parameter")
 
 	var params *ast.FieldList
+	var paramStmts []ast.Stmt
 	if paramsNode != nil {
-		params = t.transformParams(paramsNode)
+		params, paramStmts = t.transformParams(paramsNode)
 	} else if paramNode != nil {
 		params = fieldList(field(paramNode.Utf8Text(t.source), ident("any")))
 	} else {
@@ -544,6 +545,10 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 		body = blockStmt()
 	}
 
+	if len(paramStmts) > 0 {
+		body.List = append(paramStmts, body.List...)
+	}
+
 	if results == nil {
 		if inferred := inferReturnType(body); inferred != nil {
 			results = inferred
@@ -562,7 +567,7 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 }
 
 func (t *Transformer) transformFuncExpr(node *sitter.Node) ast.Expr {
-	params := t.transformParams(node.ChildByFieldName("parameters"))
+	params, paramStmts := t.transformParams(node.ChildByFieldName("parameters"))
 
 	var results *ast.FieldList
 	if rtn := node.ChildByFieldName("return_type"); rtn != nil {
@@ -576,6 +581,10 @@ func (t *Transformer) transformFuncExpr(node *sitter.Node) ast.Expr {
 		body = t.transformBlock(bn)
 	} else {
 		body = blockStmt()
+	}
+
+	if len(paramStmts) > 0 {
+		body.List = append(paramStmts, body.List...)
 	}
 
 	if results == nil {

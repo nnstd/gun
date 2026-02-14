@@ -294,7 +294,7 @@ func (t *Transformer) transformAnonFuncAsDefault(node *sitter.Node) *ast.FuncDec
 	returnTypeNode := node.ChildByFieldName("return_type")
 	bodyNode := node.ChildByFieldName("body")
 
-	params := t.transformParams(paramsNode)
+	params, paramStmts := t.transformParams(paramsNode)
 	var results *ast.FieldList
 	if returnTypeNode != nil {
 		retType := t.getTypeAnnotation(returnTypeNode)
@@ -308,6 +308,10 @@ func (t *Transformer) transformAnonFuncAsDefault(node *sitter.Node) *ast.FuncDec
 		body = t.transformBlock(bodyNode)
 	} else {
 		body = blockStmt()
+	}
+
+	if len(paramStmts) > 0 {
+		body.List = append(paramStmts, body.List...)
 	}
 
 	if results == nil {
