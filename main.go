@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -104,7 +105,8 @@ func transpileFile(inputPath, outputPath, pkgName string, verbose bool) error {
 		fmt.Fprintf(os.Stderr, "compiling %s\n", inputPath)
 	}
 
-	result, err := compiler.Compile(source, pkgName)
+	moduleName := detectModuleName(inputPath)
+	result, err := compiler.Compile(source, pkgName, moduleName)
 	if err != nil {
 		return fmt.Errorf("compile %s: %w", inputPath, err)
 	}
@@ -146,4 +148,29 @@ func transpileDir(dirPath, outputDir, pkgName string, verbose bool) error {
 
 		return transpileFile(path, outPath, pkgName, verbose)
 	})
+}
+
+// detectModuleName walks up from the input file to find a go.mod and returns
+// the module name. Returns empty string if not found.
+func detectModuleName(inputPath string) string {
+	dir, _ := filepath.Abs(filepath.Dir(inputPath))
+	for {
+		gomod := filepath.Join(dir, "go.mod")
+		if f, err := os.Open(gomod); err == nil {
+			defer f.Close()
+			scanner := bufio.NewScanner(f)
+			for scanner.Scan() {
+				line := scanner.Text()
+				if strings.HasPrefix(line, "module ") {
+					return strings.TrimSpace(strings.TrimPrefix(line, "module "))
+				}
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
 }

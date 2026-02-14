@@ -9,17 +9,21 @@ import (
 
 // Transformer walks a tree-sitter TypeScript AST and builds a go/ast.File.
 type Transformer struct {
-	source  []byte
-	pkgName string
-	decls   []ast.Decl
-	imports map[string]bool // tracks needed Go imports
+	source        []byte
+	pkgName       string
+	moduleName    string // Go module name from go.mod (for relative imports)
+	decls         []ast.Decl
+	imports       map[string]bool           // tracks needed Go imports
+	importedNames map[string]resolvedImport // TS name → Go resolution
 }
 
-func newTransformer(source []byte, pkgName string) *Transformer {
+func newTransformer(source []byte, pkgName, moduleName string) *Transformer {
 	return &Transformer{
-		source:  source,
-		pkgName: pkgName,
-		imports: make(map[string]bool),
+		source:        source,
+		pkgName:       pkgName,
+		moduleName:    moduleName,
+		imports:       make(map[string]bool),
+		importedNames: make(map[string]resolvedImport),
 	}
 }
 
@@ -87,7 +91,7 @@ func (t *Transformer) transformTopLevel(node *sitter.Node) {
 	case "export_statement":
 		t.transformExport(node)
 	case "import_statement":
-		// TS imports don't directly map; we track Go imports as needed
+		t.transformImport(node)
 	case "expression_statement":
 		// Top-level expression statements become init() body or are skipped
 		// For now, wrap in an init function if it's a call

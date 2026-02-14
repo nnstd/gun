@@ -3,14 +3,15 @@ package compiler
 import "fmt"
 
 // Compile transpiles TypeScript source code to Go source code.
-func Compile(source []byte, pkgName string) ([]byte, error) {
+// moduleName is the Go module name (from go.mod) used to resolve relative imports.
+func Compile(source []byte, pkgName, moduleName string) ([]byte, error) {
 	tree, err := parseTypeScript(source)
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
 	defer tree.Close()
 
-	transformer := newTransformer(source, pkgName)
+	transformer := newTransformer(source, pkgName, moduleName)
 	file := transformer.transform(tree.RootNode())
 
 	output, err := emit(file)
