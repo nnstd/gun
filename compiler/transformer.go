@@ -19,6 +19,7 @@ type Transformer struct {
 	imports            map[string]string          // Go import path → alias (empty = no alias)
 	importedNames      map[string]resolvedImport  // TS name → Go resolution
 	varTypes           map[string]string          // variable name → module type (e.g. "app" → "hono")
+	localScopes        []map[string]bool          // stack of local variable/parameter names that shadow imports
 }
 
 func newTransformer(source []byte, pkgName, moduleName string, samePackageImports bool) *Transformer {
@@ -73,6 +74,32 @@ func (t *Transformer) addImport(pkg string) {
 
 func (t *Transformer) addAliasedImport(pkg, alias string) {
 	t.imports[pkg] = alias
+}
+
+// pushScope starts a new local scope (e.g. when entering a function body).
+func (t *Transformer) pushScope(names []string) {
+	scope := make(map[string]bool, len(names))
+	for _, n := range names {
+		scope[n] = true
+	}
+	t.localScopes = append(t.localScopes, scope)
+}
+
+// popScope removes the most recent local scope.
+func (t *Transformer) popScope() {
+	if len(t.localScopes) > 0 {
+		t.localScopes = t.localScopes[:len(t.localScopes)-1]
+	}
+}
+
+// isLocalName returns true if the name is shadowed by a parameter/local in any active scope.
+func (t *Transformer) isLocalName(name string) bool {
+	for i := len(t.localScopes) - 1; i >= 0; i-- {
+		if t.localScopes[i][name] {
+			return true
+		}
+	}
+	return false
 }
 
 // jsValueType returns *jsvalue.JSValue and registers the import.

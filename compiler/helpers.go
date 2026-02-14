@@ -5,6 +5,8 @@ import (
 	"go/token"
 	"strings"
 	"unicode"
+
+	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
 func ident(name string) *ast.Ident {
@@ -354,6 +356,32 @@ var goKeywords = map[string]bool{
 	"func": true, "go": true, "goto": true, "if": true, "import": true,
 	"interface": true, "map": true, "package": true, "range": true, "return": true,
 	"select": true, "struct": true, "switch": true, "type": true, "var": true,
+}
+
+// extractParamNames extracts parameter names from a tree-sitter parameters node.
+func extractParamNames(node *sitter.Node, source []byte) []string {
+	if node == nil {
+		return nil
+	}
+	var names []string
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		param := node.NamedChild(i)
+		switch param.Kind() {
+		case "required_parameter", "optional_parameter":
+			nameNode := param.ChildByFieldName("pattern")
+			if nameNode != nil && nameNode.Kind() == "identifier" {
+				names = append(names, nameNode.Utf8Text(source))
+			}
+		case "rest_parameter":
+			nameNode := param.ChildByFieldName("pattern")
+			if nameNode != nil {
+				names = append(names, nameNode.Utf8Text(source))
+			}
+		case "identifier":
+			names = append(names, param.Utf8Text(source))
+		}
+	}
+	return names
 }
 
 // sanitizeIdent makes a JS identifier safe for use as a Go identifier by

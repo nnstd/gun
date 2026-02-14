@@ -81,6 +81,29 @@ func init() {
 	})
 	registerModule("assert", "testing", "testing", nil)
 	registerModule("module", "github.com/nnstd/gun/runtime/module", "module", nil)
+	registerModule("get-caller-file", "github.com/nnstd/gun/runtime/get_caller_file", "get_caller_file", nil)
+	registerModule("cliui", "github.com/nnstd/gun/runtime/cliui", "cliui", nil)
+	registerModule("ansi-regex", "github.com/nnstd/gun/runtime/ansi_regex", "ansi_regex", nil)
+	registerModule("strip-ansi", "github.com/nnstd/gun/runtime/strip_ansi", "strip_ansi", nil)
+	registerModule("emoji-regex", "github.com/nnstd/gun/runtime/emoji_regex", "emoji_regex", nil)
+	registerModule("get-east-asian-width", "github.com/nnstd/gun/runtime/get_east_asian_width", "get_east_asian_width", nil)
+	registerModule("string-width", "github.com/nnstd/gun/runtime/string_width", "string_width", nil)
+	registerModule("wrap-ansi", "github.com/nnstd/gun/runtime/wrap_ansi", "wrap_ansi", nil)
+	registerModule("ansi-styles", "github.com/nnstd/gun/runtime/ansi_styles", "ansi_styles", nil)
+	registerModule("escalade/sync", "github.com/nnstd/gun/runtime/escalade_sync", "escalade_sync", nil)
+	registerModule("y18n", "github.com/nnstd/gun/runtime/y18n", "y18n", nil)
+	registerModule("yargs-parser", "github.com/nnstd/gun/runtime/yargs_parser", "yargs_parser", map[string]string{
+		"YargsParser":    "YargsParser",
+		"camelCase":      "CamelCase",
+		"decamelize":     "Decamelize",
+		"looksLikeNumber": "LooksLikeNumber",
+	})
+	registerModule("yargs", "github.com/nnstd/gun/runtime/yargs", "yargs", map[string]string{
+		"default": "Default",
+	})
+	registerModule("yargs/helpers", "github.com/nnstd/gun/runtime/yargs_helpers", "yargs_helpers", map[string]string{
+		"hideBin": "HideBin",
+	})
 }
 
 func (t *Transformer) transformImport(node *sitter.Node) {
@@ -153,8 +176,14 @@ func (t *Transformer) transformImport(node *sitter.Node) {
 				goImportPath: mod.goPath,
 				goPkgName:    mod.goName,
 			}
+			// Check for explicit default symbol mapping in knownSymbols
+			if symTable := knownSymbols[modulePath]; symTable != nil {
+				if sym, ok := symTable["default"]; ok {
+					ri.goSymbol = sym.goSymbol
+				}
+			}
 			// For third-party/relative packages, default import maps to the Default symbol
-			if !isKnown {
+			if ri.goSymbol == "" && !isKnown {
 				ri.goSymbol = "Default"
 			}
 			t.importedNames[localName] = ri
@@ -259,6 +288,10 @@ func (t *Transformer) resolveModulePath(modulePath string) moduleMapping {
 // resolveIdentifier checks if a name was imported from a TS module and returns
 // the appropriate Go expression. Falls back to builtin identifier mapping.
 func (t *Transformer) resolveIdentifier(name string) ast.Expr {
+	// Local parameters/variables shadow imports
+	if t.isLocalName(name) {
+		return ident(sanitizeIdent(name))
+	}
 	if imp, ok := t.importedNames[name]; ok {
 		if imp.goImportPath != "" {
 			// Use aliased import when package name differs from import path's last segment

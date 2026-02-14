@@ -174,6 +174,7 @@ func (t *Transformer) transformIfStmt(node *sitter.Node) ast.Stmt {
 		if paren, ok := cond.(*ast.ParenExpr); ok {
 			cond = paren.X
 		}
+		cond = ensureBool(cond)
 	}
 	if cond == nil {
 		cond = ident("true")

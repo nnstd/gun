@@ -292,10 +292,16 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			objText := objNode.Utf8Text(t.source)
 			prop := propNode.Utf8Text(t.source)
 
-			// Module-registered call transformers (e.g. hono route methods)
+			// Module-registered call transformers (e.g. hono route methods, yargs commands)
 			// Check before transformArgs to avoid eagerly transforming callback args
 			// that the module transformer will handle itself.
-			if modType, ok := t.varTypes[objText]; ok {
+			modType := ""
+			if mt, ok := t.varTypes[objText]; ok {
+				modType = mt
+			} else {
+				modType = t.inferModuleType(objNode)
+			}
+			if modType != "" {
 				if fn, ok := moduleCallTransformers[modType]; ok {
 					if r := fn(t, objNode, prop, argsNode); r != nil {
 						return r
@@ -317,6 +323,13 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 				if r := transformBuiltinMethod(obj, prop, args, t.addImport); r != nil {
 					return r
 				}
+			}
+
+			// Method call on a local scope variable (JSValue parameter):
+			// use selector form so it compiles as obj.Method(args)
+			if objNode.Kind() == "identifier" && t.isLocalName(objText) {
+				obj := t.transformExpr(objNode)
+				return callExpr(selectorExpr(obj, capitalize(prop)), args...)
 			}
 		}
 	}
@@ -391,6 +404,13 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 		return callExpr(ident("len"), obj)
 	}
 
+	// For local scope variables (function parameters typed as *jsvalue.JSValue),
+	// use dynamic property access via Get() instead of Go selector expressions.
+	if objNode.Kind() == "identifier" && t.isLocalName(objNode.Utf8Text(t.source)) {
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		return callExpr(selectorExpr(obj, "Get"), stringLit(prop))
+	}
+
 	return selectorExpr(obj, capitalize(prop))
 }
 
@@ -463,15 +483,87 @@ func (t *Transformer) transformObjectLiteral(node *sitter.Node) ast.Expr {
 			if keyNode != nil && valNode != nil {
 				key := keyNode.Utf8Text(t.source)
 				if val := t.transformExpr(valNode); val != nil {
-					elts = append(elts, keyValue(stringLit(key), val))
+					elts = append(elts, keyValue(stringLit(key), t.wrapAsJSValue(val)))
 				}
 			}
 		case "shorthand_property_identifier":
 			name := child.Utf8Text(t.source)
-			elts = append(elts, keyValue(stringLit(name), t.resolveIdentifier(name)))
+			elts = append(elts, keyValue(stringLit(name), t.wrapAsJSValue(t.resolveIdentifier(name))))
 		}
 	}
 	return compositeLit(mapType(ident("string"), t.jsValueType()), elts...)
+}
+
+// isJSValueGet returns true if the expression is a JSValue .Get() call.
+func isJSValueGet(expr ast.Expr) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	return sel.Sel.Name == "Get"
+}
+
+// ensureBool wraps a non-boolean expression so it can be used in an if condition.
+// JSValue Get() calls are wrapped with .Bool(); other pointer/interface types
+// get a != nil check.
+func ensureBool(expr ast.Expr) ast.Expr {
+	if expr == nil {
+		return ident("false")
+	}
+	// Already a boolean expression
+	switch e := expr.(type) {
+	case *ast.BinaryExpr:
+		switch e.Op {
+		case token.EQL, token.NEQ, token.LSS, token.GTR, token.LEQ, token.GEQ, token.LAND, token.LOR:
+			return expr
+		}
+	case *ast.UnaryExpr:
+		if e.Op == token.NOT {
+			return expr
+		}
+	case *ast.Ident:
+		if e.Name == "true" || e.Name == "false" {
+			return expr
+		}
+	}
+	// JSValue Get() call → .Bool()
+	if isJSValueGet(expr) {
+		return callExpr(selectorExpr(expr, "Bool"))
+	}
+	return expr
+}
+
+// wrapAsJSValue wraps an expression with jsvalue.From() so it can be used
+// as a *jsvalue.JSValue value in map literals. Expressions that are already
+// jsvalue constructor calls are returned as-is.
+func (t *Transformer) wrapAsJSValue(expr ast.Expr) ast.Expr {
+	if isJSValueExpr(expr) {
+		return expr
+	}
+	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	return callExpr(selectorExpr(ident("jsvalue"), "From"), expr)
+}
+
+// isJSValueExpr returns true if the expression is already a *jsvalue.JSValue
+// (e.g. a call to jsvalue.NewString, jsvalue.NewNumber, jsvalue.From, etc.)
+func isJSValueExpr(expr ast.Expr) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	id, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	return id.Name == "jsvalue"
 }
 
 func (t *Transformer) transformTemplateString(node *sitter.Node) ast.Expr {
@@ -512,7 +604,7 @@ func (t *Transformer) transformTemplateString(node *sitter.Node) ast.Expr {
 }
 
 func (t *Transformer) transformTernary(node *sitter.Node) ast.Expr {
-	cond := t.transformExpr(node.ChildByFieldName("condition"))
+	cond := ensureBool(t.transformExpr(node.ChildByFieldName("condition")))
 	cons := t.transformExpr(node.ChildByFieldName("consequence"))
 	alt := t.transformExpr(node.ChildByFieldName("alternative"))
 
@@ -545,14 +637,22 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 
 	var params *ast.FieldList
 	var paramStmts []ast.Stmt
+	var paramNames []string
 	if paramsNode != nil {
 		params, paramStmts = t.transformParams(paramsNode)
+		paramNames = extractParamNames(paramsNode, t.source)
 	} else if paramNode != nil {
-		params = fieldList(field(sanitizeIdent(paramNode.Utf8Text(t.source)), ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
+		pName := sanitizeIdent(paramNode.Utf8Text(t.source))
+		params = fieldList(field(pName, ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
 		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		paramNames = []string{pName}
 	} else {
 		params = fieldList()
 	}
+
+	// Push parameter names so they shadow imports inside the body
+	t.pushScope(paramNames)
+	defer t.popScope()
 
 	var results *ast.FieldList
 	if returnTypeNode != nil {
@@ -598,7 +698,12 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 }
 
 func (t *Transformer) transformFuncExpr(node *sitter.Node) ast.Expr {
-	params, paramStmts := t.transformParams(node.ChildByFieldName("parameters"))
+	paramsNode := node.ChildByFieldName("parameters")
+	params, paramStmts := t.transformParams(paramsNode)
+
+	// Push parameter names so they shadow imports inside the body
+	t.pushScope(extractParamNames(paramsNode, t.source))
+	defer t.popScope()
 
 	var results *ast.FieldList
 	if rtn := node.ChildByFieldName("return_type"); rtn != nil {
@@ -656,4 +761,42 @@ func (t *Transformer) transformNewExpr(node *sitter.Node) ast.Expr {
 		return callExpr(ident(fmt.Sprintf("New%s", capitalize(name))), args...)
 	}
 	return addrOf(compositeLit(ident(name)))
+}
+
+// inferModuleType walks a tree-sitter node to determine if it originates from
+// a known module package. This handles chained calls like yargs.Default(args).command(...)
+// where the object of .command() is a call_expression rather than a simple identifier.
+func (t *Transformer) inferModuleType(node *sitter.Node) string {
+	if node == nil {
+		return ""
+	}
+	switch node.Kind() {
+	case "identifier":
+		name := node.Utf8Text(t.source)
+		if modType, ok := t.varTypes[name]; ok {
+			return modType
+		}
+		if imp, ok := t.importedNames[name]; ok {
+			return imp.goPkgName
+		}
+	case "call_expression":
+		fnNode := node.ChildByFieldName("function")
+		return t.inferModuleType(fnNode)
+	case "member_expression":
+		objNode := node.ChildByFieldName("object")
+		if objNode == nil {
+			return ""
+		}
+		if objNode.Kind() == "identifier" {
+			name := objNode.Utf8Text(t.source)
+			if modType, ok := t.varTypes[name]; ok {
+				return modType
+			}
+			if imp, ok := t.importedNames[name]; ok {
+				return imp.goPkgName
+			}
+		}
+		return t.inferModuleType(objNode)
+	}
+	return ""
 }

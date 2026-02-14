@@ -195,3 +195,32 @@ func (v *JSValue) BigInt() int64 {
 func (v *JSValue) SymbolDesc() string {
 	return v.symbolDesc
 }
+
+// Array returns the underlying array elements, or nil if not an array.
+func (v *JSValue) Array() []*JSValue {
+	return v.arrayVal
+}
+
+// From wraps an arbitrary Go value as a *JSValue.
+// If the value is already a *JSValue, it is returned as-is.
+func From(v any) *JSValue {
+	if v == nil {
+		return NewNull()
+	}
+	switch val := v.(type) {
+	case *JSValue:
+		return val
+	case string:
+		return NewString(val)
+	case int:
+		return NewInt(val)
+	case float64:
+		return NewNumber(val)
+	case bool:
+		return NewBool(val)
+	case func(...*JSValue) *JSValue:
+		return NewFunction(val)
+	default:
+		return NewString(fmt.Sprint(val))
+	}
+}
