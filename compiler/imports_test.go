@@ -112,6 +112,20 @@ foo();`
 	assertContains(t, s, "Default()")
 }
 
+func TestSamePackageNamespaceImport(t *testing.T) {
+	ts := `import * as templates from "./completion-templates.js";
+const s = templates.completionShTemplate;`
+	out, err := Compile([]byte(ts), "mypkg", "mymod", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	// Namespace import in same-package mode: templates.foo → Foo
+	assertNotContains(t, s, `"mymod/completion-templates"`)
+	assertContains(t, s, "CompletionShTemplate")
+	assertNotContains(t, s, "templates.CompletionShTemplate")
+}
+
 func TestConsoleErrorStillUsesStdlibOS(t *testing.T) {
 	ts := `console.error("fail");`
 	out := compile(t, ts)

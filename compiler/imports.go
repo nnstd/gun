@@ -268,6 +268,10 @@ func (t *Transformer) resolveIdentifier(name string) ast.Expr {
 		}
 		// Namespace import (import * as X) — return the package ident
 		if imp.goSymbol == "" {
+			if imp.goPkgName == "" {
+				// Same-package namespace: return local name as-is (member access handles the rest)
+				return ident(name)
+			}
 			return ident(imp.goPkgName)
 		}
 		// Same-package reference — no package prefix needed

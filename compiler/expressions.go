@@ -356,8 +356,17 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 		return ident("nil")
 	}
 
-	obj := t.transformExpr(objNode)
 	prop := sanitizeIdent(propNode.Utf8Text(t.source))
+
+	// Same-package namespace import: templates.foo → Foo (direct symbol reference)
+	if objNode.Kind() == "identifier" {
+		name := objNode.Utf8Text(t.source)
+		if imp, ok := t.importedNames[name]; ok && imp.goSymbol == "" && imp.goPkgName == "" {
+			return ident(capitalize(prop))
+		}
+	}
+
+	obj := t.transformExpr(objNode)
 
 	if prop == "length" {
 		return callExpr(ident("len"), obj)
