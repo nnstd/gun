@@ -19,7 +19,7 @@ type Transformer struct {
 	imports            map[string]string          // Go import path → alias (empty = no alias)
 	importedNames      map[string]resolvedImport  // TS name → Go resolution
 	varTypes           map[string]string          // variable name → module type (e.g. "app" → "hono")
-	localScopes        []map[string]bool          // stack of local variable/parameter names that shadow imports
+	localScopes        []map[string]bool          // stack of local variable/parameter names that shadow imports (true = has type annotation, false = JSValue default)
 }
 
 func newTransformer(source []byte, pkgName, moduleName string, samePackageImports bool) *Transformer {
@@ -77,12 +77,21 @@ func (t *Transformer) addAliasedImport(pkg, alias string) {
 }
 
 // pushScope starts a new local scope (e.g. when entering a function body).
+// The names slice contains parameter/variable names. Use pushTypedScope to
+// also record which names have explicit type annotations.
 func (t *Transformer) pushScope(names []string) {
 	scope := make(map[string]bool, len(names))
 	for _, n := range names {
-		scope[n] = true
+		scope[n] = false // false = no type annotation (JSValue default)
 	}
 	t.localScopes = append(t.localScopes, scope)
+}
+
+// pushTypedScope starts a new local scope with type annotation info.
+// The map values indicate whether each name has an explicit type annotation
+// (true = typed, false = JSValue default).
+func (t *Transformer) pushTypedScope(names map[string]bool) {
+	t.localScopes = append(t.localScopes, names)
 }
 
 // popScope removes the most recent local scope.
@@ -95,8 +104,19 @@ func (t *Transformer) popScope() {
 // isLocalName returns true if the name is shadowed by a parameter/local in any active scope.
 func (t *Transformer) isLocalName(name string) bool {
 	for i := len(t.localScopes) - 1; i >= 0; i-- {
-		if t.localScopes[i][name] {
+		if _, ok := t.localScopes[i][name]; ok {
 			return true
+		}
+	}
+	return false
+}
+
+// isUntypedLocal returns true if the name is a local variable/parameter without
+// an explicit type annotation (i.e. it defaults to *jsvalue.JSValue).
+func (t *Transformer) isUntypedLocal(name string) bool {
+	for i := len(t.localScopes) - 1; i >= 0; i-- {
+		if typed, ok := t.localScopes[i][name]; ok {
+			return !typed
 		}
 	}
 	return false

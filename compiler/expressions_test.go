@@ -100,3 +100,17 @@ func TestAwaitStripped(t *testing.T) {
 	assertNotContains(t, out, "async")
 	assertContains(t, out, "func")
 }
+
+func TestNewMemberExpression(t *testing.T) {
+	ts := `const seg = new Intl.Segmenter();`
+	out := compile(t, ts)
+	assertNotContains(t, out, "Intl.")
+	assertContains(t, out, "IntlSegmenter")
+}
+
+func TestLengthOnUntypedParam(t *testing.T) {
+	ts := `function f(s) { return s.length; }`
+	out := compile(t, ts)
+	assertContains(t, out, `.Get("length")`)
+	assertNotContains(t, out, "len(s)")
+}

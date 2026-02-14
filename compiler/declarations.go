@@ -139,6 +139,11 @@ func (t *Transformer) transformFuncDecl(node *sitter.Node, exported bool) *ast.F
 		}
 	}
 
+	// Push a typed scope so isUntypedLocal/isLocalName work inside the body.
+	paramInfo := extractParamInfo(paramsNode, t.source)
+	t.pushTypedScope(paramInfo)
+	defer t.popScope()
+
 	var body *ast.BlockStmt
 	if bodyNode != nil {
 		body = t.transformBlock(bodyNode)
@@ -544,6 +549,20 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 						Lhs: []ast.Expr{ident(name)},
 						Tok: token.DEFINE,
 						Rhs: []ast.Expr{selectorExpr(valExpr, capitalize(key))},
+					})
+				}
+			case "object_assignment_pattern":
+				// { ambiguousIsNarrow = true } = options
+				leftNode := child.ChildByFieldName("left")
+				rightNode := child.ChildByFieldName("right")
+				if leftNode != nil && rightNode != nil {
+					name := leftNode.Utf8Text(t.source)
+					goName := sanitizeIdent(name)
+					defaultVal := t.transformExpr(rightNode)
+					stmts = append(stmts, &ast.AssignStmt{
+						Lhs: []ast.Expr{ident(goName)},
+						Tok: token.DEFINE,
+						Rhs: []ast.Expr{defaultVal},
 					})
 				}
 			}

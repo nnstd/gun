@@ -358,6 +358,18 @@ var goKeywords = map[string]bool{
 	"select": true, "struct": true, "switch": true, "type": true, "var": true,
 }
 
+// goBuiltins is the set of Go predeclared identifiers (types, constants, functions)
+// that should not be shadowed by user variables.
+var goBuiltins = map[string]bool{
+	"string": true, "int": true, "int8": true, "int16": true, "int32": true, "int64": true,
+	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
+	"float32": true, "float64": true, "complex64": true, "complex128": true,
+	"bool": true, "byte": true, "rune": true, "error": true, "any": true, "comparable": true,
+	"len": true, "cap": true, "make": true, "new": true, "append": true, "copy": true,
+	"delete": true, "panic": true, "recover": true, "print": true, "println": true,
+	"true": true, "false": true, "nil": true, "iota": true,
+}
+
 // extractParamNames extracts parameter names from a tree-sitter parameters node.
 func extractParamNames(node *sitter.Node, source []byte) []string {
 	if node == nil {
@@ -384,13 +396,43 @@ func extractParamNames(node *sitter.Node, source []byte) []string {
 	return names
 }
 
+// extractParamInfo returns a map of parameter names to whether they have
+// explicit type annotations. true = has type annotation (Go native type),
+// false = no annotation (defaults to *jsvalue.JSValue).
+func extractParamInfo(node *sitter.Node, source []byte) map[string]bool {
+	if node == nil {
+		return nil
+	}
+	info := make(map[string]bool)
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		param := node.NamedChild(i)
+		switch param.Kind() {
+		case "required_parameter", "optional_parameter":
+			nameNode := param.ChildByFieldName("pattern")
+			typeNode := param.ChildByFieldName("type")
+			if nameNode != nil && nameNode.Kind() == "identifier" {
+				info[nameNode.Utf8Text(source)] = typeNode != nil
+			}
+		case "rest_parameter":
+			nameNode := param.ChildByFieldName("pattern")
+			typeNode := param.ChildByFieldName("type")
+			if nameNode != nil {
+				info[nameNode.Utf8Text(source)] = typeNode != nil
+			}
+		case "identifier":
+			info[param.Utf8Text(source)] = false
+		}
+	}
+	return info
+}
+
 // sanitizeIdent makes a JS identifier safe for use as a Go identifier by
 // replacing illegal characters and escaping reserved keywords.
 func sanitizeIdent(name string) string {
 	if strings.ContainsRune(name, '$') {
 		name = strings.ReplaceAll(name, "$", "_")
 	}
-	if goKeywords[name] {
+	if goKeywords[name] || goBuiltins[name] {
 		return name + "_"
 	}
 	return name

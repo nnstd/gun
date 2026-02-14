@@ -318,10 +318,29 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 
 			// Method transforms on arbitrary receivers (string/collection methods)
 			// Skip if the object is a namespace import (it's a package, not a value)
+			isUntypedLocal := objNode.Kind() == "identifier" && t.isUntypedLocal(objText)
 			if _, isNsImport := t.importedNames[objText]; !isNsImport {
 				obj := t.transformExpr(objNode)
-				if r := transformBuiltinMethod(obj, prop, args, t.addImport); r != nil {
-					return r
+				// When the receiver is an untyped local (JSValue parameter),
+				// coerce it and non-literal args to Go string so builtin
+				// string methods like strings.Replace compile correctly.
+				if isUntypedLocal {
+					t.addImport("fmt")
+					obj = callExpr(selectorExpr(ident("fmt"), "Sprint"), obj)
+					coercedArgs := make([]ast.Expr, len(args))
+					copy(coercedArgs, args)
+					for i, arg := range coercedArgs {
+						if _, isLit := arg.(*ast.BasicLit); !isLit {
+							coercedArgs[i] = callExpr(selectorExpr(ident("fmt"), "Sprint"), arg)
+						}
+					}
+					if r := transformBuiltinMethod(obj, prop, coercedArgs, t.addImport); r != nil {
+						return r
+					}
+				} else {
+					if r := transformBuiltinMethod(obj, prop, args, t.addImport); r != nil {
+						return r
+					}
 				}
 			}
 
@@ -401,6 +420,11 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 	obj := t.transformExpr(objNode)
 
 	if prop == "length" {
+		// For JSValue parameters, use dynamic property access instead of len()
+		if objNode.Kind() == "identifier" && t.isUntypedLocal(objNode.Utf8Text(t.source)) {
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			return callExpr(selectorExpr(obj, "Get"), stringLit("length"))
+		}
 		return callExpr(ident("len"), obj)
 	}
 
@@ -749,6 +773,17 @@ func (t *Transformer) transformNewExpr(node *sitter.Node) ast.Expr {
 	}
 
 	name := ctorNode.Utf8Text(t.source)
+
+	// Handle member_expression constructors like new Intl.Segmenter()
+	// Flatten "Intl.Segmenter" → "IntlSegmenter" for builtin lookup and fallback
+	if ctorNode.Kind() == "member_expression" {
+		objNode := ctorNode.ChildByFieldName("object")
+		propNode := ctorNode.ChildByFieldName("property")
+		if objNode != nil && propNode != nil {
+			name = capitalize(objNode.Utf8Text(t.source)) + capitalize(propNode.Utf8Text(t.source))
+		}
+	}
+
 	args := t.transformArgs(argsNode)
 
 	// Try builtin new expressions first

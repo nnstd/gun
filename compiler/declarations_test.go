@@ -245,6 +245,23 @@ func TestEmptyInput(t *testing.T) {
 	assertContains(t, string(out), "package main")
 }
 
+func TestObjectDestructuringWithDefaults(t *testing.T) {
+	ts := `function f(options) {
+		const { ambiguousIsNarrow = true, countAnsiEscapeCodes = false } = options;
+		return ambiguousIsNarrow;
+	}`
+	out := compile(t, ts)
+	assertContains(t, out, "ambiguousIsNarrow = true")
+	assertContains(t, out, "countAnsiEscapeCodes = false")
+}
+
+func TestGoBuiltinParamSanitized(t *testing.T) {
+	ts := `function f(string) { return string; }`
+	out := compile(t, ts)
+	assertContains(t, out, "string_")
+	assertNotContains(t, out, "string *jsvalue")
+}
+
 func TestRestPatternParam(t *testing.T) {
 	ts := `export function foo(...args) { return args; }`
 	out := compile(t, ts)

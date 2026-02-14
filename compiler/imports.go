@@ -86,13 +86,7 @@ func init() {
 	registerModule("get-east-asian-width", "github.com/nnstd/gun/runtime/get_east_asian_width", "get_east_asian_width", nil)
 	registerModule("escalade/sync", "github.com/nnstd/gun/runtime/escalade_sync", "escalade_sync", nil)
 	registerModule("y18n", "github.com/nnstd/gun/runtime/y18n", "y18n", nil)
-	registerModule("yargs-parser", "github.com/nnstd/gun/runtime/yargs_parser", "yargs_parser", map[string]string{
-		"YargsParser":    "YargsParser",
-		"camelCase":      "CamelCase",
-		"decamelize":     "Decamelize",
-		"looksLikeNumber": "LooksLikeNumber",
-	})
-	registerModule("yargs", "github.com/nnstd/gun/runtime/yargs", "yargs", map[string]string{
+registerModule("yargs", "github.com/nnstd/gun/runtime/yargs", "yargs", map[string]string{
 		"default": "Default",
 	})
 }

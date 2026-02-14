@@ -31,6 +31,9 @@ func transformBuiltinMethod(obj ast.Expr, prop string, args []ast.Expr, addImpor
 	if r := transformCollectionMethod(obj, prop, args, addImport); r != nil {
 		return r
 	}
+	if r := transformRegexpMethod(obj, prop, args, addImport); r != nil {
+		return r
+	}
 	return nil
 }
 

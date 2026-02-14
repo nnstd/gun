@@ -108,3 +108,11 @@ func TestProcessExit(t *testing.T) {
 	out := compile(t, ts)
 	assertContains(t, out, "os.Exit(1)")
 }
+
+func TestRegexTest(t *testing.T) {
+	ts := `const re = /hello/;
+function check(s: string): boolean { return re.test(s); }`
+	out := compile(t, ts)
+	assertContains(t, out, ".MatchString(s)")
+	assertNotContains(t, out, ".Test(")
+}

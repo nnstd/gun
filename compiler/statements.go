@@ -299,10 +299,15 @@ func (t *Transformer) transformForInOrOfStmt(node *sitter.Node) ast.Stmt {
 
 	// Extract variable name from left side
 	varName := "v"
+	var destructurePattern *sitter.Node
 	if leftNode != nil {
 		switch leftNode.Kind() {
 		case "identifier":
-			varName = leftNode.Utf8Text(t.source)
+			varName = sanitizeIdent(leftNode.Utf8Text(t.source))
+		case "object_pattern", "array_pattern":
+			// for (const {segment: character} of ...) — left is directly a pattern
+			varName = "_item"
+			destructurePattern = leftNode
 		default:
 			// Could be a lexical_declaration wrapping a variable_declarator
 			for i := uint(0); i < leftNode.NamedChildCount(); i++ {
@@ -310,10 +315,15 @@ func (t *Transformer) transformForInOrOfStmt(node *sitter.Node) ast.Stmt {
 				if child.Kind() == "variable_declarator" {
 					nameNode := child.ChildByFieldName("name")
 					if nameNode != nil {
-						varName = nameNode.Utf8Text(t.source)
+						if nameNode.Kind() == "object_pattern" || nameNode.Kind() == "array_pattern" {
+							varName = "_item"
+							destructurePattern = nameNode
+						} else {
+							varName = sanitizeIdent(nameNode.Utf8Text(t.source))
+						}
 					}
 				} else if child.Kind() == "identifier" {
-					varName = child.Utf8Text(t.source)
+					varName = sanitizeIdent(child.Utf8Text(t.source))
 				}
 			}
 		}
@@ -335,6 +345,13 @@ func (t *Transformer) transformForInOrOfStmt(node *sitter.Node) ast.Stmt {
 		}
 	} else {
 		body = blockStmt()
+	}
+
+	// If the loop variable was a destructuring pattern, prepend destructuring
+	// statements at the top of the loop body.
+	if destructurePattern != nil {
+		destructStmts := t.transformDestructuringFromExpr(destructurePattern, ident(varName))
+		body.List = append(destructStmts, body.List...)
 	}
 
 	if isOf {

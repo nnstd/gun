@@ -143,6 +143,17 @@ func TestNilExpressionStatementsSkipped(t *testing.T) {
 	assertNotContains(t, out, "\tnil\n")
 }
 
+func TestForOfDestructuring(t *testing.T) {
+	ts := `function f(items: any[]): void {
+		for (const {name: label} of items) {
+			console.log(label);
+		}
+	}`
+	out := compile(t, ts)
+	assertContains(t, out, "for _, _item := range items")
+	assertContains(t, out, "label := _item.Name")
+}
+
 func TestModuleExportsFunction(t *testing.T) {
 	ts := `module.exports = function getCallerFile(position) {
 		return position;
