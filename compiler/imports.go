@@ -83,7 +83,7 @@ func init() {
 	registerModule("module", "github.com/nnstd/gun/runtime/module", "module", nil)
 	registerModule("get-caller-file", "github.com/nnstd/gun/runtime/get_caller_file", "get_caller_file", nil)
 	registerModule("cliui", "github.com/nnstd/gun/runtime/cliui", "cliui", nil)
-	registerModule("get-east-asian-width", "github.com/nnstd/gun/runtime/get_east_asian_width", "get_east_asian_width", nil)
+
 	registerModule("escalade/sync", "github.com/nnstd/gun/runtime/escalade_sync", "escalade_sync", nil)
 	registerModule("y18n", "github.com/nnstd/gun/runtime/y18n", "y18n", nil)
 registerModule("yargs", "github.com/nnstd/gun/runtime/yargs", "yargs", map[string]string{

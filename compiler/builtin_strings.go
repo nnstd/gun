@@ -67,6 +67,26 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 		if len(args) >= 2 {
 			return callExpr(selectorExpr(ident("strings"), "ReplaceAll"), obj, args[0], args[1])
 		}
+	case "codePointAt":
+		// str.codePointAt(pos) → int([]rune(str)[pos])
+		var idx ast.Expr = intLit("0")
+		if len(args) > 0 {
+			idx = args[0]
+		}
+		return callExpr(ident("int"), &ast.IndexExpr{
+			X:     callExpr(ident("[]rune"), obj),
+			Index: idx,
+		})
+	case "charCodeAt":
+		// str.charCodeAt(pos) → int(str[pos])
+		var idx ast.Expr = intLit("0")
+		if len(args) > 0 {
+			idx = args[0]
+		}
+		return callExpr(ident("int"), &ast.IndexExpr{
+			X:     callExpr(ident("[]rune"), obj),
+			Index: idx,
+		})
 	}
 	return nil
 }
