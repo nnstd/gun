@@ -218,6 +218,20 @@ func (t *Transformer) transformForStmt(node *sitter.Node) ast.Stmt {
 	var init ast.Stmt
 	if initNode != nil {
 		init = t.transformStmt(initNode)
+		// for-loop init must be a simple statement; convert var decls to :=
+		if ds, ok := init.(*ast.DeclStmt); ok {
+			if gd, ok := ds.Decl.(*ast.GenDecl); ok && len(gd.Specs) == 1 {
+				if vs, ok := gd.Specs[0].(*ast.ValueSpec); ok && len(vs.Names) == 1 {
+					var rhs ast.Expr
+					if len(vs.Values) > 0 {
+						rhs = vs.Values[0]
+					} else {
+						rhs = intLit("0")
+					}
+					init = assignDefine([]ast.Expr{ident(vs.Names[0].Name)}, []ast.Expr{rhs})
+				}
+			}
+		}
 	}
 
 	var cond ast.Expr

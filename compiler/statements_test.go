@@ -100,6 +100,15 @@ func TestBreakAndContinue(t *testing.T) {
 	assertContains(t, out, "continue")
 }
 
+func TestForLoopInitUsesShortVarDecl(t *testing.T) {
+	ts := `function f(): void {
+		for (let i = 0; i < 10; i++) { console.log(i); }
+	}`
+	out := compile(t, ts)
+	assertContains(t, out, "for i := 0;")
+	assertNotContains(t, out, "var i")
+}
+
 func TestThrowStatement(t *testing.T) {
 	ts := `function fail(): void { throw new Error("boom"); }`
 	out := compile(t, ts)
