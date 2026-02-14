@@ -143,3 +143,42 @@ func TestLengthOnUntypedParam(t *testing.T) {
 	assertContains(t, out, "s.Len()")
 	assertNotContains(t, out, "len(s)")
 }
+
+func TestEnsureBoolMethodCallGetsNilCheck(t *testing.T) {
+	// Method calls (e.g. obj.Match()) may return *jsvalue.JSValue → need != nil
+	ts := `function f(s) { if (s.Match()) { return s; } }`
+	out := compile(t, ts)
+	assertContains(t, out, "!= nil")
+}
+
+func TestEnsureBoolPlainCallNotWrapped(t *testing.T) {
+	// Plain function calls that return bool should NOT get != nil
+	ts := `function isOk(x: number): boolean { return x > 0; }
+function f(x: number): string { if (isOk(x)) { return "yes"; } return "no"; }`
+	out := compile(t, ts)
+	assertContains(t, out, "if isOk(x)")
+	assertNotContains(t, out, "isOk(x) != nil")
+}
+
+func TestArrowFuncTrailingReturn(t *testing.T) {
+	// Arrow functions with a return type but not all paths returning
+	// should get a trailing zero-value return to avoid "missing return".
+	ts := `const f = (x: number): string => { if (x > 0) { return "pos"; } };`
+	out := compile(t, ts)
+	assertContains(t, out, `return ""`)
+}
+
+func TestFuncExprTrailingReturn(t *testing.T) {
+	ts := `const f = function(x: number): string { if (x > 0) { return "pos"; } };`
+	out := compile(t, ts)
+	assertContains(t, out, `return ""`)
+}
+
+func TestLocalVarPropertyAccessUsesGet(t *testing.T) {
+	// Local variables declared inside a function body should be registered
+	// in scope so property access uses .Get() instead of struct field access.
+	ts := `function f(obj) { var result = obj.call(); return result.argv; }`
+	out := compile(t, ts)
+	assertContains(t, out, `result.Get("argv")`)
+	assertNotContains(t, out, "result.Argv")
+}

@@ -162,3 +162,13 @@ func TestModuleExportsFunction(t *testing.T) {
 	assertContains(t, out, "func Default(")
 	assertNotContains(t, out, "module")
 }
+
+func TestFuncVarMemberAssignmentSkipped(t *testing.T) {
+	// JS functions are objects and can have properties attached.
+	// Go functions cannot, so member assignments on function vars should be skipped.
+	ts := `var myFunc = (x) => { return x; };
+myFunc.extra = "hello";`
+	out := compile(t, ts)
+	assertNotContains(t, out, "myFunc.Extra")
+	assertNotContains(t, out, `myFunc.extra`)
+}

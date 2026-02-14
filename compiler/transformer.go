@@ -19,6 +19,7 @@ type Transformer struct {
 	imports            map[string]string          // Go import path → alias (empty = no alias)
 	importedNames      map[string]resolvedImport  // TS name → Go resolution
 	varTypes           map[string]string          // variable name → module type (e.g. "app" → "hono")
+	funcVarNames       map[string]bool            // package-level vars assigned function literals (can't have Go fields)
 	localScopes        []map[string]bool          // stack of local variable/parameter names that shadow imports (true = has type annotation, false = JSValue default)
 }
 
@@ -31,6 +32,7 @@ func newTransformer(source []byte, pkgName, moduleName string, samePackageImport
 		imports:            make(map[string]string),
 		importedNames:      make(map[string]resolvedImport),
 		varTypes:           make(map[string]string),
+		funcVarNames:       make(map[string]bool),
 	}
 }
 

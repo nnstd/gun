@@ -615,10 +615,16 @@ func ensureBool(expr ast.Expr) ast.Expr {
 	if isJSValueGet(expr) {
 		return callExpr(selectorExpr(expr, "Bool"))
 	}
-	// Non-boolean identifiers, selectors, and calls: treat as truthiness check → != nil
-	switch expr.(type) {
-	case *ast.Ident, *ast.SelectorExpr, *ast.CallExpr:
+	// Non-boolean identifiers and selectors: treat as truthiness check → != nil
+	switch e := expr.(type) {
+	case *ast.Ident, *ast.SelectorExpr:
 		return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
+	case *ast.CallExpr:
+		// Method calls (obj.Method()) may return *jsvalue.JSValue → need != nil.
+		// Plain function calls (isFoo()) typically return bool already.
+		if _, ok := e.Fun.(*ast.SelectorExpr); ok {
+			return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
+		}
 	}
 	return expr
 }

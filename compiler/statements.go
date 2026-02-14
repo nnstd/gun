@@ -30,6 +30,16 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 					if leftNode.Kind() == "member_expression" && leftNode.Utf8Text(t.source) == "module.exports" {
 						return nil
 					}
+					// Skip member assignments on package-level function vars.
+					// JS functions are objects and can have properties; Go functions cannot.
+					if leftNode.Kind() == "member_expression" {
+						objNode := leftNode.ChildByFieldName("object")
+						if objNode != nil && objNode.Kind() == "identifier" {
+							if t.funcVarNames[objNode.Utf8Text(t.source)] {
+								return nil
+							}
+						}
+					}
 					lhs := t.transformExpr(leftNode)
 					rhs := t.transformExpr(rightNode)
 					if lhs != nil && rhs != nil {

@@ -39,6 +39,8 @@ func TestJSONParse(t *testing.T) {
 	ts := `function deser(s: string): any { return JSON.parse(s); }`
 	out := compile(t, ts)
 	assertContains(t, out, "json.Unmarshal")
+	assertContains(t, out, "jsvalue.From(v)")
+	assertContains(t, out, "*jsvalue.JSValue")
 }
 
 func TestStringMethods(t *testing.T) {
