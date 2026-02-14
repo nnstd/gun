@@ -62,16 +62,13 @@ func (cmd *TranspileCmd) Run() error {
 	if info.IsDir() {
 		return transpileDir(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose)
 	}
-	// -o is always a directory; derive the .go filename from the input
-	outputPath := ""
-	if cmd.Output != "" {
-		if err := os.MkdirAll(cmd.Output, 0755); err != nil {
-			return err
-		}
-		base := strings.TrimSuffix(filepath.Base(cmd.Input), ".ts") + ".go"
-		outputPath = filepath.Join(cmd.Output, base)
+
+	// No -o: just print to stdout
+	if cmd.Output == "" {
+		return transpileFile(cmd.Input, "", cmd.Pkg, "", cmd.Verbose)
 	}
-	return transpileFile(cmd.Input, outputPath, cmd.Pkg, "", cmd.Verbose)
+
+	return transpileProject(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose)
 }
 
 func (cmd *BuildCmd) Run() error {
@@ -83,50 +80,23 @@ func (cmd *BuildCmd) Run() error {
 		return fmt.Errorf("build command requires a single .ts file, not a directory")
 	}
 
-	// Transpile to temp dir
 	tmpDir, err := os.MkdirTemp("", "gun-build-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	goFile := filepath.Join(tmpDir, "main.go")
-	if err := transpileFile(cmd.Input, goFile, cmd.Pkg, "gunbuild", cmd.Verbose); err != nil {
+	if err := transpileProject(cmd.Input, tmpDir, cmd.Pkg, cmd.Verbose); err != nil {
 		return err
 	}
 
-	// Transpile relative imports recursively
-	inputDir := filepath.Dir(cmd.Input)
-	if inputDir == "" {
-		inputDir = "."
-	}
-	if err := transpileRelativeImports(cmd.Input, inputDir, tmpDir, "gunbuild", cmd.Verbose); err != nil {
-		return err
-	}
-
-	if err := scaffoldGoMod(tmpDir, cmd.Verbose); err != nil {
-		return err
-	}
-
-	// Determine output binary path
 	binPath := cmd.Output
 	if binPath == "" {
 		binPath = strings.TrimSuffix(filepath.Base(cmd.Input), ".ts")
 	}
 	binPath, _ = filepath.Abs(binPath)
 
-	build := exec.Command("go", "build", "-o", binPath, ".")
-	build.Dir = tmpDir
-	var buildStderr strings.Builder
-	build.Stderr = &buildStderr
-	if cmd.Verbose {
-		fmt.Fprintf(os.Stderr, "building %s\n", goFile)
-	}
-	if err := build.Run(); err != nil {
-		return fmt.Errorf("go build failed:\n%s\ntranspiled source is at %s", buildStderr.String(), goFile)
-	}
-
-	return nil
+	return goBuild(tmpDir, binPath, cmd.Verbose)
 }
 
 func (cmd *RunCmd) Run() error {
@@ -138,54 +108,65 @@ func (cmd *RunCmd) Run() error {
 		return fmt.Errorf("run command requires a single .ts file, not a directory")
 	}
 
-	// Transpile to temp dir
 	tmpDir, err := os.MkdirTemp("", "gun-run-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
 	}
-
-	goFile := filepath.Join(tmpDir, "main.go")
-	if err := transpileFile(cmd.Input, goFile, cmd.Pkg, "gunrun", cmd.Verbose); err != nil {
-		os.RemoveAll(tmpDir)
-		return err
-	}
-
-	// Transpile relative imports recursively
-	inputDir := filepath.Dir(cmd.Input)
-	if inputDir == "" {
-		inputDir = "."
-	}
-	if err := transpileRelativeImports(cmd.Input, inputDir, tmpDir, "gunrun", cmd.Verbose); err != nil {
-		os.RemoveAll(tmpDir)
-		return err
-	}
-
-	// Set up go.mod so gun/runtime/* imports resolve
-	if err := scaffoldGoMod(tmpDir, cmd.Verbose); err != nil {
-		os.RemoveAll(tmpDir)
-		return err
-	}
-
-	// Build
-	binPath := filepath.Join(tmpDir, "main")
-	build := exec.Command("go", "build", "-o", binPath, ".")
-	build.Dir = tmpDir
-	var buildStderr strings.Builder
-	build.Stderr = &buildStderr
-	if cmd.Verbose {
-		fmt.Fprintf(os.Stderr, "building %s\n", goFile)
-	}
-	if err := build.Run(); err != nil {
-		return fmt.Errorf("go build failed:\n%s\ntranspiled source is at %s", buildStderr.String(), goFile)
-	}
 	defer os.RemoveAll(tmpDir)
 
-	// Run
+	if err := transpileProject(cmd.Input, tmpDir, cmd.Pkg, cmd.Verbose); err != nil {
+		return err
+	}
+
+	binPath := filepath.Join(tmpDir, "main")
+	if err := goBuild(tmpDir, binPath, cmd.Verbose); err != nil {
+		return err
+	}
+
 	run := exec.Command(binPath, cmd.Args...)
 	run.Stdin = os.Stdin
 	run.Stdout = os.Stdout
 	run.Stderr = os.Stderr
 	return run.Run()
+}
+
+// transpileProject transpiles a .ts entry file and all its relative imports
+// into outDir, then scaffolds a go.mod so the result is go-buildable.
+func transpileProject(input, outDir, pkg string, verbose bool) error {
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return err
+	}
+
+	moduleName := filepath.Base(outDir)
+	goFile := filepath.Join(outDir, strings.TrimSuffix(filepath.Base(input), ".ts")+".go")
+	if err := transpileFile(input, goFile, pkg, moduleName, verbose); err != nil {
+		return err
+	}
+
+	inputDir := filepath.Dir(input)
+	if inputDir == "" {
+		inputDir = "."
+	}
+	if err := transpileRelativeImports(input, inputDir, outDir, moduleName, verbose); err != nil {
+		return err
+	}
+
+	return scaffoldGoMod(outDir, verbose)
+}
+
+// goBuild runs `go build` in dir and writes the binary to binPath.
+func goBuild(dir, binPath string, verbose bool) error {
+	build := exec.Command("go", "build", "-o", binPath, ".")
+	build.Dir = dir
+	var stderr strings.Builder
+	build.Stderr = &stderr
+	if verbose {
+		fmt.Fprintf(os.Stderr, "building %s\n", dir)
+	}
+	if err := build.Run(); err != nil {
+		return fmt.Errorf("go build failed:\n%s\ntranspiled source is at %s", stderr.String(), dir)
+	}
+	return nil
 }
 
 func main() {
