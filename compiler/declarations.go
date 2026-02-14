@@ -195,6 +195,31 @@ func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.
 				pType = ptrType(pType)
 			}
 
+			// Handle rest pattern in required_parameter (JS without type annotations)
+			// tree-sitter parses `...args` as required_parameter > rest_pattern
+			if nameNode != nil && nameNode.Kind() == "rest_pattern" {
+				restName := "args"
+				for j := uint(0); j < nameNode.NamedChildCount(); j++ {
+					if child := nameNode.NamedChild(j); child.Kind() == "identifier" {
+						restName = sanitizeIdent(child.Utf8Text(t.source))
+						break
+					}
+				}
+				var elemType ast.Expr = ptrType(selectorExpr(ident("jsvalue"), "JSValue"))
+				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+				if typeNode != nil {
+					if mapped := t.getTypeAnnotation(typeNode); mapped != nil {
+						if at, ok := mapped.(*ast.ArrayType); ok {
+							elemType = at.Elt
+						} else {
+							elemType = mapped
+						}
+					}
+				}
+				fields = append(fields, field(restName, &ast.Ellipsis{Elt: elemType}))
+				continue
+			}
+
 			// Handle destructuring patterns in parameters
 			if nameNode != nil && (nameNode.Kind() == "object_pattern" || nameNode.Kind() == "array_pattern") {
 				syntheticName := fmt.Sprintf("_param%d", i)

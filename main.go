@@ -595,16 +595,7 @@ func resolveExportsField(raw json.RawMessage) string {
 	// Check "." entry (the main export)
 	dot, ok := obj["."]
 	if ok {
-		// "." could be a string or a conditions object
-		var dotStr string
-		if json.Unmarshal(dot, &dotStr) == nil {
-			return dotStr
-		}
-		var conds map[string]json.RawMessage
-		if json.Unmarshal(dot, &conds) == nil {
-			return pickCondition(conds)
-		}
-		return ""
+		return resolveExportValue(dot)
 	}
 
 	// No "." key — the object itself might be conditions
@@ -621,8 +612,102 @@ func pickCondition(conds map[string]json.RawMessage) string {
 		if json.Unmarshal(raw, &s) == nil {
 			return s
 		}
+		// Nested conditions object (e.g. "import": {"types": "...", "default": "..."})
+		var nested map[string]json.RawMessage
+		if json.Unmarshal(raw, &nested) == nil {
+			if def, ok := nested["default"]; ok {
+				if json.Unmarshal(def, &s) == nil {
+					return s
+				}
+			}
+		}
 	}
 	return ""
+}
+
+// resolveExportValue resolves an export value that can be a string, conditions object, or array of those.
+func resolveExportValue(raw json.RawMessage) string {
+	// String
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	// Conditions object
+	var conds map[string]json.RawMessage
+	if json.Unmarshal(raw, &conds) == nil {
+		if entry := pickCondition(conds); entry != "" {
+			return entry
+		}
+	}
+	// Array — try each element in order
+	var arr []json.RawMessage
+	if json.Unmarshal(raw, &arr) == nil {
+		for _, elem := range arr {
+			if entry := resolveExportValue(elem); entry != "" {
+				return entry
+			}
+		}
+	}
+	return ""
+}
+
+// resolveSubpathEntry handles subpath exports like "yargs/helpers" by looking up
+// the subpath in the root package's exports field.
+func resolveSubpathEntry(pkgName, fromDir string) (string, error) {
+	root, subpath := splitPkgSubpath(pkgName)
+	if subpath == "" {
+		return "", fmt.Errorf("cannot determine entry point for %s", pkgName)
+	}
+
+	rootDir, err := resolveNodeModule(root, fromDir)
+	if err != nil {
+		return "", err
+	}
+
+	data, err := os.ReadFile(filepath.Join(rootDir, "package.json"))
+	if err != nil {
+		return "", fmt.Errorf("cannot determine entry point for %s", pkgName)
+	}
+
+	var pj struct {
+		Exports json.RawMessage `json:"exports"`
+	}
+	if err := json.Unmarshal(data, &pj); err != nil || len(pj.Exports) == 0 {
+		return "", fmt.Errorf("cannot determine entry point for %s", pkgName)
+	}
+
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(pj.Exports, &obj) != nil {
+		return "", fmt.Errorf("cannot determine entry point for %s", pkgName)
+	}
+
+	key := "./" + subpath
+	raw, ok := obj[key]
+	if !ok {
+		return "", fmt.Errorf("no subpath export %s in %s", key, root)
+	}
+
+	if entry := resolveExportValue(raw); entry != "" {
+		return filepath.Join(rootDir, entry), nil
+	}
+
+	return "", fmt.Errorf("cannot resolve subpath export %s in %s", key, root)
+}
+
+// splitPkgSubpath splits "pkg/sub" into ("pkg", "sub") and "@scope/pkg/sub" into ("@scope/pkg", "sub").
+func splitPkgSubpath(pkgName string) (string, string) {
+	if strings.HasPrefix(pkgName, "@") {
+		parts := strings.SplitN(pkgName, "/", 3)
+		if len(parts) < 3 {
+			return pkgName, ""
+		}
+		return parts[0] + "/" + parts[1], parts[2]
+	}
+	parts := strings.SplitN(pkgName, "/", 2)
+	if len(parts) < 2 {
+		return pkgName, ""
+	}
+	return parts[0], parts[1]
 }
 
 // transpileNodeModuleImports discovers and transpiles node_modules dependencies
@@ -686,7 +771,11 @@ func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName
 			}
 			entryPath, err := getNodeModuleEntry(pkgDir)
 			if err != nil {
-				return err
+				// Try subpath export resolution (e.g. "yargs/helpers" → yargs exports["./helpers"])
+				entryPath, err = resolveSubpathEntry(pkgName, filepath.Dir(srcFile))
+				if err != nil {
+					return err
+				}
 			}
 
 			sanitized := compiler.SanitizeGoPkgName(pkgName)

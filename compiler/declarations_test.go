@@ -103,7 +103,7 @@ func TestParamGoKeywordEscaped(t *testing.T) {
 func TestRestParameter(t *testing.T) {
 	ts := `function sum(...nums: number[]): number { return 0; }`
 	out := compile(t, ts)
-	assertContains(t, out, "...nums")
+	assertContains(t, out, "nums ...float64")
 }
 
 func TestOptionalParameter(t *testing.T) {
@@ -243,4 +243,11 @@ func TestEmptyInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertContains(t, string(out), "package main")
+}
+
+func TestRestPatternParam(t *testing.T) {
+	ts := `export function foo(...args) { return args; }`
+	out := compile(t, ts)
+	assertContains(t, out, "args ...*jsvalue.JSValue")
+	assertNotContains(t, out, "...args")
 }

@@ -78,6 +78,7 @@ func init() {
 		"spawn":    "Command",
 	})
 	registerModule("assert", "testing", "testing", nil)
+	registerModule("module", "github.com/nnstd/gun/runtime/module", "module", nil)
 }
 
 func (t *Transformer) transformImport(node *sitter.Node) {
