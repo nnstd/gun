@@ -141,3 +141,4 @@ func TestConsoleErrorStillUsesStdlibOS(t *testing.T) {
 	assertContains(t, out, "os.Stderr")
 	assertNotContains(t, out, "nodeos")
 }
+

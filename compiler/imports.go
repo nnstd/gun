@@ -83,13 +83,7 @@ func init() {
 	registerModule("module", "github.com/nnstd/gun/runtime/module", "module", nil)
 	registerModule("get-caller-file", "github.com/nnstd/gun/runtime/get_caller_file", "get_caller_file", nil)
 	registerModule("cliui", "github.com/nnstd/gun/runtime/cliui", "cliui", nil)
-	registerModule("ansi-regex", "github.com/nnstd/gun/runtime/ansi_regex", "ansi_regex", nil)
-	registerModule("strip-ansi", "github.com/nnstd/gun/runtime/strip_ansi", "strip_ansi", nil)
-	registerModule("emoji-regex", "github.com/nnstd/gun/runtime/emoji_regex", "emoji_regex", nil)
 	registerModule("get-east-asian-width", "github.com/nnstd/gun/runtime/get_east_asian_width", "get_east_asian_width", nil)
-	registerModule("string-width", "github.com/nnstd/gun/runtime/string_width", "string_width", nil)
-	registerModule("wrap-ansi", "github.com/nnstd/gun/runtime/wrap_ansi", "wrap_ansi", nil)
-	registerModule("ansi-styles", "github.com/nnstd/gun/runtime/ansi_styles", "ansi_styles", nil)
 	registerModule("escalade/sync", "github.com/nnstd/gun/runtime/escalade_sync", "escalade_sync", nil)
 	registerModule("y18n", "github.com/nnstd/gun/runtime/y18n", "y18n", nil)
 	registerModule("yargs-parser", "github.com/nnstd/gun/runtime/yargs_parser", "yargs_parser", map[string]string{
@@ -100,9 +94,6 @@ func init() {
 	})
 	registerModule("yargs", "github.com/nnstd/gun/runtime/yargs", "yargs", map[string]string{
 		"default": "Default",
-	})
-	registerModule("yargs/helpers", "github.com/nnstd/gun/runtime/yargs_helpers", "yargs_helpers", map[string]string{
-		"hideBin": "HideBin",
 	})
 }
 
@@ -172,6 +163,7 @@ func (t *Transformer) transformImport(node *sitter.Node) {
 		case "identifier":
 			// import X from "mod" → default import
 			localName := child.Utf8Text(t.source)
+
 			ri := resolvedImport{
 				goImportPath: mod.goPath,
 				goPkgName:    mod.goName,
