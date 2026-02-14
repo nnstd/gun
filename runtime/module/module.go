@@ -25,6 +25,22 @@ func IsBuiltin(name string) bool {
 	return false
 }
 
+// Meta holds import.meta properties.
+type Meta struct {
+	Url string
+}
+
+// ImportMeta returns the import.meta object for the current process.
+var ImportMeta = &Meta{
+	Url: func() string {
+		exe, err := os.Executable()
+		if err != nil {
+			return ""
+		}
+		return "file://" + exe
+	}(),
+}
+
 // RequireFunc is the type returned by CreateRequire. It loads a module by path
 // and returns its contents. JSON files are parsed into map[string]any;
 // other modules return nil.

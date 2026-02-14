@@ -46,6 +46,11 @@ func (t *Transformer) transformExpr(node *sitter.Node) ast.Expr {
 	case "null", "undefined":
 		return ident("nil")
 
+	case "meta_property":
+		// import.meta → module.ImportMeta
+		t.addImport("github.com/nnstd/gun/runtime/module")
+		return selectorExpr(ident("module"), "ImportMeta")
+
 	case "this":
 		return ident("this")
 
@@ -609,6 +614,11 @@ func ensureBool(expr ast.Expr) ast.Expr {
 	// JSValue Get() call → .Bool()
 	if isJSValueGet(expr) {
 		return callExpr(selectorExpr(expr, "Bool"))
+	}
+	// Non-boolean identifiers and selectors: treat as truthiness check → != nil
+	switch expr.(type) {
+	case *ast.Ident, *ast.SelectorExpr:
+		return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
 	}
 	return expr
 }

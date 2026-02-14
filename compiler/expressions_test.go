@@ -124,6 +124,19 @@ func TestNewMemberExpression(t *testing.T) {
 	assertContains(t, out, "intl.NewSegmenter()")
 }
 
+func TestImportMeta(t *testing.T) {
+	ts := `const url = import.meta.url;`
+	out := compile(t, ts)
+	assertContains(t, out, "module.ImportMeta.Url")
+	assertNotContains(t, out, "nil.Url")
+}
+
+func TestEnsureBoolTruthinessCheck(t *testing.T) {
+	ts := `function f(x: any): string { return x ? "yes" : "no"; }`
+	out := compile(t, ts)
+	assertContains(t, out, "x != nil")
+}
+
 func TestLengthOnUntypedParam(t *testing.T) {
 	ts := `function f(s) { return s.length; }`
 	out := compile(t, ts)
