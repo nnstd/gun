@@ -477,6 +477,8 @@ func (t *Transformer) transformTemplateString(node *sitter.Node) ast.Expr {
 	}
 
 	format := strings.Join(formatParts, "")
+	// Escape double quotes so the format string is a valid Go string literal
+	format = strings.ReplaceAll(format, `"`, `\"`)
 	allArgs := append([]ast.Expr{stringLit(format)}, args...)
 	return callExpr(selectorExpr(ident("fmt"), "Sprintf"), allArgs...)
 }

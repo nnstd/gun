@@ -20,6 +20,13 @@ func TestTemplateString(t *testing.T) {
 	assertContains(t, out, "%v")
 }
 
+func TestTemplateStringWithDoubleQuotes(t *testing.T) {
+	ts := "const msg = `\"${name}\"`;"
+	out := compile(t, ts)
+	assertContains(t, out, "fmt.Sprintf")
+	assertContains(t, out, `\"%v\"`)
+}
+
 func TestTernaryExpression(t *testing.T) {
 	ts := `function pick(ok: boolean): string { return ok ? "yes" : "no"; }`
 	out := compile(t, ts)
