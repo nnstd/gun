@@ -71,6 +71,14 @@ func importSpec(path string) *ast.ImportSpec {
 	return &ast.ImportSpec{Path: stringLit(path)}
 }
 
+func importSpecAlias(path, alias string) *ast.ImportSpec {
+	spec := &ast.ImportSpec{Path: stringLit(path)}
+	if alias != "" {
+		spec.Name = ident(alias)
+	}
+	return spec
+}
+
 func varDecl(name string, typ ast.Expr, value ast.Expr) *ast.GenDecl {
 	spec := &ast.ValueSpec{
 		Names: []*ast.Ident{ident(name)},

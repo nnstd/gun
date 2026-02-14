@@ -13,7 +13,7 @@ type Transformer struct {
 	pkgName       string
 	moduleName    string // Go module name from go.mod (for relative imports)
 	decls         []ast.Decl
-	imports       map[string]bool           // tracks needed Go imports
+	imports       map[string]string          // Go import path → alias (empty = no alias)
 	importedNames map[string]resolvedImport // TS name → Go resolution
 }
 
@@ -22,7 +22,7 @@ func newTransformer(source []byte, pkgName, moduleName string) *Transformer {
 		source:        source,
 		pkgName:       pkgName,
 		moduleName:    moduleName,
-		imports:       make(map[string]bool),
+		imports:       make(map[string]string),
 		importedNames: make(map[string]resolvedImport),
 	}
 }
@@ -46,8 +46,8 @@ func (t *Transformer) transform(root *sitter.Node) *ast.File {
 	// Add imports
 	if len(t.imports) > 0 {
 		var specs []ast.Spec
-		for pkg := range t.imports {
-			specs = append(specs, importSpec(pkg))
+		for pkg, alias := range t.imports {
+			specs = append(specs, importSpecAlias(pkg, alias))
 		}
 		importDecl := &ast.GenDecl{Tok: token.IMPORT, Specs: specs}
 		if len(specs) > 1 {
@@ -60,7 +60,13 @@ func (t *Transformer) transform(root *sitter.Node) *ast.File {
 }
 
 func (t *Transformer) addImport(pkg string) {
-	t.imports[pkg] = true
+	if _, ok := t.imports[pkg]; !ok {
+		t.imports[pkg] = ""
+	}
+}
+
+func (t *Transformer) addAliasedImport(pkg, alias string) {
+	t.imports[pkg] = alias
 }
 
 func (t *Transformer) transformTopLevel(node *sitter.Node) {

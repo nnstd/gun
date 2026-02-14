@@ -3,6 +3,7 @@ package compiler
 import (
 	"go/ast"
 	"path"
+	"path/filepath"
 	"strings"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
@@ -21,47 +22,62 @@ type moduleMapping struct {
 	goName string // Go package name used in code
 }
 
-// knownModules maps Node.js / TS built-in module names to Go stdlib packages.
+// knownModules maps Node.js / TS built-in module names to Go packages.
 var knownModules = map[string]moduleMapping{
-	"fs":           {goPath: "os", goName: "os"},
-	"path":         {goPath: "path/filepath", goName: "filepath"},
-	"http":         {goPath: "net/http", goName: "http"},
-	"https":        {goPath: "net/http", goName: "http"},
-	"url":          {goPath: "net/url", goName: "url"},
-	"os":           {goPath: "os", goName: "os"},
-	"util":         {goPath: "fmt", goName: "fmt"},
-	"events":       {goPath: "sync", goName: "sync"},
-	"stream":       {goPath: "io", goName: "io"},
-	"buffer":       {goPath: "bytes", goName: "bytes"},
-	"crypto":       {goPath: "crypto", goName: "crypto"},
+	"fs":            {goPath: "gun/runtime/fs", goName: "fs"},
+	"path":          {goPath: "gun/runtime/path", goName: "nodepath"},
+	"os":            {goPath: "gun/runtime/os", goName: "nodeos"},
+	"http":          {goPath: "net/http", goName: "http"},
+	"https":         {goPath: "net/http", goName: "http"},
+	"url":           {goPath: "net/url", goName: "url"},
+	"util":          {goPath: "fmt", goName: "fmt"},
+	"events":        {goPath: "sync", goName: "sync"},
+	"stream":        {goPath: "io", goName: "io"},
+	"buffer":        {goPath: "bytes", goName: "bytes"},
+	"crypto":        {goPath: "crypto", goName: "crypto"},
 	"child_process": {goPath: "os/exec", goName: "exec"},
-	"assert":       {goPath: "testing", goName: "testing"},
+	"assert":        {goPath: "testing", goName: "testing"},
 }
 
 // knownSymbols maps (module, symbol) pairs to specific Go translations.
 // If a symbol isn't listed here, it gets capitalized and called on the package.
 var knownSymbols = map[string]map[string]resolvedImport{
 	"fs": {
-		"readFile":      {goImportPath: "os", goPkgName: "os", goSymbol: "ReadFile"},
-		"readFileSync":  {goImportPath: "os", goPkgName: "os", goSymbol: "ReadFile"},
-		"writeFile":     {goImportPath: "os", goPkgName: "os", goSymbol: "WriteFile"},
-		"writeFileSync": {goImportPath: "os", goPkgName: "os", goSymbol: "WriteFile"},
-		"existsSync":    {goImportPath: "os", goPkgName: "os", goSymbol: "Stat"},
-		"mkdirSync":     {goImportPath: "os", goPkgName: "os", goSymbol: "MkdirAll"},
-		"readdirSync":   {goImportPath: "os", goPkgName: "os", goSymbol: "ReadDir"},
-		"unlinkSync":    {goImportPath: "os", goPkgName: "os", goSymbol: "Remove"},
-		"statSync":      {goImportPath: "os", goPkgName: "os", goSymbol: "Stat"},
+		"readFile":       {goImportPath: "gun/runtime/fs", goPkgName: "fs", goSymbol: "ReadFileSync"},
+		"readFileSync":   {goImportPath: "gun/runtime/fs", goPkgName: "fs", goSymbol: "ReadFileSync"},
+		"writeFile":      {goImportPath: "gun/runtime/fs", goPkgName: "fs", goSymbol: "WriteFileSync"},
+		"writeFileSync":  {goImportPath: "gun/runtime/fs", goPkgName: "fs", goSymbol: "WriteFileSync"},
+		"existsSync":     {goImportPath: "gun/runtime/fs", goPkgName: "fs", goSymbol: "ExistsSync"},
+		"mkdirSync":      {goImportPath: "gun/runtime/fs", goPkgName: "fs", goSymbol: "MkdirSync"},
+		"readdirSync":    {goImportPath: "gun/runtime/fs", goPkgName: "fs", goSymbol: "ReaddirSync"},
+		"unlinkSync":     {goImportPath: "gun/runtime/fs", goPkgName: "fs", goSymbol: "UnlinkSync"},
+		"statSync":       {goImportPath: "gun/runtime/fs", goPkgName: "fs", goSymbol: "StatSync"},
+		"rmdirSync":      {goImportPath: "gun/runtime/fs", goPkgName: "fs", goSymbol: "RmdirSync"},
+		"appendFileSync": {goImportPath: "gun/runtime/fs", goPkgName: "fs", goSymbol: "AppendFileSync"},
+		"copyFileSync":   {goImportPath: "gun/runtime/fs", goPkgName: "fs", goSymbol: "CopyFileSync"},
+		"renameSync":     {goImportPath: "gun/runtime/fs", goPkgName: "fs", goSymbol: "RenameSync"},
 	},
 	"path": {
-		"join":     {goImportPath: "path/filepath", goPkgName: "filepath", goSymbol: "Join"},
-		"resolve":  {goImportPath: "path/filepath", goPkgName: "filepath", goSymbol: "Abs"},
-		"basename": {goImportPath: "path/filepath", goPkgName: "filepath", goSymbol: "Base"},
-		"dirname":  {goImportPath: "path/filepath", goPkgName: "filepath", goSymbol: "Dir"},
-		"extname":  {goImportPath: "path/filepath", goPkgName: "filepath", goSymbol: "Ext"},
-		"relative": {goImportPath: "path/filepath", goPkgName: "filepath", goSymbol: "Rel"},
-		"isAbsolute": {goImportPath: "path/filepath", goPkgName: "filepath", goSymbol: "IsAbs"},
-		"normalize":  {goImportPath: "path/filepath", goPkgName: "filepath", goSymbol: "Clean"},
-		"parse":      {goImportPath: "path/filepath", goPkgName: "filepath", goSymbol: "Split"},
+		"join":       {goImportPath: "gun/runtime/path", goPkgName: "nodepath", goSymbol: "Join"},
+		"resolve":    {goImportPath: "gun/runtime/path", goPkgName: "nodepath", goSymbol: "Resolve"},
+		"basename":   {goImportPath: "gun/runtime/path", goPkgName: "nodepath", goSymbol: "Basename"},
+		"dirname":    {goImportPath: "gun/runtime/path", goPkgName: "nodepath", goSymbol: "Dirname"},
+		"extname":    {goImportPath: "gun/runtime/path", goPkgName: "nodepath", goSymbol: "Extname"},
+		"relative":   {goImportPath: "gun/runtime/path", goPkgName: "nodepath", goSymbol: "Relative"},
+		"isAbsolute": {goImportPath: "gun/runtime/path", goPkgName: "nodepath", goSymbol: "IsAbsolute"},
+		"normalize":  {goImportPath: "gun/runtime/path", goPkgName: "nodepath", goSymbol: "Normalize"},
+		"parse":      {goImportPath: "gun/runtime/path", goPkgName: "nodepath", goSymbol: "Parse"},
+		"sep":        {goImportPath: "gun/runtime/path", goPkgName: "nodepath", goSymbol: "Sep"},
+		"delimiter":  {goImportPath: "gun/runtime/path", goPkgName: "nodepath", goSymbol: "Delimiter"},
+	},
+	"os": {
+		"homedir":  {goImportPath: "gun/runtime/os", goPkgName: "nodeos", goSymbol: "Homedir"},
+		"tmpdir":   {goImportPath: "gun/runtime/os", goPkgName: "nodeos", goSymbol: "Tmpdir"},
+		"hostname": {goImportPath: "gun/runtime/os", goPkgName: "nodeos", goSymbol: "Hostname"},
+		"platform": {goImportPath: "gun/runtime/os", goPkgName: "nodeos", goSymbol: "Platform"},
+		"arch":     {goImportPath: "gun/runtime/os", goPkgName: "nodeos", goSymbol: "Arch"},
+		"cpus":     {goImportPath: "gun/runtime/os", goPkgName: "nodeos", goSymbol: "Cpus"},
+		"EOL":      {goImportPath: "gun/runtime/os", goPkgName: "nodeos", goSymbol: "EOL"},
 	},
 	"url": {
 		"parse":  {goImportPath: "net/url", goPkgName: "url", goSymbol: "Parse"},
@@ -227,7 +243,12 @@ func (t *Transformer) resolveModulePath(modulePath string) moduleMapping {
 func (t *Transformer) resolveIdentifier(name string) ast.Expr {
 	if imp, ok := t.importedNames[name]; ok {
 		if imp.goImportPath != "" {
-			t.addImport(imp.goImportPath)
+			// Use aliased import when package name differs from import path's last segment
+			if imp.goPkgName != "" && imp.goPkgName != filepath.Base(imp.goImportPath) {
+				t.addAliasedImport(imp.goImportPath, imp.goPkgName)
+			} else {
+				t.addImport(imp.goImportPath)
+			}
 		}
 		// Namespace import (import * as X) — return the package ident
 		if imp.goSymbol == "" {
