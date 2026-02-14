@@ -83,6 +83,16 @@ func TestAssignmentExpressionInIIFE(t *testing.T) {
 	assertNotContains(t, out, "= =")
 }
 
+func TestAssignmentExpressionJSValueTarget(t *testing.T) {
+	// Package-level untyped var gets *jsvalue.JSValue; the IIFE must match
+	// and wrap the RHS with jsvalue.From() so any-typed values convert.
+	ts := `var _a;
+var x = (_a = someExpr());`
+	out := compile(t, ts)
+	assertContains(t, out, "func() *jsvalue.JSValue")
+	assertContains(t, out, "jsvalue.From(")
+}
+
 func TestDollarSignInIdentifier(t *testing.T) {
 	ts := `let $0 = "bin";
 let default$0 = "node";

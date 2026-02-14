@@ -263,15 +263,31 @@ func (t *Transformer) transformAssignmentExpr(node *sitter.Node) ast.Expr {
 	}
 	// In JS, assignment is an expression that returns the assigned value.
 	// In Go, assignment is a statement. Wrap in an IIFE to preserve semantics.
+	// Use *jsvalue.JSValue return type when the target is an untyped variable
+	// (package-level var or untyped param), since those default to *jsvalue.JSValue.
+	var retType ast.Expr = ident("any")
+	assignRHS := right
+	retExpr := right
+	if leftNode := node.ChildByFieldName("left"); leftNode != nil && leftNode.Kind() == "identifier" {
+		name := leftNode.Utf8Text(t.source)
+		if t.isUntypedLocal(name) || !t.isLocalName(name) {
+			retType = jsValuePtrType()
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			// Wrap RHS with jsvalue.From() so any-typed expressions
+			// (e.g. conditional IIFEs) convert to *jsvalue.JSValue.
+			assignRHS = t.wrapAsJSValue(right)
+			retExpr = left
+		}
+	}
 	return &ast.CallExpr{
 		Fun: &ast.FuncLit{
 			Type: &ast.FuncType{
 				Params:  fieldList(),
-				Results: fieldList(field("", ident("any"))),
+				Results: fieldList(field("", retType)),
 			},
 			Body: blockStmt(
-				&ast.AssignStmt{Lhs: []ast.Expr{left}, Tok: token.ASSIGN, Rhs: []ast.Expr{right}},
-				returnStmt(right),
+				&ast.AssignStmt{Lhs: []ast.Expr{left}, Tok: token.ASSIGN, Rhs: []ast.Expr{assignRHS}},
+				returnStmt(retExpr),
 			),
 		},
 	}
