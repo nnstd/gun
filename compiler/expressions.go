@@ -122,9 +122,18 @@ func (t *Transformer) transformExpr(node *sitter.Node) ast.Expr {
 
 	case "regex":
 		t.addImport("regexp")
+		pattern := node.Utf8Text(t.source)
+		// Strip JS regex delimiters: /pattern/flags → pattern
+		if len(pattern) >= 2 && pattern[0] == '/' {
+			end := strings.LastIndex(pattern, "/")
+			if end > 0 {
+				pattern = pattern[1:end]
+			}
+		}
+		// Use raw string literal (backtick) so backslashes are literal
 		return callExpr(
 			selectorExpr(ident("regexp"), "MustCompile"),
-			stringLit(node.Utf8Text(t.source)),
+			basicLit(token.STRING, "`"+pattern+"`"),
 		)
 
 	case "conditional_type", "intersection_type", "union_type":
