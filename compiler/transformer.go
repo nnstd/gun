@@ -3,6 +3,8 @@ package compiler
 import (
 	"go/ast"
 	"go/token"
+	"path/filepath"
+	"strings"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
@@ -130,10 +132,21 @@ func (t *Transformer) transformExport(node *sitter.Node) {
 		return
 	}
 
+	// Detect wildcard re-export: export * from "mod" — skip silently (no Go equivalent)
+	for i := uint(0); i < node.ChildCount(); i++ {
+		if node.Child(i).Kind() == "*" {
+			if node.ChildByFieldName("source") != nil {
+				return
+			}
+		}
+	}
+
 	// export can wrap a declaration — find the inner declaration and capitalize its name
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		switch child.Kind() {
+		case "export_clause":
+			t.transformExportClause(node, child)
 		case "function_declaration":
 			if d := t.transformFuncDecl(child, true); d != nil {
 				t.decls = append(t.decls, d)
@@ -172,67 +185,193 @@ func (t *Transformer) transformExport(node *sitter.Node) {
 	}
 }
 
-// transformExportDefault handles `export default { port: X, fetch: Y }` patterns.
-// Generates fmt.Println + http.ListenAndServe in main().
+// transformExportDefault handles `export default ...` statements.
+// Dispatches by the kind of the exported value.
 func (t *Transformer) transformExportDefault(node *sitter.Node) {
-	// Find the object literal child
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
-		if child.Kind() != "object" {
+		switch child.Kind() {
+		case "function_declaration":
+			nameNode := child.ChildByFieldName("name")
+			if nameNode != nil {
+				if d := t.transformFuncDecl(child, true); d != nil {
+					t.decls = append(t.decls, d)
+				}
+			} else {
+				if d := t.transformAnonFuncAsDefault(child); d != nil {
+					t.decls = append(t.decls, d)
+				}
+			}
+			return
+		case "function", "function_expression":
+			if d := t.transformAnonFuncAsDefault(child); d != nil {
+				t.decls = append(t.decls, d)
+			}
+			return
+		case "class_declaration":
+			classDecls := t.transformClassDecl(child)
+			t.decls = append(t.decls, classDecls...)
+			return
+		case "object":
+			if t.transformExportDefaultObject(child) {
+				return
+			}
+			t.decls = append(t.decls, varDecl("Default", nil, t.transformExpr(child)))
+			return
+		case "identifier":
+			name := child.Utf8Text(t.source)
+			t.decls = append(t.decls, varDecl("Default", nil, ident(name)))
+			return
+		default:
+			if expr := t.transformExpr(child); expr != nil {
+				t.decls = append(t.decls, varDecl("Default", nil, expr))
+			}
+			return
+		}
+	}
+}
+
+// transformExportDefaultObject tries to match the Hono server pattern
+// `export default { port: X, fetch: Y }`. Returns true if matched.
+func (t *Transformer) transformExportDefaultObject(node *sitter.Node) bool {
+	var portExpr ast.Expr
+	var fetchExpr ast.Expr
+
+	for j := uint(0); j < node.NamedChildCount(); j++ {
+		pair := node.NamedChild(j)
+		if pair.Kind() != "pair" {
+			continue
+		}
+		keyNode := pair.ChildByFieldName("key")
+		valNode := pair.ChildByFieldName("value")
+		if keyNode == nil || valNode == nil {
+			continue
+		}
+		key := keyNode.Utf8Text(t.source)
+		switch key {
+		case "port":
+			portExpr = t.transformExpr(valNode)
+		case "fetch":
+			fetchExpr = t.transformExpr(valNode)
+		}
+	}
+
+	if portExpr == nil || fetchExpr == nil {
+		return false
+	}
+
+	t.addImport("fmt")
+	t.addImport("net/http")
+
+	mainFn := t.getOrCreateMain()
+
+	portStr := "3000"
+	if lit, ok := portExpr.(*ast.BasicLit); ok {
+		portStr = lit.Value
+	}
+	printStmt := exprStmt(callExpr(
+		selectorExpr(ident("fmt"), "Println"),
+		stringLit("Listening on :"+portStr),
+	))
+
+	listenStmt := exprStmt(callExpr(
+		selectorExpr(ident("http"), "ListenAndServe"),
+		stringLit(":"+portStr),
+		fetchExpr,
+	))
+
+	mainFn.Body.List = append(mainFn.Body.List, printStmt, listenStmt)
+	return true
+}
+
+// transformAnonFuncAsDefault handles `export default function() { ... }` (no name).
+func (t *Transformer) transformAnonFuncAsDefault(node *sitter.Node) *ast.FuncDecl {
+	paramsNode := node.ChildByFieldName("parameters")
+	returnTypeNode := node.ChildByFieldName("return_type")
+	bodyNode := node.ChildByFieldName("body")
+
+	params := t.transformParams(paramsNode)
+	var results *ast.FieldList
+	if returnTypeNode != nil {
+		retType := t.getTypeAnnotation(returnTypeNode)
+		if retType != nil {
+			results = fieldList(field("", retType))
+		}
+	}
+
+	var body *ast.BlockStmt
+	if bodyNode != nil {
+		body = t.transformBlock(bodyNode)
+	} else {
+		body = blockStmt()
+	}
+
+	return funcDecl("Default", params, results, body)
+}
+
+// transformExportClause handles `export { foo, bar }`, `export { foo as bar }`,
+// and `export { x } from "mod"`.
+func (t *Transformer) transformExportClause(exportNode *sitter.Node, clause *sitter.Node) {
+	sourceNode := exportNode.ChildByFieldName("source")
+	var reexportMod string
+	if sourceNode != nil {
+		reexportMod = strings.Trim(sourceNode.Utf8Text(t.source), "'\"")
+	}
+
+	for i := uint(0); i < clause.NamedChildCount(); i++ {
+		spec := clause.NamedChild(i)
+		if spec.Kind() != "export_specifier" {
 			continue
 		}
 
-		var portExpr ast.Expr
-		var fetchExpr ast.Expr
-
-		for j := uint(0); j < child.NamedChildCount(); j++ {
-			pair := child.NamedChild(j)
-			if pair.Kind() != "pair" {
-				continue
-			}
-			keyNode := pair.ChildByFieldName("key")
-			valNode := pair.ChildByFieldName("value")
-			if keyNode == nil || valNode == nil {
-				continue
-			}
-			key := keyNode.Utf8Text(t.source)
-			switch key {
-			case "port":
-				portExpr = t.transformExpr(valNode)
-			case "fetch":
-				fetchExpr = t.transformExpr(valNode)
-			}
+		nameNode := spec.ChildByFieldName("name")
+		aliasNode := spec.ChildByFieldName("alias")
+		if nameNode == nil {
+			continue
 		}
 
-		if portExpr == nil || fetchExpr == nil {
+		origName := nameNode.Utf8Text(t.source)
+		exportedName := origName
+		if aliasNode != nil {
+			exportedName = aliasNode.Utf8Text(t.source)
+		}
+		goName := capitalize(exportedName)
+
+		if reexportMod != "" {
+			t.transformReexport(origName, goName, reexportMod)
+		} else {
+			t.decls = append(t.decls, varDecl(goName, nil, ident(origName)))
+		}
+	}
+}
+
+// transformReexport handles a single re-exported symbol from a module.
+func (t *Transformer) transformReexport(origName, goName, modulePath string) {
+	// Check knownSymbols for a specific mapping
+	if symTable, ok := knownSymbols[modulePath]; ok {
+		if sym, ok := symTable[origName]; ok {
+			if sym.goPkgName != "" && sym.goPkgName != filepath.Base(sym.goImportPath) {
+				t.addAliasedImport(sym.goImportPath, sym.goPkgName)
+			} else {
+				t.addImport(sym.goImportPath)
+			}
+			t.decls = append(t.decls, varDecl(goName, nil, selectorExpr(ident(sym.goPkgName), sym.goSymbol)))
 			return
 		}
-
-		t.addImport("fmt")
-		t.addImport("net/http")
-
-		mainFn := t.getOrCreateMain()
-
-		// fmt.Println("Listening on :PORT")
-		portStr := "3000"
-		if lit, ok := portExpr.(*ast.BasicLit); ok {
-			portStr = lit.Value
-		}
-		printStmt := exprStmt(callExpr(
-			selectorExpr(ident("fmt"), "Println"),
-			stringLit("Listening on :"+portStr),
-		))
-
-		// http.ListenAndServe(":PORT", handler)
-		listenStmt := exprStmt(callExpr(
-			selectorExpr(ident("http"), "ListenAndServe"),
-			stringLit(":"+portStr),
-			fetchExpr,
-		))
-
-		mainFn.Body.List = append(mainFn.Body.List, printStmt, listenStmt)
-		return
 	}
+
+	// Fall back to module mapping with capitalized name
+	mod, isKnown := knownModules[modulePath]
+	if !isKnown {
+		mod = t.resolveModulePath(modulePath)
+	}
+
+	if mod.goName != "" && mod.goName != filepath.Base(mod.goPath) {
+		t.addAliasedImport(mod.goPath, mod.goName)
+	} else {
+		t.addImport(mod.goPath)
+	}
+	t.decls = append(t.decls, varDecl(goName, nil, selectorExpr(ident(mod.goName), capitalize(origName))))
 }
 
 // getOrCreateMain returns the main() (or init()) function, creating it if needed.
