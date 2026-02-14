@@ -1,6 +1,9 @@
 package compiler
 
-import "go/ast"
+import (
+	"go/ast"
+	"go/token"
+)
 
 // transformBuiltinCall dispatches calls on known global objects (console, Math, JSON, Object).
 // Returns nil if the call is not a known builtin.
@@ -56,10 +59,33 @@ func transformBuiltinNew(name string, args []ast.Expr, t *Transformer) ast.Expr 
 		return callExpr(selectorExpr(ident("time"), "Now"))
 	case "RegExp":
 		t.addImport("regexp")
+		pattern := ast.Expr(stringLit(""))
 		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("regexp"), "MustCompile"), args[0])
+			pattern = args[0]
 		}
-		return callExpr(selectorExpr(ident("regexp"), "MustCompile"), stringLit(""))
+		compiled := callExpr(selectorExpr(ident("regexp"), "MustCompile"), pattern)
+		// When flags argument is present, wrap in IIFE to preserve the reference
+		// (Go rejects unused variables). JS regex flags like "g" have no direct
+		// Go equivalent — global matching is handled at the call site.
+		if len(args) > 1 {
+			return &ast.CallExpr{
+				Fun: &ast.FuncLit{
+					Type: &ast.FuncType{
+						Params:  fieldList(),
+						Results: fieldList(field("", ptrType(selectorExpr(ident("regexp"), "Regexp")))),
+					},
+					Body: blockStmt(
+						&ast.AssignStmt{
+							Lhs: []ast.Expr{ident("_")},
+							Tok: token.ASSIGN,
+							Rhs: []ast.Expr{args[1]},
+						},
+						returnStmt(compiled),
+					),
+				},
+			}
+		}
+		return compiled
 	case "Hono":
 		t.addImport("github.com/nnstd/gun/runtime/hono")
 		return callExpr(selectorExpr(ident("hono"), "New"))
