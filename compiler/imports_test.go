@@ -94,6 +94,24 @@ const h = os.homedir();`
 	assertContains(t, out, "nodeos.Homedir")
 }
 
+func TestSamePackageImportsNoImportGenerated(t *testing.T) {
+	ts := `import { helper } from "./utils";
+import foo from "./foo";
+helper();
+foo();`
+	out, err := Compile([]byte(ts), "mypkg", "mymod", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	// Same-package: no import path should be generated for relative imports
+	assertNotContains(t, s, `"mymod/utils"`)
+	assertNotContains(t, s, `"mymod/foo"`)
+	// Symbols should be referenced directly without package prefix
+	assertContains(t, s, "Helper()")
+	assertContains(t, s, "Default()")
+}
+
 func TestConsoleErrorStillUsesStdlibOS(t *testing.T) {
 	ts := `console.error("fail");`
 	out := compile(t, ts)

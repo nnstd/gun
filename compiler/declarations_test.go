@@ -130,7 +130,7 @@ func TestMainFunctionGenerated(t *testing.T) {
 }
 
 func TestNonMainPackageUsesInit(t *testing.T) {
-	out, err := Compile([]byte(`console.log("hi");`), "lib", "")
+	out, err := Compile([]byte(`console.log("hi");`), "lib", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestParamObjectDestructuring(t *testing.T) {
 }
 
 func TestEmptyInput(t *testing.T) {
-	out, err := Compile([]byte(""), "main", "")
+	out, err := Compile([]byte(""), "main", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

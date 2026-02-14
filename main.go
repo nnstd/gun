@@ -66,7 +66,7 @@ func (cmd *TranspileCmd) Run() error {
 
 	// No -o: just print to stdout
 	if cmd.Output == "" {
-		return transpileFile(cmd.Input, "", cmd.Pkg, "", cmd.Verbose)
+		return transpileFile(cmd.Input, "", cmd.Pkg, "", cmd.Verbose, false)
 	}
 
 	return transpileProject(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose)
@@ -140,7 +140,7 @@ func transpileProject(input, outDir, pkg string, verbose bool) error {
 
 	moduleName := "gunrun"
 	goFile := filepath.Join(outDir, strings.TrimSuffix(filepath.Base(input), ".ts")+".go")
-	if err := transpileFile(input, goFile, pkg, moduleName, verbose); err != nil {
+	if err := transpileFile(input, goFile, pkg, moduleName, verbose, false); err != nil {
 		return err
 	}
 
@@ -186,7 +186,7 @@ func main() {
 	}
 }
 
-func transpileFile(inputPath, outputPath, pkgName, moduleName string, verbose bool) error {
+func transpileFile(inputPath, outputPath, pkgName, moduleName string, verbose, samePackageImports bool) error {
 	source, err := os.ReadFile(inputPath)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", inputPath, err)
@@ -199,7 +199,7 @@ func transpileFile(inputPath, outputPath, pkgName, moduleName string, verbose bo
 	if moduleName == "" {
 		moduleName = detectModuleName(inputPath)
 	}
-	result, err := compiler.Compile(source, pkgName, moduleName)
+	result, err := compiler.Compile(source, pkgName, moduleName, samePackageImports)
 	if err != nil {
 		return fmt.Errorf("compile %s: %w", inputPath, err)
 	}
@@ -239,7 +239,7 @@ func transpileDir(dirPath, outputDir, pkgName string, verbose bool) error {
 			return err
 		}
 
-		return transpileFile(path, outPath, pkgName, "", verbose)
+		return transpileFile(path, outPath, pkgName, "", verbose, false)
 	})
 }
 
@@ -462,7 +462,7 @@ func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose b
 		}
 
 		outFile := filepath.Join(outDir, filepath.Base(strings.TrimSuffix(resolved, ".ts"))+".go")
-		if err := transpileFile(resolved, outFile, pkgName, moduleName, verbose); err != nil {
+		if err := transpileFile(resolved, outFile, pkgName, moduleName, verbose, false); err != nil {
 			return err
 		}
 
@@ -790,7 +790,7 @@ func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName
 
 			// Transpile the entry file
 			outFile := filepath.Join(outDir, strings.TrimSuffix(filepath.Base(entryPath), filepath.Ext(entryPath))+".go")
-			if err := transpileFile(entryPath, outFile, sanitized, moduleName, verbose); err != nil {
+			if err := transpileFile(entryPath, outFile, sanitized, moduleName, verbose, true); err != nil {
 				return fmt.Errorf("transpile node_module %s: %w", pkgName, err)
 			}
 
@@ -839,7 +839,7 @@ func transpileNodeModuleRelativeImports(entryFile, outDir, moduleName, pkgName s
 			transpiled = append(transpiled, absResolved)
 
 			outFile := filepath.Join(outDir, strings.TrimSuffix(filepath.Base(resolved), filepath.Ext(resolved))+".go")
-			if err := transpileFile(resolved, outFile, pkgName, moduleName, verbose); err != nil {
+			if err := transpileFile(resolved, outFile, pkgName, moduleName, verbose, true); err != nil {
 				return err
 			}
 			if err := walk(resolved); err != nil {

@@ -227,9 +227,14 @@ func IsKnownModule(name string) bool {
 func (t *Transformer) resolveModulePath(modulePath string) moduleMapping {
 	// Relative import: ./foo or ../bar
 	if strings.HasPrefix(modulePath, ".") {
+		// Same-package mode: relative imports are within the same Go package
+		if t.samePackageImports {
+			return moduleMapping{goPath: "", goName: ""}
+		}
 		// Strip file extension
 		clean := strings.TrimSuffix(modulePath, ".ts")
 		clean = strings.TrimSuffix(clean, ".js")
+		clean = strings.TrimSuffix(clean, ".mjs")
 		// Use the last path segment as the Go package name
 		pkgName := path.Base(clean)
 		// Build Go import path: module/relative/path
@@ -237,8 +242,7 @@ func (t *Transformer) resolveModulePath(modulePath string) moduleMapping {
 		if modName == "" {
 			modName = "main"
 		}
-		goPath := modName + "/" + strings.TrimPrefix(clean, "./")
-		goPath = strings.TrimPrefix(goPath, "../")
+		goPath := path.Clean(modName + "/" + strings.TrimPrefix(clean, "./"))
 		return moduleMapping{goPath: goPath, goName: pkgName}
 	}
 
@@ -265,6 +269,10 @@ func (t *Transformer) resolveIdentifier(name string) ast.Expr {
 		// Namespace import (import * as X) — return the package ident
 		if imp.goSymbol == "" {
 			return ident(imp.goPkgName)
+		}
+		// Same-package reference — no package prefix needed
+		if imp.goPkgName == "" {
+			return ident(imp.goSymbol)
 		}
 		// Named import — return pkg.Symbol
 		return selectorExpr(ident(imp.goPkgName), imp.goSymbol)

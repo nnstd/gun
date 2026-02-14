@@ -11,23 +11,25 @@ import (
 
 // Transformer walks a tree-sitter TypeScript AST and builds a go/ast.File.
 type Transformer struct {
-	source        []byte
-	pkgName       string
-	moduleName    string                     // Go module name from go.mod (for relative imports)
-	decls         []ast.Decl
-	imports       map[string]string          // Go import path → alias (empty = no alias)
-	importedNames map[string]resolvedImport  // TS name → Go resolution
-	varTypes      map[string]string          // variable name → module type (e.g. "app" → "hono")
+	source             []byte
+	pkgName            string
+	moduleName         string                     // Go module name from go.mod (for relative imports)
+	samePackageImports bool                        // treat relative imports as same-package refs
+	decls              []ast.Decl
+	imports            map[string]string          // Go import path → alias (empty = no alias)
+	importedNames      map[string]resolvedImport  // TS name → Go resolution
+	varTypes           map[string]string          // variable name → module type (e.g. "app" → "hono")
 }
 
-func newTransformer(source []byte, pkgName, moduleName string) *Transformer {
+func newTransformer(source []byte, pkgName, moduleName string, samePackageImports bool) *Transformer {
 	return &Transformer{
-		source:        source,
-		pkgName:       pkgName,
-		moduleName:    moduleName,
-		imports:       make(map[string]string),
-		importedNames: make(map[string]resolvedImport),
-		varTypes:      make(map[string]string),
+		source:             source,
+		pkgName:            pkgName,
+		moduleName:         moduleName,
+		samePackageImports: samePackageImports,
+		imports:            make(map[string]string),
+		importedNames:      make(map[string]resolvedImport),
+		varTypes:           make(map[string]string),
 	}
 }
 
@@ -395,6 +397,12 @@ func (t *Transformer) transformReexport(origName, goName, modulePath string) {
 	mod, isKnown := knownModules[modulePath]
 	if !isKnown {
 		mod = t.resolveModulePath(modulePath)
+	}
+
+	// Same-package: no import needed, reference symbol directly
+	if mod.goPath == "" {
+		t.decls = append(t.decls, varDecl(goName, nil, ident(capitalize(origName))))
+		return
 	}
 
 	if mod.goName != "" && mod.goName != filepath.Base(mod.goPath) {
