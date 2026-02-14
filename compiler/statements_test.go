@@ -123,3 +123,20 @@ func TestTryCatch(t *testing.T) {
 	assertContains(t, out, "defer func()")
 	assertContains(t, out, "recover()")
 }
+
+func TestUseStrictSkipped(t *testing.T) {
+	ts := `"use strict";
+console.log("hello");`
+	out := compile(t, ts)
+	assertNotContains(t, out, "use strict")
+	assertContains(t, out, "hello")
+}
+
+func TestModuleExportsFunction(t *testing.T) {
+	ts := `module.exports = function getCallerFile(position) {
+		return position;
+	}`
+	out := compile(t, ts)
+	assertContains(t, out, "func Default(")
+	assertNotContains(t, out, "module")
+}

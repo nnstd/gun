@@ -449,7 +449,7 @@ func (t *Transformer) transformObjectLiteral(node *sitter.Node) ast.Expr {
 			}
 		case "shorthand_property_identifier":
 			name := child.Utf8Text(t.source)
-			elts = append(elts, keyValue(stringLit(name), ident(name)))
+			elts = append(elts, keyValue(stringLit(name), t.resolveIdentifier(name)))
 		}
 	}
 	return compositeLit(mapType(ident("string"), t.jsValueType()), elts...)

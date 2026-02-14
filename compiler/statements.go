@@ -17,11 +17,19 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 	case "expression_statement":
 		if node.NamedChildCount() > 0 {
 			child := node.NamedChild(0)
+			// Skip "use strict" directives
+			if child.Kind() == "string" || child.Kind() == "string_literal" {
+				return nil
+			}
 			// Assignment expressions should become assignment statements
 			if child.Kind() == "assignment_expression" {
 				leftNode := child.ChildByFieldName("left")
 				rightNode := child.ChildByFieldName("right")
 				if leftNode != nil && rightNode != nil {
+					// module.exports = expr → treat as export default (handled at top level)
+					if leftNode.Kind() == "member_expression" && leftNode.Utf8Text(t.source) == "module.exports" {
+						return nil
+					}
 					lhs := t.transformExpr(leftNode)
 					rhs := t.transformExpr(rightNode)
 					if lhs != nil && rhs != nil {

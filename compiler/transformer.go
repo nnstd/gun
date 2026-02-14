@@ -111,8 +111,31 @@ func (t *Transformer) transformTopLevel(node *sitter.Node) {
 	case "import_statement":
 		t.transformImport(node)
 	case "expression_statement":
+		// Check for module.exports = expr (CJS default export)
+		if node.NamedChildCount() > 0 {
+			child := node.NamedChild(0)
+			if child.Kind() == "assignment_expression" {
+				leftNode := child.ChildByFieldName("left")
+				rightNode := child.ChildByFieldName("right")
+				if leftNode != nil && rightNode != nil &&
+					leftNode.Kind() == "member_expression" &&
+					leftNode.Utf8Text(t.source) == "module.exports" {
+					// Treat as export default
+					switch rightNode.Kind() {
+					case "function_expression", "function":
+						if d := t.transformAnonFuncAsDefault(rightNode); d != nil {
+							t.decls = append(t.decls, d)
+						}
+					default:
+						if expr := t.transformExpr(rightNode); expr != nil {
+							t.decls = append(t.decls, varDecl("Default", nil, expr))
+						}
+					}
+					return
+				}
+			}
+		}
 		// Top-level expression statements become init() body or are skipped
-		// For now, wrap in an init function if it's a call
 		if stmt := t.transformStmt(node); stmt != nil {
 			initFn := t.getOrCreateMain()
 			initFn.Body.List = append(initFn.Body.List, stmt)

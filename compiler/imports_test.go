@@ -126,6 +126,14 @@ const s = templates.completionShTemplate;`
 	assertNotContains(t, s, "templates.CompletionShTemplate")
 }
 
+func TestShorthandPropertyResolvesImport(t *testing.T) {
+	ts := `import { readFileSync } from "fs";
+export default { readFileSync };`
+	out := compile(t, ts)
+	// Value should be resolved to fs.ReadFileSync, not bare readFileSync
+	assertContains(t, out, "fs.ReadFileSync")
+}
+
 func TestConsoleErrorStillUsesStdlibOS(t *testing.T) {
 	ts := `console.error("fail");`
 	out := compile(t, ts)
