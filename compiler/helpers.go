@@ -155,6 +155,108 @@ func keyValue(key, value ast.Expr) *ast.KeyValueExpr {
 	return &ast.KeyValueExpr{Key: key, Value: value}
 }
 
+// inferReturnType walks a Go AST block looking for return statements and
+// infers the return type from the first returned expression it finds.
+// Returns nil if no return with a value is found or the type can't be inferred.
+func inferReturnType(body *ast.BlockStmt) *ast.FieldList {
+	if body == nil {
+		return nil
+	}
+	if typ := findReturnType(body.List); typ != nil {
+		return fieldList(field("", typ))
+	}
+	return nil
+}
+
+func findReturnType(stmts []ast.Stmt) ast.Expr {
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *ast.ReturnStmt:
+			if len(s.Results) == 1 {
+				if typ := inferExprType(s.Results[0]); typ != nil {
+					return typ
+				}
+			}
+		case *ast.IfStmt:
+			if typ := findReturnType(s.Body.List); typ != nil {
+				return typ
+			}
+			if es, ok := s.Else.(*ast.BlockStmt); ok {
+				if typ := findReturnType(es.List); typ != nil {
+					return typ
+				}
+			}
+		case *ast.BlockStmt:
+			if typ := findReturnType(s.List); typ != nil {
+				return typ
+			}
+		}
+	}
+	return nil
+}
+
+func inferExprType(expr ast.Expr) ast.Expr {
+	switch e := expr.(type) {
+	case *ast.BasicLit:
+		switch e.Kind {
+		case token.STRING:
+			return ident("string")
+		case token.INT:
+			return ident("float64")
+		case token.FLOAT:
+			return ident("float64")
+		}
+	case *ast.Ident:
+		switch e.Name {
+		case "true", "false":
+			return ident("bool")
+		}
+	case *ast.UnaryExpr:
+		if e.Op == token.NOT {
+			return ident("bool")
+		}
+	case *ast.BinaryExpr:
+		switch e.Op {
+		case token.EQL, token.NEQ, token.LSS, token.LEQ, token.GTR, token.GEQ, token.LAND, token.LOR:
+			return ident("bool")
+		default:
+			// Arithmetic — check if either operand is a string (concatenation)
+			lt := inferExprType(e.X)
+			rt := inferExprType(e.Y)
+			if isStringType(lt) || isStringType(rt) {
+				return ident("string")
+			}
+			if lt != nil {
+				return lt
+			}
+			if rt != nil {
+				return rt
+			}
+		}
+	case *ast.CallExpr:
+		if sel, ok := e.Fun.(*ast.SelectorExpr); ok {
+			if pkg, ok := sel.X.(*ast.Ident); ok {
+				switch {
+				case pkg.Name == "fmt" && sel.Sel.Name == "Sprintf":
+					return ident("string")
+				case pkg.Name == "strconv":
+					return ident("string")
+				}
+			}
+		}
+	case *ast.ParenExpr:
+		return inferExprType(e.X)
+	}
+	return nil
+}
+
+func isStringType(expr ast.Expr) bool {
+	if id, ok := expr.(*ast.Ident); ok {
+		return id.Name == "string"
+	}
+	return false
+}
+
 // capitalize returns the string with the first letter uppercased (Go export convention).
 func capitalize(s string) string {
 	if s == "" {

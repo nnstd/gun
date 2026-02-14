@@ -511,6 +511,10 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 		body = blockStmt()
 	}
 
+	if results == nil {
+		results = inferReturnType(body)
+	}
+
 	return &ast.FuncLit{
 		Type: &ast.FuncType{Params: params, Results: results},
 		Body: body,
@@ -532,6 +536,10 @@ func (t *Transformer) transformFuncExpr(node *sitter.Node) ast.Expr {
 		body = t.transformBlock(bn)
 	} else {
 		body = blockStmt()
+	}
+
+	if results == nil {
+		results = inferReturnType(body)
 	}
 
 	return &ast.FuncLit{

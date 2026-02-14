@@ -40,7 +40,7 @@ func (cmd *BuildCmd) Run() error {
 	if info.IsDir() {
 		return transpileDir(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose)
 	}
-	return transpileFile(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose)
+	return transpileFile(cmd.Input, cmd.Output, cmd.Pkg, "", cmd.Verbose)
 }
 
 func (cmd *RunCmd) Run() error {
@@ -59,7 +59,17 @@ func (cmd *RunCmd) Run() error {
 	}
 
 	goFile := filepath.Join(tmpDir, "main.go")
-	if err := transpileFile(cmd.Input, goFile, cmd.Pkg, cmd.Verbose); err != nil {
+	if err := transpileFile(cmd.Input, goFile, cmd.Pkg, "gunrun", cmd.Verbose); err != nil {
+		os.RemoveAll(tmpDir)
+		return err
+	}
+
+	// Transpile relative imports recursively
+	inputDir := filepath.Dir(cmd.Input)
+	if inputDir == "" {
+		inputDir = "."
+	}
+	if err := transpileRelativeImports(cmd.Input, inputDir, tmpDir, "gunrun", cmd.Verbose); err != nil {
 		os.RemoveAll(tmpDir)
 		return err
 	}
@@ -104,7 +114,7 @@ func main() {
 	}
 }
 
-func transpileFile(inputPath, outputPath, pkgName string, verbose bool) error {
+func transpileFile(inputPath, outputPath, pkgName, moduleName string, verbose bool) error {
 	source, err := os.ReadFile(inputPath)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", inputPath, err)
@@ -114,7 +124,9 @@ func transpileFile(inputPath, outputPath, pkgName string, verbose bool) error {
 		fmt.Fprintf(os.Stderr, "compiling %s\n", inputPath)
 	}
 
-	moduleName := detectModuleName(inputPath)
+	if moduleName == "" {
+		moduleName = detectModuleName(inputPath)
+	}
 	result, err := compiler.Compile(source, pkgName, moduleName)
 	if err != nil {
 		return fmt.Errorf("compile %s: %w", inputPath, err)
@@ -155,7 +167,7 @@ func transpileDir(dirPath, outputDir, pkgName string, verbose bool) error {
 			return err
 		}
 
-		return transpileFile(path, outPath, pkgName, verbose)
+		return transpileFile(path, outPath, pkgName, "", verbose)
 	})
 }
 
@@ -259,6 +271,128 @@ func findModuleDir(start string) (string, bool) {
 		}
 		dir = parent
 	}
+}
+
+// findRelativeImports scans TS source for relative import paths (./foo or ../foo).
+func findRelativeImports(source []byte) []string {
+	var imports []string
+	lines := strings.Split(string(source), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// Match: from "./..." or from '../...'
+		idx := strings.Index(line, "from ")
+		if idx < 0 {
+			continue
+		}
+		rest := strings.TrimSpace(line[idx+5:])
+		if len(rest) < 3 {
+			continue
+		}
+		quote := rest[0]
+		if quote != '\'' && quote != '"' {
+			continue
+		}
+		end := strings.IndexByte(rest[1:], quote)
+		if end < 0 {
+			continue
+		}
+		modPath := rest[1 : end+1]
+		if strings.HasPrefix(modPath, ".") {
+			imports = append(imports, modPath)
+		}
+	}
+	return imports
+}
+
+// resolveImportFile resolves a relative import path like ./foo to an actual .ts file.
+// Tries importPath.ts first, then importPath/index.ts.
+func resolveImportFile(importPath, fromDir string) (string, error) {
+	// Strip leading ./ or ../
+	clean := importPath
+	clean = strings.TrimSuffix(clean, ".ts")
+	clean = strings.TrimSuffix(clean, ".js")
+
+	candidate := filepath.Join(fromDir, clean+".ts")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate, nil
+	}
+
+	candidate = filepath.Join(fromDir, clean, "index.ts")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate, nil
+	}
+
+	return "", fmt.Errorf("cannot resolve import %q from %s", importPath, fromDir)
+}
+
+// transpileRelativeImports recursively discovers and transpiles relative imports
+// from a TS entry file into the correct subdirectories of tmpDir.
+func transpileRelativeImports(entryFile, inputDir, tmpDir, moduleName string, verbose bool) error {
+	absInputDir, err := filepath.Abs(inputDir)
+	if err != nil {
+		return err
+	}
+	visited := map[string]bool{}
+	return walkImports(entryFile, absInputDir, absInputDir, tmpDir, moduleName, verbose, visited)
+}
+
+func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose bool, visited map[string]bool) error {
+	absFile, _ := filepath.Abs(tsFile)
+	if visited[absFile] {
+		return nil
+	}
+	visited[absFile] = true
+
+	source, err := os.ReadFile(tsFile)
+	if err != nil {
+		return err
+	}
+
+	fileDir := filepath.Dir(tsFile)
+	imports := findRelativeImports(source)
+
+	for _, imp := range imports {
+		resolved, err := resolveImportFile(imp, fileDir)
+		if err != nil {
+			return err
+		}
+
+		// Determine the relative path from baseDir to the resolved file's directory
+		absResolved, _ := filepath.Abs(resolved)
+		resolvedDir := filepath.Dir(absResolved)
+		relDir, err := filepath.Rel(filepath.Join(baseDir), resolvedDir)
+		if err != nil {
+			return err
+		}
+
+		// The Go package name is the last segment of the relative path
+		pkgName := filepath.Base(relDir)
+		if pkgName == "." {
+			// File is in the same directory — use the import name as subdir
+			clean := strings.TrimPrefix(imp, "./")
+			clean = strings.TrimPrefix(clean, "../")
+			clean = strings.TrimSuffix(clean, ".ts")
+			clean = strings.TrimSuffix(clean, ".js")
+			pkgName = filepath.Base(clean)
+			relDir = clean
+		}
+
+		outDir := filepath.Join(tmpDir, relDir)
+		if err := os.MkdirAll(outDir, 0755); err != nil {
+			return err
+		}
+
+		outFile := filepath.Join(outDir, filepath.Base(strings.TrimSuffix(resolved, ".ts"))+".go")
+		if err := transpileFile(resolved, outFile, pkgName, moduleName, verbose); err != nil {
+			return err
+		}
+
+		// Recurse into this file's imports
+		if err := walkImports(resolved, inputDir, baseDir, tmpDir, moduleName, verbose, visited); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // detectModuleName walks up from the input file to find a go.mod and returns

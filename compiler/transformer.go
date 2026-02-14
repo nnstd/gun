@@ -261,6 +261,7 @@ func (t *Transformer) transformExportDefaultObject(node *sitter.Node) bool {
 	}
 
 	t.addImport("fmt")
+	t.addImport("log")
 	t.addImport("net/http")
 
 	mainFn := t.getOrCreateMain()
@@ -275,9 +276,12 @@ func (t *Transformer) transformExportDefaultObject(node *sitter.Node) bool {
 	))
 
 	listenStmt := exprStmt(callExpr(
-		selectorExpr(ident("http"), "ListenAndServe"),
-		stringLit(":"+portStr),
-		fetchExpr,
+		selectorExpr(ident("log"), "Fatal"),
+		callExpr(
+			selectorExpr(ident("http"), "ListenAndServe"),
+			stringLit(":"+portStr),
+			fetchExpr,
+		),
 	))
 
 	mainFn.Body.List = append(mainFn.Body.List, printStmt, listenStmt)
@@ -304,6 +308,10 @@ func (t *Transformer) transformAnonFuncAsDefault(node *sitter.Node) *ast.FuncDec
 		body = t.transformBlock(bodyNode)
 	} else {
 		body = blockStmt()
+	}
+
+	if results == nil {
+		results = inferReturnType(body)
 	}
 
 	return funcDecl("Default", params, results, body)

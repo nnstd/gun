@@ -222,7 +222,11 @@ func (t *Transformer) resolveModulePath(modulePath string) moduleMapping {
 		// Use the last path segment as the Go package name
 		pkgName := path.Base(clean)
 		// Build Go import path: module/relative/path
-		goPath := t.moduleName + "/" + strings.TrimPrefix(clean, "./")
+		modName := t.moduleName
+		if modName == "" {
+			modName = "main"
+		}
+		goPath := modName + "/" + strings.TrimPrefix(clean, "./")
 		goPath = strings.TrimPrefix(goPath, "../")
 		return moduleMapping{goPath: goPath, goName: pkgName}
 	}

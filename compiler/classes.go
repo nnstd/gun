@@ -186,6 +186,10 @@ func (t *Transformer) transformMethod(node *sitter.Node, className, recv string)
 		body = blockStmt()
 	}
 
+	if results == nil {
+		results = inferReturnType(body)
+	}
+
 	return methodDecl(recv, mName, ptrType(ident(className)), params, results, body)
 }
 

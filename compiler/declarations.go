@@ -140,6 +140,10 @@ func (t *Transformer) transformFuncDecl(node *sitter.Node, exported bool) *ast.F
 		body = blockStmt()
 	}
 
+	if results == nil {
+		results = inferReturnType(body)
+	}
+
 	return funcDecl(name, params, results, body)
 }
 
