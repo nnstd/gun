@@ -1,46 +1,94 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"gun/compiler"
+
+	"github.com/alecthomas/kong"
 )
 
-func main() {
-	output := flag.String("o", "", "output file path (default: stdout)")
-	pkgName := flag.String("pkg", "main", "Go package name")
-	verbose := flag.Bool("v", false, "verbose mode (print tree-sitter AST)")
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: gun [flags] <input.ts>\n\nFlags:\n")
-		flag.PrintDefaults()
-	}
-	flag.Parse()
+var cli struct {
+	Build BuildCmd `cmd:"" default:"withargs" help:"Transpile TypeScript to Go."`
+	Run   RunCmd   `cmd:"" help:"Transpile, build, and run a TypeScript file."`
+}
 
-	args := flag.Args()
-	if len(args) == 0 {
-		flag.Usage()
-		os.Exit(1)
-	}
+type BuildCmd struct {
+	Input   string `arg:"" help:"Input .ts file or directory."`
+	Output  string `short:"o" help:"Output file or directory."`
+	Pkg     string `short:"p" default:"main" help:"Go package name."`
+	Verbose bool   `short:"v" help:"Verbose output."`
+}
 
-	inputPath := args[0]
+type RunCmd struct {
+	Input   string   `arg:"" help:"Input .ts file."`
+	Pkg     string   `short:"p" default:"main" help:"Go package name."`
+	Verbose bool     `short:"v" help:"Verbose output."`
+	Args    []string `arg:"" optional:"" passthrough:"" help:"Arguments to pass to the compiled program."`
+}
 
-	info, err := os.Stat(inputPath)
+func (cmd *BuildCmd) Run() error {
+	info, err := os.Stat(cmd.Input)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		return err
 	}
-
 	if info.IsDir() {
-		err = transpileDir(inputPath, *output, *pkgName, *verbose)
-	} else {
-		err = transpileFile(inputPath, *output, *pkgName, *verbose)
+		return transpileDir(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose)
+	}
+	return transpileFile(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose)
+}
+
+func (cmd *RunCmd) Run() error {
+	info, err := os.Stat(cmd.Input)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("run command requires a single .ts file, not a directory")
 	}
 
+	// Transpile to temp dir
+	tmpDir, err := os.MkdirTemp("", "gun-run-*")
 	if err != nil {
+		return fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	goFile := filepath.Join(tmpDir, "main.go")
+	if err := transpileFile(cmd.Input, goFile, cmd.Pkg, cmd.Verbose); err != nil {
+		return err
+	}
+
+	// Build
+	binPath := filepath.Join(tmpDir, "main")
+	build := exec.Command("go", "build", "-o", binPath, goFile)
+	build.Stderr = os.Stderr
+	if cmd.Verbose {
+		fmt.Fprintf(os.Stderr, "building %s\n", goFile)
+	}
+	if err := build.Run(); err != nil {
+		return fmt.Errorf("go build: %w", err)
+	}
+
+	// Run
+	run := exec.Command(binPath, cmd.Args...)
+	run.Stdin = os.Stdin
+	run.Stdout = os.Stdout
+	run.Stderr = os.Stderr
+	return run.Run()
+}
+
+func main() {
+	ctx := kong.Parse(&cli,
+		kong.Name("gun"),
+		kong.Description("TypeScript to Go transpiler."),
+		kong.UsageOnError(),
+	)
+	if err := ctx.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -81,7 +129,6 @@ func transpileDir(dirPath, outputDir, pkgName string, verbose bool) error {
 		if info.IsDir() || !strings.HasSuffix(path, ".ts") {
 			return nil
 		}
-		// Skip .d.ts files
 		if strings.HasSuffix(path, ".d.ts") {
 			return nil
 		}

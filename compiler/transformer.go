@@ -29,6 +29,11 @@ func (t *Transformer) transform(root *sitter.Node) *ast.File {
 		t.transformTopLevel(child)
 	}
 
+	// Ensure main() exists for runnable packages
+	if t.pkgName == "main" {
+		t.getOrCreateMain()
+	}
+
 	file := &ast.File{
 		Name:  ident(t.pkgName),
 		Decls: t.decls,
@@ -87,7 +92,7 @@ func (t *Transformer) transformTopLevel(node *sitter.Node) {
 		// Top-level expression statements become init() body or are skipped
 		// For now, wrap in an init function if it's a call
 		if stmt := t.transformStmt(node); stmt != nil {
-			initFn := t.getOrCreateInit()
+			initFn := t.getOrCreateMain()
 			initFn.Body.List = append(initFn.Body.List, stmt)
 		}
 	case "comment", "line_comment", "block_comment":
@@ -140,14 +145,19 @@ func (t *Transformer) transformExport(node *sitter.Node) {
 	}
 }
 
-// getOrCreateInit returns the init() function, creating it if needed.
-func (t *Transformer) getOrCreateInit() *ast.FuncDecl {
+// getOrCreateMain returns the main() (or init()) function, creating it if needed.
+// Uses main() when package is "main" so the output is directly runnable.
+func (t *Transformer) getOrCreateMain() *ast.FuncDecl {
+	name := "init"
+	if t.pkgName == "main" {
+		name = "main"
+	}
 	for _, d := range t.decls {
-		if fd, ok := d.(*ast.FuncDecl); ok && fd.Name.Name == "init" {
+		if fd, ok := d.(*ast.FuncDecl); ok && fd.Name.Name == name {
 			return fd
 		}
 	}
-	fn := funcDecl("init", fieldList(), nil, blockStmt())
+	fn := funcDecl(name, fieldList(), nil, blockStmt())
 	t.decls = append(t.decls, fn)
 	return fn
 }
