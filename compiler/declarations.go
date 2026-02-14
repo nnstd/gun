@@ -43,11 +43,11 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 			if valueNode != nil {
 				stmts := t.transformDestructuring(nameNode, valueNode)
 				for _, stmt := range stmts {
-					decls = append(decls, &ast.FuncDecl{
-						Name: ident("_destructure_placeholder"),
-						Type: &ast.FuncType{Params: fieldList()},
-						Body: blockStmt(stmt),
-					})
+					if assign, ok := stmt.(*ast.AssignStmt); ok && len(assign.Lhs) == 1 && len(assign.Rhs) == 1 {
+						if id, ok := assign.Lhs[0].(*ast.Ident); ok {
+							decls = append(decls, varDecl(id.Name, nil, assign.Rhs[0]))
+						}
+					}
 				}
 			}
 			continue
@@ -230,6 +230,15 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 	var stmts []ast.Stmt
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
+		// Handle variable declarations directly so destructuring (and multi-decl)
+		// statements are not lost — transformStmt can only return one ast.Stmt.
+		if child.Kind() == "lexical_declaration" || child.Kind() == "variable_declaration" {
+			decls := t.transformVarDecl(child)
+			for _, d := range decls {
+				stmts = append(stmts, &ast.DeclStmt{Decl: d})
+			}
+			continue
+		}
 		if s := t.transformStmt(child); s != nil {
 			stmts = append(stmts, s)
 		}
@@ -490,6 +499,31 @@ func (t *Transformer) transformDestructuring(pattern *sitter.Node, value *sitter
 	case "array_pattern":
 		for i := uint(0); i < pattern.NamedChildCount(); i++ {
 			child := pattern.NamedChild(i)
+
+			// Rest element: const [first, ...rest] = arr → rest := arr[1:]
+			if child.Kind() == "rest_pattern" {
+				nameNode := child.ChildByFieldName("pattern")
+				if nameNode == nil {
+					// fallback: second named child is the identifier
+					if child.NamedChildCount() > 0 {
+						nameNode = child.NamedChild(child.NamedChildCount() - 1)
+					}
+				}
+				if nameNode == nil {
+					continue
+				}
+				name := nameNode.Utf8Text(t.source)
+				stmts = append(stmts, &ast.AssignStmt{
+					Lhs: []ast.Expr{ident(name)},
+					Tok: token.DEFINE,
+					Rhs: []ast.Expr{&ast.SliceExpr{
+						X:   valExpr,
+						Low: intLit(fmt.Sprintf("%d", i)),
+					}},
+				})
+				continue
+			}
+
 			name := child.Utf8Text(t.source)
 			if name == "" {
 				continue

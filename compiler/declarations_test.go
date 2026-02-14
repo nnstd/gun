@@ -181,6 +181,53 @@ export {X as "default"}`
 	assertNotContains(t, out, "default")
 }
 
+func TestObjectDestructuringTopLevel(t *testing.T) {
+	ts := `const obj = { a: 1, b: 2 };
+const { a, b } = obj;`
+	out := compile(t, ts)
+	assertContains(t, out, "var a = obj.A")
+	assertContains(t, out, "var b = obj.B")
+	assertNotContains(t, out, "_destructure_placeholder")
+}
+
+func TestArrayDestructuringTopLevel(t *testing.T) {
+	ts := `const arr = [1, 2];
+const [x, y] = arr;`
+	out := compile(t, ts)
+	assertContains(t, out, "var x = arr[0]")
+	assertContains(t, out, "var y = arr[1]")
+	assertNotContains(t, out, "_destructure_placeholder")
+}
+
+func TestObjectDestructuringInFunction(t *testing.T) {
+	ts := `function test() {
+	const obj = { a: 1 };
+	const { a } = obj;
+	console.log(a);
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "var a = obj.A")
+	assertNotContains(t, out, "_destructure_placeholder")
+}
+
+func TestArrayDestructuringInFunction(t *testing.T) {
+	ts := `function test() {
+	const [first, second] = [3, 4];
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "var first =")
+	assertContains(t, out, "var second =")
+	assertNotContains(t, out, "_destructure_placeholder")
+}
+
+func TestArrayDestructuringRest(t *testing.T) {
+	ts := `const arr = [1, 2, 3];
+const [first, ...rest] = arr;`
+	out := compile(t, ts)
+	assertContains(t, out, "var first = arr[0]")
+	assertContains(t, out, "var rest = arr[1:]")
+}
+
 func TestEmptyInput(t *testing.T) {
 	out, err := Compile([]byte(""), "main", "")
 	if err != nil {
