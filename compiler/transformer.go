@@ -11,10 +11,11 @@ import (
 type Transformer struct {
 	source        []byte
 	pkgName       string
-	moduleName    string // Go module name from go.mod (for relative imports)
+	moduleName    string                     // Go module name from go.mod (for relative imports)
 	decls         []ast.Decl
 	imports       map[string]string          // Go import path → alias (empty = no alias)
-	importedNames map[string]resolvedImport // TS name → Go resolution
+	importedNames map[string]resolvedImport  // TS name → Go resolution
+	varTypes      map[string]string          // variable name → module type (e.g. "app" → "hono")
 }
 
 func newTransformer(source []byte, pkgName, moduleName string) *Transformer {
@@ -24,6 +25,7 @@ func newTransformer(source []byte, pkgName, moduleName string) *Transformer {
 		moduleName:    moduleName,
 		imports:       make(map[string]string),
 		importedNames: make(map[string]resolvedImport),
+		varTypes:      make(map[string]string),
 	}
 }
 
@@ -113,6 +115,21 @@ func (t *Transformer) transformTopLevel(node *sitter.Node) {
 }
 
 func (t *Transformer) transformExport(node *sitter.Node) {
+	// Check for "export default ..."
+	hasDefault := false
+	for i := uint(0); i < node.ChildCount(); i++ {
+		child := node.Child(i)
+		if child.Kind() == "default" {
+			hasDefault = true
+			break
+		}
+	}
+
+	if hasDefault {
+		t.transformExportDefault(node)
+		return
+	}
+
 	// export can wrap a declaration — find the inner declaration and capitalize its name
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
@@ -152,6 +169,69 @@ func (t *Transformer) transformExport(node *sitter.Node) {
 				t.decls = append(t.decls, d)
 			}
 		}
+	}
+}
+
+// transformExportDefault handles `export default { port: X, fetch: Y }` patterns.
+// Generates fmt.Println + http.ListenAndServe in main().
+func (t *Transformer) transformExportDefault(node *sitter.Node) {
+	// Find the object literal child
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if child.Kind() != "object" {
+			continue
+		}
+
+		var portExpr ast.Expr
+		var fetchExpr ast.Expr
+
+		for j := uint(0); j < child.NamedChildCount(); j++ {
+			pair := child.NamedChild(j)
+			if pair.Kind() != "pair" {
+				continue
+			}
+			keyNode := pair.ChildByFieldName("key")
+			valNode := pair.ChildByFieldName("value")
+			if keyNode == nil || valNode == nil {
+				continue
+			}
+			key := keyNode.Utf8Text(t.source)
+			switch key {
+			case "port":
+				portExpr = t.transformExpr(valNode)
+			case "fetch":
+				fetchExpr = t.transformExpr(valNode)
+			}
+		}
+
+		if portExpr == nil || fetchExpr == nil {
+			return
+		}
+
+		t.addImport("fmt")
+		t.addImport("net/http")
+
+		mainFn := t.getOrCreateMain()
+
+		// fmt.Println("Listening on :PORT")
+		portStr := "3000"
+		if lit, ok := portExpr.(*ast.BasicLit); ok {
+			portStr = lit.Value
+		}
+		printStmt := exprStmt(callExpr(
+			selectorExpr(ident("fmt"), "Println"),
+			stringLit("Listening on :"+portStr),
+		))
+
+		// http.ListenAndServe(":PORT", handler)
+		listenStmt := exprStmt(callExpr(
+			selectorExpr(ident("http"), "ListenAndServe"),
+			stringLit(":"+portStr),
+			fetchExpr,
+		))
+
+		mainFn.Body.List = append(mainFn.Body.List, printStmt, listenStmt)
+		return
 	}
 }
 

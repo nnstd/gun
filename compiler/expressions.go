@@ -268,6 +268,15 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 				return r
 			}
 
+			// Module-registered call transformers (e.g. hono route methods)
+			if modType, ok := t.varTypes[objText]; ok {
+				if fn, ok := moduleCallTransformers[modType]; ok {
+					if r := fn(t, objNode, prop, argsNode); r != nil {
+						return r
+					}
+				}
+			}
+
 			// Method transforms on arbitrary receivers (string/collection methods)
 			// Skip if the object is a namespace import (it's a package, not a value)
 			if _, isNsImport := t.importedNames[objText]; !isNsImport {

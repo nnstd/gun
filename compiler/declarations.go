@@ -63,6 +63,17 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 			value = t.transformExpr(valueNode)
 		}
 
+		// Track variable types for known constructors (e.g. new Hono() → "hono")
+		if valueNode != nil && valueNode.Kind() == "new_expression" {
+			ctorNode := valueNode.ChildByFieldName("constructor")
+			if ctorNode != nil {
+				ctorName := ctorNode.Utf8Text(t.source)
+				if imp, ok := t.importedNames[ctorName]; ok {
+					t.varTypes[name] = imp.goPkgName
+				}
+			}
+		}
+
 		// If const with simple literal value, use Go const
 		if isConst && value != nil && isConstCompatible(value) && (typ == nil || isConstType(typ)) {
 			decls = append(decls, constDecl(name, typ, value))

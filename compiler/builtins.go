@@ -53,6 +53,9 @@ func transformBuiltinNew(name string, args []ast.Expr, addImport func(string)) a
 			return callExpr(selectorExpr(ident("regexp"), "MustCompile"), args[0])
 		}
 		return callExpr(selectorExpr(ident("regexp"), "MustCompile"), stringLit(""))
+	case "Hono":
+		addImport("gun/runtime/hono")
+		return callExpr(selectorExpr(ident("hono"), "New"))
 	}
 	return nil
 }

@@ -37,6 +37,7 @@ var knownModules = map[string]moduleMapping{
 	"crypto":        {goPath: "crypto", goName: "crypto"},
 	"child_process": {goPath: "os/exec", goName: "exec"},
 	"assert":        {goPath: "testing", goName: "testing"},
+	"hono":          {goPath: "gun/runtime/hono", goName: "hono"},
 }
 
 // knownSymbols maps (module, symbol) pairs to specific Go translations.
@@ -87,6 +88,9 @@ var knownSymbols = map[string]map[string]resolvedImport{
 		"exec":     {goImportPath: "os/exec", goPkgName: "exec", goSymbol: "Command"},
 		"execSync": {goImportPath: "os/exec", goPkgName: "exec", goSymbol: "Command"},
 		"spawn":    {goImportPath: "os/exec", goPkgName: "exec", goSymbol: "Command"},
+	},
+	"hono": {
+		"Hono": {goImportPath: "gun/runtime/hono", goPkgName: "hono", goSymbol: "Hono"},
 	},
 }
 
