@@ -515,7 +515,8 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 					coercedArgs := make([]ast.Expr, len(args))
 					copy(coercedArgs, args)
 					for i, arg := range coercedArgs {
-						if _, isLit := arg.(*ast.BasicLit); !isLit {
+						// Skip coercion for arguments that should remain as their original types
+						if shouldCoerceArg(prop, i, arg) {
 							coercedArgs[i] = callExpr(selectorExpr(ident("fmt"), "Sprint"), arg)
 						}
 					}
@@ -962,6 +963,34 @@ func isNumericExpr(expr ast.Expr) bool {
 		return false
 	}
 	return isNumericLit(unary.X)
+}
+
+// shouldCoerceArg returns true if the argument should be coerced to string for the given method.
+// Some methods expect specific argument types (regex, integer) that should not be coerced.
+func shouldCoerceArg(method string, argIndex int, arg ast.Expr) bool {
+	// Skip coercion for literal arguments
+	if _, isLit := arg.(*ast.BasicLit); isLit {
+		return false
+	}
+
+	// Methods that expect regex arguments (don't coerce)
+	if method == "match" && argIndex == 0 {
+		return false
+	}
+
+	// Methods that expect integer index arguments (don't coerce)
+	if (method == "charAt" || method == "charCodeAt" || method == "codePointAt" ||
+		method == "substring" || method == "substr") && argIndex == 0 {
+		return false
+	}
+
+	// Methods that expect integer arguments for both start and end positions
+	if method == "substring" && argIndex == 1 {
+		return false
+	}
+
+	// Default: coerce to string
+	return true
 }
 
 func isBoolLit(expr ast.Expr) bool {
