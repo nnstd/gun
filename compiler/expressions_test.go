@@ -286,6 +286,15 @@ func TestArrayIsArray(t *testing.T) {
 	assertNotContains(t, out, "Array.")
 }
 
+func TestArrayLiteralIndexUsesNativeSubscript(t *testing.T) {
+	// Variables initialized from array literals are typed Go slices,
+	// so indexing should use native [] not .Index().
+	ts := `function f(x) { const args = [x, x]; return args[0]; }`
+	out := compile(t, ts)
+	assertContains(t, out, "args[0]")
+	assertNotContains(t, out, "args.Index(")
+}
+
 func TestLocalVarPropertyAccessUsesGet(t *testing.T) {
 	// Local variables declared inside a function body should be registered
 	// in scope so property access uses .Get() instead of struct field access.
