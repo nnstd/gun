@@ -59,6 +59,11 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 		if len(args) > 0 {
 			return callExpr(selectorExpr(ident("strings"), "HasSuffix"), obj, args[0])
 		}
+	case "includes":
+		addImport("strings")
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("strings"), "Contains"), obj, args[0])
+		}
 	case "replace":
 		addImport("strings")
 		if len(args) >= 2 {
