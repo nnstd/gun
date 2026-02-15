@@ -279,6 +279,10 @@ func (t *Transformer) transformUnaryExpr(node *sitter.Node) ast.Expr {
 		if argNode != nil && argNode.Kind() == "subscript_expression" {
 			return &ast.BinaryExpr{X: arg, Op: token.EQL, Y: ident("nil")}
 		}
+		// !someCall() where the call returns *jsvalue.JSValue → call() == nil
+		if argNode != nil && t.nodeReturnsJSValue(argNode) {
+			return &ast.BinaryExpr{X: arg, Op: token.EQL, Y: ident("nil")}
+		}
 		return &ast.UnaryExpr{Op: token.NOT, X: arg}
 	case "-":
 		return &ast.UnaryExpr{Op: token.SUB, X: arg}
