@@ -411,6 +411,15 @@ func From(v any) *JSValue {
 	}
 }
 
+// FromStrings converts a []string into an array JSValue.
+func FromStrings(ss []string) *JSValue {
+	elems := make([]*JSValue, len(ss))
+	for i, s := range ss {
+		elems[i] = NewString(s)
+	}
+	return NewArray(elems...)
+}
+
 // Truthy implements JavaScript truthiness semantics.
 // Returns false for nil, undefined, null, false, 0, NaN, and "".
 func Truthy(v *JSValue) bool {

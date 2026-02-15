@@ -439,6 +439,39 @@ func TestMapLocalInBoolContext(t *testing.T) {
 	assertContains(t, out, `config["verbose"] != nil`)
 }
 
+func TestSubscriptOnJSValueCallResult(t *testing.T) {
+	ts := `function f(arg) { return arg.slice(-1)[0]; }`
+	out := compile(t, ts)
+	assertContains(t, out, ".Index(0)")
+	assertNotContains(t, out, "[0]")
+}
+
+func TestJSValueSliceLocalAssignedFromSlice(t *testing.T) {
+	ts := `function f(args) {
+	const notFlags = [];
+	notFlags = args.slice(1);
+}`
+	out := compile(t, ts)
+	assertContains(t, out, ".Array()")
+	assertNotContains(t, out, "int(")
+	assertNotContains(t, out, ".Number()")
+}
+
+func TestSplitOnJSValueReturnsJSValue(t *testing.T) {
+	ts := `function f(key) { return key.split("."); }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.FromStrings(strings.Split(")
+}
+
+func TestLenInBoolContext(t *testing.T) {
+	ts := `function f() {
+	const arr = [1, 2];
+	if (arr.length) { return true; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "> 0")
+}
+
 func TestHoistedFuncPaddedArgs(t *testing.T) {
 	ts := `function outer(x) {
 	function inner(a, b, c) { return a; }

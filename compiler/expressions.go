@@ -457,6 +457,11 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 							}
 						}
 						if r := transformBuiltinMethod(obj, prop, coercedArgs, t.addImport); r != nil {
+							// split returns []string but caller may need *jsvalue.JSValue
+							if prop == "split" {
+								t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+								return callExpr(selectorExpr(ident("jsvalue"), "FromStrings"), r)
+							}
 							return r
 						}
 					} else {
@@ -645,7 +650,12 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 	}
 	// JSValue arrays can't be indexed directly; use .Index() for numeric
 	// keys and .Get() for string keys.
-	if objNode != nil && objNode.Kind() == "identifier" && t.isUntypedLocal(objNode.Utf8Text(t.source)) {
+	isJSValueObj := objNode != nil && objNode.Kind() == "identifier" && t.isUntypedLocal(objNode.Utf8Text(t.source))
+	// Also catch call expressions that return JSValue (e.g. arg.Slice(-1)[0]).
+	if !isJSValueObj && objNode != nil && t.nodeReturnsJSValue(objNode) {
+		isJSValueObj = true
+	}
+	if isJSValueObj {
 		indexNode := node.ChildByFieldName("index")
 		if indexNode != nil && (indexNode.Kind() == "string" || indexNode.Kind() == "string_literal") {
 			return callExpr(selectorExpr(obj, "Get"), index)
@@ -824,6 +834,12 @@ func (t *Transformer) ensureBool(expr ast.Expr) ast.Expr {
 	// JSValue Get() call → .Bool()
 	if isJSValueGet(expr) {
 		return callExpr(selectorExpr(expr, "Bool"))
+	}
+	// len(x) returns int; convert to len(x) > 0 for boolean context.
+	if call, ok := expr.(*ast.CallExpr); ok {
+		if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "len" {
+			return &ast.BinaryExpr{X: expr, Op: token.GTR, Y: intLit("0")}
+		}
 	}
 	// Non-boolean identifiers and selectors: treat as truthiness check → != nil
 	switch e := expr.(type) {

@@ -96,8 +96,14 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 						}
 						// When assigning a JSValue-returning expression to a typed local
 						// (e.g. i = eatArray(...) where i is int), coerce the return value.
+						// For JSValue slice locals, convert via .Array() instead.
 						if leftNode.Kind() == "identifier" && t.isTypedLocal(leftNode.Utf8Text(t.source)) && t.nodeReturnsJSValue(rightNode) {
-							rhs = callExpr(ident("int"), callExpr(selectorExpr(rhs, "Number")))
+							lname := leftNode.Utf8Text(t.source)
+							if t.jsvalueSliceLocals[lname] {
+								rhs = callExpr(selectorExpr(rhs, "Array"))
+							} else {
+								rhs = callExpr(ident("int"), callExpr(selectorExpr(rhs, "Number")))
+							}
 						}
 						return assignStmt([]ast.Expr{lhs}, []ast.Expr{rhs})
 					}
