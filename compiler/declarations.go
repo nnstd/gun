@@ -225,6 +225,12 @@ func (t *Transformer) transformFuncDecl(node *sitter.Node, exported bool) *ast.F
 		name = capitalize(name)
 	}
 
+	// Push a typed scope so isUntypedLocal/isLocalName work inside the body
+	// AND during parameter destructuring (which may register typed locals).
+	paramInfo := extractParamInfo(paramsNode, t.source)
+	t.pushTypedScope(paramInfo)
+	defer t.popScope()
+
 	params, paramStmts := t.transformParams(paramsNode)
 	var results *ast.FieldList
 	if returnTypeNode != nil {
@@ -233,11 +239,6 @@ func (t *Transformer) transformFuncDecl(node *sitter.Node, exported bool) *ast.F
 			results = fieldList(field("", retType))
 		}
 	}
-
-	// Push a typed scope so isUntypedLocal/isLocalName work inside the body.
-	paramInfo := extractParamInfo(paramsNode, t.source)
-	t.pushTypedScope(paramInfo)
-	defer t.popScope()
 
 	var body *ast.BlockStmt
 	if bodyNode != nil {
@@ -764,6 +765,8 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 						Tok: token.DEFINE,
 						Rhs: []ast.Expr{defaultVal},
 					})
+					// Register as typed so ensureBool knows the concrete type
+					t.addToCurrentScope(goName, true)
 				}
 			}
 		}
