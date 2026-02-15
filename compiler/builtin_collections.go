@@ -6,6 +6,10 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 	switch prop {
 	case "concat":
 		if len(args) > 0 {
+			// [].concat(x) → just x (empty receiver is a no-op)
+			if cl, ok := obj.(*ast.CompositeLit); ok && len(cl.Elts) == 0 {
+				return args[0]
+			}
 			return callExpr(ident("append"), append([]ast.Expr{obj}, args...)...)
 		}
 	case "push":

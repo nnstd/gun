@@ -497,7 +497,7 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 		return ident("nil")
 	}
 
-	prop := sanitizeIdent(propNode.Utf8Text(t.source))
+	prop := propNode.Utf8Text(t.source)
 
 	// Same-package namespace import: templates.foo → Foo (direct symbol reference)
 	if objNode.Kind() == "identifier" {

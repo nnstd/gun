@@ -342,6 +342,40 @@ func (v *JSValue) Map(fn func(*JSValue) *JSValue) *JSValue {
 	return NewArray(results...)
 }
 
+// Filter returns a new array containing elements for which fn returns true.
+func (v *JSValue) Filter(fn func(*JSValue) bool) *JSValue {
+	if v.arrayVal == nil {
+		return NewArray()
+	}
+	var results []*JSValue
+	for _, elem := range v.arrayVal {
+		if fn(elem) {
+			results = append(results, elem)
+		}
+	}
+	return NewArray(results...)
+}
+
+// ForEach calls fn for each element in the array.
+func (v *JSValue) ForEach(fn func(*JSValue)) {
+	if v.arrayVal == nil {
+		return
+	}
+	for _, elem := range v.arrayVal {
+		fn(elem)
+	}
+}
+
+// Pop removes and returns the last element, or nil if empty.
+func (v *JSValue) Pop() *JSValue {
+	if len(v.arrayVal) == 0 {
+		return nil
+	}
+	last := v.arrayVal[len(v.arrayVal)-1]
+	v.arrayVal = v.arrayVal[:len(v.arrayVal)-1]
+	return last
+}
+
 // From wraps an arbitrary Go value as a *JSValue.
 // If the value is already a *JSValue, it is returned as-is.
 func From(v any) *JSValue {
