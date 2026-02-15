@@ -261,6 +261,10 @@ func (t *Transformer) transformUnaryExpr(node *sitter.Node) ast.Expr {
 		if argNode != nil && argNode.Kind() == "identifier" && t.isUntypedLocal(argNode.Utf8Text(t.source)) {
 			return &ast.BinaryExpr{X: arg, Op: token.EQL, Y: ident("nil")}
 		}
+		// !arr[i] where elements are *jsvalue.JSValue → arr[i] == nil
+		if argNode != nil && argNode.Kind() == "subscript_expression" {
+			return &ast.BinaryExpr{X: arg, Op: token.EQL, Y: ident("nil")}
+		}
 		return &ast.UnaryExpr{Op: token.NOT, X: arg}
 	case "-":
 		return &ast.UnaryExpr{Op: token.SUB, X: arg}
@@ -552,6 +556,11 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 	// JSValue arrays can't be indexed directly; use .Index() method.
 	if objNode != nil && objNode.Kind() == "identifier" && t.isUntypedLocal(objNode.Utf8Text(t.source)) {
 		return callExpr(selectorExpr(obj, "Index"), index)
+	}
+	// Go slice indices must be integers; wrap float64 vars with int().
+	indexNode := node.ChildByFieldName("index")
+	if indexNode != nil && indexNode.Kind() == "identifier" {
+		index = callExpr(ident("int"), index)
 	}
 	return &ast.IndexExpr{X: obj, Index: index}
 }
