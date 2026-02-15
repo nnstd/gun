@@ -97,6 +97,11 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 			X:     callExpr(ident("[]rune"), obj),
 			Index: idx,
 		})
+	case "match":
+		// str.match(regex) → regex.FindStringSubmatch(str)
+		if len(args) > 0 {
+			return callExpr(selectorExpr(args[0], "FindStringSubmatch"), obj)
+		}
 	}
 	return nil
 }

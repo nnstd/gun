@@ -241,6 +241,13 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 		}
 	}
 
+	// Logical AND/OR require both operands to be bool in Go.
+	// (The JSValue || default-value IIFE is handled above and returns early.)
+	if op == token.LAND || op == token.LOR {
+		left = t.ensureBool(left)
+		right = t.ensureBool(right)
+	}
+
 	return &ast.BinaryExpr{X: left, Op: op, Y: right}
 }
 
