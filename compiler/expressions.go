@@ -223,10 +223,10 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 			left = callExpr(ident("int"), callExpr(selectorExpr(left, "Number")))
 		} else if rightIsJSValue && isNumericLit(left) {
 			right = callExpr(ident("int"), callExpr(selectorExpr(right, "Number")))
-		} else if leftIsJSValue && !rightIsJSValue && isComparisonOp(op) {
+		} else if leftIsJSValue && !rightIsJSValue && isComparisonOp(op) && !isNilNode(rightNode) {
 			// JSValue compared with a non-JSValue (likely string) → coerce to string
 			left = callExpr(selectorExpr(left, "String"))
-		} else if rightIsJSValue && !leftIsJSValue && isComparisonOp(op) {
+		} else if rightIsJSValue && !leftIsJSValue && isComparisonOp(op) && !isNilNode(leftNode) {
 			right = callExpr(selectorExpr(right, "String"))
 		}
 	}
@@ -413,7 +413,8 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 							return r
 						}
 					} else {
-						if r := transformBuiltinMethod(obj, prop, args, t.addImport); r != nil {
+						coercedArgs := t.coerceJSValueArgs(args, argsNode)
+						if r := transformBuiltinMethod(obj, prop, coercedArgs, t.addImport); r != nil {
 							return r
 						}
 					}
@@ -621,6 +622,22 @@ func isNumericLit(expr ast.Expr) bool {
 	return lit.Kind == token.INT || lit.Kind == token.FLOAT
 }
 
+func isNilNode(node *sitter.Node) bool {
+	if node == nil {
+		return false
+	}
+	return node.Kind() == "null" || node.Kind() == "undefined"
+}
+
+func isBoolReturningMethod(name string) bool {
+	switch name {
+	case "MatchString", "HasPrefix", "HasSuffix", "Contains", "ContainsAny",
+		"EqualFold", "IsNaN", "IsInf":
+		return true
+	}
+	return false
+}
+
 func isJSValueGet(expr ast.Expr) bool {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
@@ -671,11 +688,32 @@ func (t *Transformer) ensureBool(expr ast.Expr) ast.Expr {
 	case *ast.CallExpr:
 		// Method calls (obj.Method()) may return *jsvalue.JSValue → need != nil.
 		// Plain function calls (isFoo()) typically return bool already.
-		if _, ok := e.Fun.(*ast.SelectorExpr); ok {
+		if sel, ok := e.Fun.(*ast.SelectorExpr); ok {
+			if isBoolReturningMethod(sel.Sel.Name) {
+				return expr
+			}
 			return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
 		}
 	}
 	return expr
+}
+
+// coerceJSValueArgs wraps JSValue identifier args with fmt.Sprint() so they
+// can be passed to functions expecting string (e.g. regexp.MatchString).
+func (t *Transformer) coerceJSValueArgs(args []ast.Expr, argsNode *sitter.Node) []ast.Expr {
+	if argsNode == nil {
+		return args
+	}
+	out := make([]ast.Expr, len(args))
+	copy(out, args)
+	for i := uint(0); i < argsNode.NamedChildCount() && int(i) < len(out); i++ {
+		argNode := argsNode.NamedChild(i)
+		if argNode != nil && argNode.Kind() == "identifier" && t.isUntypedLocal(argNode.Utf8Text(t.source)) {
+			t.addImport("fmt")
+			out[i] = callExpr(selectorExpr(ident("fmt"), "Sprint"), out[i])
+		}
+	}
+	return out
 }
 
 // wrapAsJSValue wraps an expression with jsvalue.From() so it can be used

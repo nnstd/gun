@@ -227,6 +227,41 @@ func TestFuncExprTrailingReturn(t *testing.T) {
 	assertContains(t, out, `return ""`)
 }
 
+func TestCharAtTypedVsJSValue(t *testing.T) {
+	// charAt on a typed string local should produce a string result,
+	// while charAt on a JSValue param should produce a JSValue result.
+	// Comparing the two must coerce the JSValue side to .String().
+	ts := `function f(str) {
+	const lower = str.toLowerCase();
+	const chrLower = lower.charAt(0);
+	const chrString = str.charAt(0);
+	return chrLower !== chrString;
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "chrString.String()")
+	assertNotContains(t, out, "chrLower.String()")
+}
+
+func TestNullComparisonNoStringCoercion(t *testing.T) {
+	// Comparing a JSValue param with null/undefined should emit x == nil,
+	// not x.String() == nil.
+	ts := `function f(x) { if (x === null) { return true; } return false; }`
+	out := compile(t, ts)
+	assertContains(t, out, "x == nil")
+	assertNotContains(t, out, "x.String() == nil")
+}
+
+func TestRegexTestBoolResult(t *testing.T) {
+	// regex.test() returns bool; ensureBool should not wrap with != nil.
+	ts := `function f(s) {
+	if (/^hello/.test(s)) { return true; }
+	return false;
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "MatchString(fmt.Sprint(s))")
+	assertNotContains(t, out, "!= nil")
+}
+
 func TestLocalVarPropertyAccessUsesGet(t *testing.T) {
 	// Local variables declared inside a function body should be registered
 	// in scope so property access uses .Get() instead of struct field access.
