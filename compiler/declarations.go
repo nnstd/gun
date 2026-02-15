@@ -160,7 +160,7 @@ func (t *Transformer) isNonJSValueInit(node *sitter.Node) bool {
 	switch node.Kind() {
 	case "number", "string", "template_string", "true", "false",
 		"ternary_expression", "binary_expression", "unary_expression",
-		"array", "object":
+		"array", "object", "new_expression":
 		return true
 	case "call_expression":
 		fnNode := node.ChildByFieldName("function")

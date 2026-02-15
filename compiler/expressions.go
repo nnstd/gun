@@ -483,6 +483,17 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 		}
 	}
 
+	// When calling a local function variable whose params are all *jsvalue.JSValue
+	// (untyped hoisted function), wrap non-JSValue arguments with jsvalue.From().
+	if fnNode.Kind() == "identifier" && t.isUntypedLocal(fnNode.Utf8Text(t.source)) {
+		fun := t.transformExpr(fnNode)
+		args := t.transformArgs(argsNode)
+		for i, arg := range args {
+			args[i] = t.wrapAsJSValue(arg)
+		}
+		return callExpr(fun, args...)
+	}
+
 	fun := t.transformExpr(fnNode)
 	args := t.transformArgs(argsNode)
 	return callExpr(fun, args...)
