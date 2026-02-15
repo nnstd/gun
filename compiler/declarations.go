@@ -121,6 +121,18 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 			}
 		}
 
+		// Track locals initialized from object literals (map[string]*jsvalue.JSValue)
+		// so property access uses map indexing obj["key"] instead of obj.Get("key").
+		// Check the transformed Go value — covers both direct object literals and
+		// Object.assign() calls which return the first arg (a map literal).
+		if value != nil {
+			if cl, ok := value.(*ast.CompositeLit); ok {
+				if _, ok := cl.Type.(*ast.MapType); ok {
+					t.mapLocals[name] = true
+				}
+			}
+		}
+
 		// If const with simple literal value, use Go const
 		if isConst && value != nil && isConstCompatible(value) && (typ == nil || isConstType(typ)) {
 			decls = append(decls, constDecl(name, typ, value))

@@ -536,6 +536,11 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 		return callExpr(ident("len"), obj)
 	}
 
+	// Map-typed locals (from object literals) use map indexing: obj["key"]
+	if objNode.Kind() == "identifier" && t.mapLocals[objNode.Utf8Text(t.source)] {
+		return &ast.IndexExpr{X: obj, Index: stringLit(prop)}
+	}
+
 	// For local scope variables (function parameters typed as *jsvalue.JSValue),
 	// use dynamic property access via Get() instead of Go selector expressions.
 	if objNode.Kind() == "identifier" && t.isLocalName(objNode.Utf8Text(t.source)) {
