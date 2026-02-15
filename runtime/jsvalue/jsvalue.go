@@ -420,6 +420,25 @@ func FromStrings(ss []string) *JSValue {
 	return NewArray(elems...)
 }
 
+// Join concatenates array elements into a string with the given separator.
+func (v *JSValue) Join(sep string) string {
+	if v.arrayVal == nil {
+		return ""
+	}
+	parts := make([]string, len(v.arrayVal))
+	for i, elem := range v.arrayVal {
+		parts[i] = elem.String()
+	}
+	result := ""
+	for i, p := range parts {
+		if i > 0 {
+			result += sep
+		}
+		result += p
+	}
+	return result
+}
+
 // Truthy implements JavaScript truthiness semantics.
 // Returns false for nil, undefined, null, false, 0, NaN, and "".
 func Truthy(v *JSValue) bool {

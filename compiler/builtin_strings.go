@@ -5,7 +5,9 @@ import "go/ast"
 func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport func(string)) ast.Expr {
 	// If the receiver is a JSValue method call (Get, Slice, Index, etc.),
 	// coerce to string for string methods.
-	if isJSValueMethodCall(obj) {
+	// For join, the receiver is an array — use JSValue .Join() directly.
+	wasJSValue := isJSValueMethodCall(obj)
+	if wasJSValue && prop != "join" {
 		addImport("fmt")
 		obj = callExpr(selectorExpr(ident("fmt"), "Sprint"), obj)
 	}
@@ -25,8 +27,12 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 			return callExpr(selectorExpr(ident("strings"), "Split"), obj, args[0])
 		}
 	case "join":
-		addImport("strings")
 		if len(args) > 0 {
+			// When receiver is a JSValue array (e.g. from .Map()), use .Join() method.
+			if wasJSValue {
+				return callExpr(selectorExpr(obj, "Join"), args[0])
+			}
+			addImport("strings")
 			return callExpr(selectorExpr(ident("strings"), "Join"), obj, args[0])
 		}
 	case "trim":

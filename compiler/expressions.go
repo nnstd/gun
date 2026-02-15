@@ -809,7 +809,8 @@ func isJSValueMethodCall(expr ast.Expr) bool {
 		return false
 	}
 	switch sel.Sel.Name {
-	case "Get", "Slice", "Index", "Match", "CharAt":
+	case "Get", "Slice", "Index", "Match", "CharAt",
+		"Map", "Filter", "Pop", "FromStrings", "NewArray", "From":
 		return true
 	}
 	return false

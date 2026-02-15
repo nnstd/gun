@@ -14,9 +14,14 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 		}
 	case "push":
 		if len(args) > 0 {
-			// When the receiver is a JSValue (e.g. obj.Get("key")), use .Push() method.
+			// When the receiver is a JSValue (e.g. obj.Get("key")), use .Push() method
+			// and wrap args with jsvalue.From().
 			if isJSValueMethodCall(obj) {
-				return callExpr(selectorExpr(obj, "Push"), args...)
+				wrapped := make([]ast.Expr, len(args))
+				for i, a := range args {
+					wrapped[i] = callExpr(selectorExpr(ident("jsvalue"), "From"), a)
+				}
+				return callExpr(selectorExpr(obj, "Push"), wrapped...)
 			}
 			return callExpr(ident("append"), append([]ast.Expr{obj}, args...)...)
 		}
