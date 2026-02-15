@@ -40,6 +40,28 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 							}
 						}
 					}
+					// mapLocal[x][y] = value → mapLocal[x.String()].Set(key, jsvalue.From(value))
+					// The first subscript on a map local returns *jsvalue.JSValue.
+					if leftNode.Kind() == "subscript_expression" {
+						subObj := leftNode.ChildByFieldName("object")
+						if subObj != nil && subObj.Kind() == "subscript_expression" {
+							innerObj := subObj.ChildByFieldName("object")
+							if innerObj != nil && innerObj.Kind() == "identifier" && t.mapLocals[innerObj.Utf8Text(t.source)] {
+								inner := t.transformExpr(subObj)
+								outerIdx := leftNode.ChildByFieldName("index")
+								outerIdxExpr := t.transformExpr(outerIdx)
+								rhs := t.transformExpr(rightNode)
+								if inner != nil && outerIdxExpr != nil && rhs != nil {
+									if outerIdx.Kind() != "string" && outerIdx.Kind() != "string_literal" {
+										t.addImport("fmt")
+										outerIdxExpr = callExpr(selectorExpr(ident("fmt"), "Sprint"), outerIdxExpr)
+									}
+									rhs = t.wrapAsJSValue(rhs)
+									return exprStmt(callExpr(selectorExpr(inner, "Set"), outerIdxExpr, rhs))
+								}
+							}
+						}
+					}
 					// obj["key"] = value on JSValue → obj.Set("key", wrappedValue)
 					if leftNode.Kind() == "subscript_expression" {
 						subObj := leftNode.ChildByFieldName("object")

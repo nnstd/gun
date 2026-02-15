@@ -583,6 +583,19 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 		}
 		return &ast.IndexExpr{X: obj, Index: index}
 	}
+	// Nested subscript on map local: mapLocal[x][y] → mapLocal[x].Get(y)
+	// The first subscript returns *jsvalue.JSValue from the map.
+	if objNode != nil && objNode.Kind() == "subscript_expression" {
+		innerObj := objNode.ChildByFieldName("object")
+		if innerObj != nil && innerObj.Kind() == "identifier" && t.mapLocals[innerObj.Utf8Text(t.source)] {
+			indexNode := node.ChildByFieldName("index")
+			if indexNode != nil && (indexNode.Kind() == "string" || indexNode.Kind() == "string_literal") {
+				return callExpr(selectorExpr(obj, "Get"), index)
+			}
+			t.addImport("fmt")
+			return callExpr(selectorExpr(obj, "Get"), callExpr(selectorExpr(ident("fmt"), "Sprint"), index))
+		}
+	}
 	// JSValue arrays can't be indexed directly; use .Index() for numeric
 	// keys and .Get() for string keys.
 	if objNode != nil && objNode.Kind() == "identifier" && t.isUntypedLocal(objNode.Utf8Text(t.source)) {

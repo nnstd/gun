@@ -327,6 +327,18 @@ func TestMapLocalSubscriptAccess(t *testing.T) {
 	assertNotContains(t, out, `config.Get("key")`)
 }
 
+func TestNestedSubscriptOnMapLocal(t *testing.T) {
+	ts := `function f(assignment, key) {
+	const flags = Object.assign({}, {});
+	flags[assignment][key] = true;
+	const v = flags[assignment][key];
+}`
+	out := compile(t, ts)
+	assertContains(t, out, `.Set(fmt.Sprint(key)`)
+	assertContains(t, out, `.Get(fmt.Sprint(key))`)
+	assertNotContains(t, out, `[int(key)]`)
+}
+
 func TestPkgLevelJSValueUsesGet(t *testing.T) {
 	ts := `let mixin;
 function f() { return mixin.format; }`
