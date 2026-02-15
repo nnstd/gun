@@ -202,6 +202,15 @@ func (v *JSValue) Array() []*JSValue {
 	return v.arrayVal
 }
 
+// Index returns the element at position i in an array JSValue.
+// Returns undefined if out of bounds or not an array.
+func (v *JSValue) Index(i int) *JSValue {
+	if v.arrayVal != nil && i >= 0 && i < len(v.arrayVal) {
+		return v.arrayVal[i]
+	}
+	return NewUndefined()
+}
+
 // Len returns the length of the value as an int.
 // For strings, returns the character count; for arrays, the element count;
 // otherwise checks the "length" property.
@@ -248,6 +257,19 @@ func (v *JSValue) Match(re *regexp.Regexp) *JSValue {
 		elems[i] = NewString(m)
 	}
 	return NewArray(elems...)
+}
+
+// CharAt implements JS String.prototype.charAt(index).
+// Returns the character at the given position as a single-character string JSValue.
+func (v *JSValue) CharAt(pos int) *JSValue {
+	if v.typ != TypeString {
+		return NewString("")
+	}
+	runes := []rune(v.strVal)
+	if pos < 0 || pos >= len(runes) {
+		return NewString("")
+	}
+	return NewString(string(runes[pos]))
 }
 
 // CodePointAt returns the Unicode code point at the given position.

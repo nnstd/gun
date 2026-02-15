@@ -172,3 +172,48 @@ myFunc.extra = "hello";`
 	assertNotContains(t, out, "myFunc.Extra")
 	assertNotContains(t, out, `myFunc.extra`)
 }
+
+func TestForLoopUpdateExpression(t *testing.T) {
+	// i++ in for-loop post should compile as IncDecStmt, not i + 1.
+	ts := `function f(): void {
+	for (let i = 0; i < 10; i++) { console.log(i); }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "i++")
+	assertNotContains(t, out, "i + 1")
+}
+
+func TestAugmentedAssignJSValueToString(t *testing.T) {
+	// When a typed string local is combined with a JSValue via +=,
+	// the RHS should be coerced with fmt.Sprint().
+	ts := `function f(item) {
+	let result = "";
+	result += item;
+	return result;
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "result += fmt.Sprint(item)")
+}
+
+func TestAssignToUntypedLocalWrapsJSValue(t *testing.T) {
+	// Assigning a string expression to an untyped local (JSValue) should
+	// wrap with jsvalue.From().
+	ts := `function f(s) {
+	s = s.toLowerCase();
+	return s;
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.From(")
+}
+
+func TestTypedLocalFromStringMethod(t *testing.T) {
+	// Variables initialized from string methods (toLowerCase etc.) should
+	// be typed locals, not treated as JSValue.
+	ts := `function f(s) {
+	const lower = s.toLowerCase();
+	return lower.indexOf("x");
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "strings.Index(lower")
+	assertNotContains(t, out, "lower.IndexOf")
+}

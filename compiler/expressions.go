@@ -187,6 +187,33 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 
 	op := mapBinaryOp(opText)
 
+	// JS `||` used as default-value pattern (x || "fallback").
+	// When the left operand is a JSValue, emit an IIFE that checks truthiness
+	// and returns the first truthy value wrapped as JSValue.
+	if op == token.LOR && leftNode != nil && leftNode.Kind() == "identifier" && t.isUntypedLocal(leftNode.Utf8Text(t.source)) {
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		wrappedRight := t.wrapAsJSValue(right)
+		return &ast.CallExpr{
+			Fun: &ast.FuncLit{
+				Type: &ast.FuncType{
+					Params:  fieldList(),
+					Results: fieldList(field("", jsValuePtrType())),
+				},
+				Body: blockStmt(
+					&ast.IfStmt{
+						Cond: &ast.BinaryExpr{
+							X:  callExpr(selectorExpr(left, "String")),
+							Op: token.NEQ,
+							Y:  stringLit(""),
+						},
+						Body: blockStmt(returnStmt(left)),
+					},
+					returnStmt(wrappedRight),
+				),
+			},
+		}
+	}
+
 	// When an untyped local (JSValue param) is compared or used in arithmetic
 	// with a numeric literal, extract the int value so Go types match.
 	if isComparisonOp(op) || isArithmeticOp(op) {
@@ -361,25 +388,34 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			isUntypedLocal := objNode.Kind() == "identifier" && t.isUntypedLocal(objText)
 			if _, isNsImport := t.importedNames[objText]; !isNsImport {
 				obj := t.transformExpr(objNode)
-				// When the receiver is an untyped local (JSValue parameter),
-				// coerce it and non-literal args to Go string so builtin
-				// string methods like strings.Replace compile correctly.
-				if isUntypedLocal {
-					t.addImport("fmt")
-					obj = callExpr(selectorExpr(ident("fmt"), "Sprint"), obj)
-					coercedArgs := make([]ast.Expr, len(args))
-					copy(coercedArgs, args)
-					for i, arg := range coercedArgs {
-						if _, isLit := arg.(*ast.BasicLit); !isLit {
-							coercedArgs[i] = callExpr(selectorExpr(ident("fmt"), "Sprint"), arg)
+				// Methods with JSValue runtime equivalents (charAt, match,
+				// slice) skip the string builtin path entirely when the
+				// receiver is JSValue — they use the runtime method directly.
+				jsValueRuntimeMethod := map[string]bool{
+					"charAt": true, "match": true, "slice": true,
+				}
+				skipBuiltin := isUntypedLocal && jsValueRuntimeMethod[prop]
+				if !skipBuiltin {
+					// When the receiver is an untyped local (JSValue parameter),
+					// coerce it and non-literal args to Go string so builtin
+					// string methods like strings.Replace compile correctly.
+					if isUntypedLocal {
+						t.addImport("fmt")
+						obj = callExpr(selectorExpr(ident("fmt"), "Sprint"), obj)
+						coercedArgs := make([]ast.Expr, len(args))
+						copy(coercedArgs, args)
+						for i, arg := range coercedArgs {
+							if _, isLit := arg.(*ast.BasicLit); !isLit {
+								coercedArgs[i] = callExpr(selectorExpr(ident("fmt"), "Sprint"), arg)
+							}
 						}
-					}
-					if r := transformBuiltinMethod(obj, prop, coercedArgs, t.addImport); r != nil {
-						return r
-					}
-				} else {
-					if r := transformBuiltinMethod(obj, prop, args, t.addImport); r != nil {
-						return r
+						if r := transformBuiltinMethod(obj, prop, coercedArgs, t.addImport); r != nil {
+							return r
+						}
+					} else {
+						if r := transformBuiltinMethod(obj, prop, args, t.addImport); r != nil {
+							return r
+						}
 					}
 				}
 			}
@@ -474,8 +510,8 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 	obj := t.transformExpr(objNode)
 
 	if prop == "length" {
-		// For JSValue parameters, use Len() which returns int
-		if objNode.Kind() == "identifier" && t.isUntypedLocal(objNode.Utf8Text(t.source)) {
+		// For JSValue expressions, use Len() which returns int
+		if t.nodeReturnsJSValue(objNode) {
 			return callExpr(selectorExpr(obj, "Len"))
 		}
 		return callExpr(ident("len"), obj)
@@ -492,13 +528,18 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 }
 
 func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
-	obj := t.transformExpr(node.ChildByFieldName("object"))
+	objNode := node.ChildByFieldName("object")
+	obj := t.transformExpr(objNode)
 	index := t.transformExpr(node.ChildByFieldName("index"))
 	if obj == nil {
 		return ident("nil")
 	}
 	if index == nil {
 		return obj
+	}
+	// JSValue arrays can't be indexed directly; use .Index() method.
+	if objNode != nil && objNode.Kind() == "identifier" && t.isUntypedLocal(objNode.Utf8Text(t.source)) {
+		return callExpr(selectorExpr(obj, "Index"), index)
 	}
 	return &ast.IndexExpr{X: obj, Index: index}
 }
@@ -595,7 +636,7 @@ func isJSValueGet(expr ast.Expr) bool {
 // ensureBool wraps a non-boolean expression so it can be used in an if condition.
 // JSValue Get() calls are wrapped with .Bool(); other pointer/interface types
 // get a != nil check.
-func ensureBool(expr ast.Expr) ast.Expr {
+func (t *Transformer) ensureBool(expr ast.Expr) ast.Expr {
 	if expr == nil {
 		return ident("false")
 	}
@@ -612,6 +653,10 @@ func ensureBool(expr ast.Expr) ast.Expr {
 		}
 	case *ast.Ident:
 		if e.Name == "true" || e.Name == "false" {
+			return expr
+		}
+		// Typed locals (bool, string, int, etc.) are already usable as-is.
+		if t.isTypedLocal(e.Name) {
 			return expr
 		}
 	}
@@ -700,19 +745,24 @@ func (t *Transformer) transformTemplateString(node *sitter.Node) ast.Expr {
 }
 
 func (t *Transformer) transformTernary(node *sitter.Node) ast.Expr {
-	cond := ensureBool(t.transformExpr(node.ChildByFieldName("condition")))
-	cons := t.transformExpr(node.ChildByFieldName("consequence"))
-	alt := t.transformExpr(node.ChildByFieldName("alternative"))
+	consNode := node.ChildByFieldName("consequence")
+	altNode := node.ChildByFieldName("alternative")
+	cond := t.ensureBool(t.transformExpr(node.ChildByFieldName("condition")))
+	cons := t.transformExpr(consNode)
+	alt := t.transformExpr(altNode)
 
 	if cond == nil || cons == nil || alt == nil {
 		return ident("nil")
 	}
 
+	// Try to infer a concrete return type so the IIFE doesn't return `any`.
+	resultType := t.inferTernaryResultType(consNode, altNode)
+
 	return &ast.CallExpr{
 		Fun: &ast.FuncLit{
 			Type: &ast.FuncType{
 				Params:  fieldList(),
-				Results: fieldList(field("", ident("any"))),
+				Results: fieldList(field("", resultType)),
 			},
 			Body: blockStmt(
 				&ast.IfStmt{
@@ -723,6 +773,38 @@ func (t *Transformer) transformTernary(node *sitter.Node) ast.Expr {
 			),
 		},
 	}
+}
+
+// inferTernaryResultType returns a Go type expression for the IIFE wrapping a
+// ternary. When both branches clearly produce the same type, that type is used;
+// otherwise falls back to `any`.
+func (t *Transformer) inferTernaryResultType(cons, alt *sitter.Node) ast.Expr {
+	a := t.inferNodeResultType(cons)
+	b := t.inferNodeResultType(alt)
+	if a != "" && a == b {
+		return ident(a)
+	}
+	return ident("any")
+}
+
+func (t *Transformer) inferNodeResultType(node *sitter.Node) string {
+	if node == nil {
+		return ""
+	}
+	switch node.Kind() {
+	case "number":
+		return "int"
+	case "string", "template_string":
+		return "string"
+	case "true", "false":
+		return "bool"
+	case "member_expression":
+		prop := node.ChildByFieldName("property")
+		if prop != nil && prop.Utf8Text(t.source) == "length" {
+			return "int"
+		}
+	}
+	return ""
 }
 
 func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {

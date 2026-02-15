@@ -78,8 +78,9 @@ func TestStringWithEmbeddedDoubleQuotes(t *testing.T) {
 func TestAssignmentExpressionInIIFE(t *testing.T) {
 	ts := `function f(a: any, b: any): any { return a = b; }`
 	out := compile(t, ts)
-	// Assignment-as-expression should be wrapped in an IIFE
-	assertContains(t, out, "func() any")
+	// Assignment-as-expression should be wrapped in an IIFE.
+	// a: any maps to *jsvalue.JSValue, so the IIFE returns that type.
+	assertContains(t, out, "func() *jsvalue.JSValue")
 	assertNotContains(t, out, "= =")
 }
 
@@ -158,6 +159,58 @@ function f(x: number): string { if (isOk(x)) { return "yes"; } return "no"; }`
 	out := compile(t, ts)
 	assertContains(t, out, "if isOk(x)")
 	assertNotContains(t, out, "isOk(x) != nil")
+}
+
+func TestEnsureBoolTypedLocalNotNilChecked(t *testing.T) {
+	// Typed bool locals should not get != nil coercion.
+	ts := `function f(s) {
+	let flag = false;
+	if (flag) { return s; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "if flag")
+	assertNotContains(t, out, "flag != nil")
+}
+
+func TestLengthOnJSValueChain(t *testing.T) {
+	// .length on a subscript of a JSValue should use .Len(), not len().
+	ts := `function f(arr) { return arr[0].length; }`
+	out := compile(t, ts)
+	assertContains(t, out, ".Index(0).Len()")
+	assertNotContains(t, out, "len(")
+}
+
+func TestTernaryNumericTypeInference(t *testing.T) {
+	// When both ternary branches are numeric, the IIFE should return int.
+	ts := `function f(x) { return x ? 1 : 0; }`
+	out := compile(t, ts)
+	assertContains(t, out, "func() int")
+	assertNotContains(t, out, "func() any")
+}
+
+func TestJSOrDefaultPattern(t *testing.T) {
+	// JS || used as default-value pattern with JSValue should emit
+	// a truthiness-checking IIFE, not Go's boolean ||.
+	ts := `function f(x) { return x || "default"; }`
+	out := compile(t, ts)
+	assertContains(t, out, `x.String() != ""`)
+	assertContains(t, out, "return x")
+	assertNotContains(t, out, `x || "default"`)
+}
+
+func TestCharAtOnJSValueUsesRuntime(t *testing.T) {
+	// charAt on a JSValue param should use the runtime .CharAt() method.
+	ts := `function f(s) { return s.charAt(0); }`
+	out := compile(t, ts)
+	assertContains(t, out, "s.CharAt(0)")
+	assertNotContains(t, out, "[]rune")
+}
+
+func TestCharAtOnStringUsesBuiltin(t *testing.T) {
+	// charAt on a plain string should use the string builtin.
+	ts := `function f(s: string): string { return s.charAt(0); }`
+	out := compile(t, ts)
+	assertContains(t, out, "string([]rune(s)[0])")
 }
 
 func TestArrowFuncTrailingReturn(t *testing.T) {

@@ -43,6 +43,10 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 					lhs := t.transformExpr(leftNode)
 					rhs := t.transformExpr(rightNode)
 					if lhs != nil && rhs != nil {
+						// Wrap RHS with jsvalue.From() when assigning to an untyped local
+						if leftNode.Kind() == "identifier" && t.isUntypedLocal(leftNode.Utf8Text(t.source)) {
+							rhs = t.wrapAsJSValue(rhs)
+						}
 						return assignStmt([]ast.Expr{lhs}, []ast.Expr{rhs})
 					}
 				}
@@ -59,6 +63,12 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 						opText = opNode.Utf8Text(t.source)
 					}
 					if lhs != nil && rhs != nil {
+						// When a typed local (string/int) is combined with a JSValue,
+						// coerce the RHS to a string via fmt.Sprint().
+						if leftNode.Kind() == "identifier" && t.isTypedLocal(leftNode.Utf8Text(t.source)) && t.nodeReturnsJSValue(rightNode) {
+							t.addImport("fmt")
+							rhs = callExpr(selectorExpr(ident("fmt"), "Sprint"), rhs)
+						}
 						return &ast.AssignStmt{
 							Lhs: []ast.Expr{lhs},
 							Tok: mapAugmentedOp(opText),
@@ -184,7 +194,7 @@ func (t *Transformer) transformIfStmt(node *sitter.Node) ast.Stmt {
 		if paren, ok := cond.(*ast.ParenExpr); ok {
 			cond = paren.X
 		}
-		cond = ensureBool(cond)
+		cond = t.ensureBool(cond)
 	}
 	if cond == nil {
 		cond = ident("true")
@@ -271,9 +281,25 @@ func (t *Transformer) transformForStmt(node *sitter.Node) ast.Stmt {
 
 	var post ast.Stmt
 	if updateNode != nil {
-		expr := t.transformExpr(updateNode)
-		if expr != nil {
-			post = exprStmt(expr)
+		// update_expression (i++/i--) needs special handling since it's
+		// only matched inside expression_statement in transformStmt.
+		if updateNode.Kind() == "update_expression" {
+			argNode := updateNode.ChildByFieldName("argument")
+			opNode := updateNode.ChildByFieldName("operator")
+			if argNode != nil {
+				if arg := t.transformExpr(argNode); arg != nil {
+					tok := token.INC
+					if opNode != nil && opNode.Utf8Text(t.source) == "--" {
+						tok = token.DEC
+					}
+					post = &ast.IncDecStmt{X: arg, Tok: tok}
+				}
+			}
+		}
+		if post == nil {
+			if expr := t.transformExpr(updateNode); expr != nil {
+				post = exprStmt(expr)
+			}
 		}
 	}
 

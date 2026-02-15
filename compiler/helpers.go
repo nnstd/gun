@@ -452,19 +452,32 @@ func extractParamInfo(node *sitter.Node, source []byte) map[string]bool {
 			nameNode := param.ChildByFieldName("pattern")
 			typeNode := param.ChildByFieldName("type")
 			if nameNode != nil && nameNode.Kind() == "identifier" {
-				info[nameNode.Utf8Text(source)] = typeNode != nil
+				info[nameNode.Utf8Text(source)] = typeNode != nil && !isAnyType(typeNode, source)
 			}
 		case "rest_parameter":
 			nameNode := param.ChildByFieldName("pattern")
 			typeNode := param.ChildByFieldName("type")
 			if nameNode != nil {
-				info[nameNode.Utf8Text(source)] = typeNode != nil
+				info[nameNode.Utf8Text(source)] = typeNode != nil && !isAnyType(typeNode, source)
 			}
 		case "identifier":
 			info[param.Utf8Text(source)] = false
 		}
 	}
 	return info
+}
+
+// isAnyType returns true when a type_annotation node resolves to TS "any",
+// which maps to *jsvalue.JSValue in Go and should be treated as untyped.
+func isAnyType(typeNode *sitter.Node, source []byte) bool {
+	if typeNode == nil {
+		return false
+	}
+	text := strings.TrimSpace(typeNode.Utf8Text(source))
+	// type_annotation nodes include the leading ":", so strip it.
+	text = strings.TrimPrefix(text, ":")
+	text = strings.TrimSpace(text)
+	return text == "any"
 }
 
 // sanitizeIdent makes a JS identifier safe for use as a Go identifier by

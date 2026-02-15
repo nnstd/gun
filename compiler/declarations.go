@@ -102,7 +102,11 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 
 		// Register the variable in the current scope so property access
 		// on it uses .Get() when appropriate.
-		t.addToCurrentScope(name, typeNode != nil)
+		// Variables with explicit types, or initialized from non-JSValue
+		// expressions (literals, ternaries, binary ops) are marked typed
+		// so they don't get spurious JSValue coercion.
+		typed := typeNode != nil || isNonJSValueInit(valueNode, t.source)
+		t.addToCurrentScope(name, typed)
 
 		// If const with simple literal value, use Go const
 		if isConst && value != nil && isConstCompatible(value) && (typ == nil || isConstType(typ)) {
@@ -113,6 +117,33 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 	}
 
 	return decls
+}
+
+// isNonJSValueInit returns true when a tree-sitter value node clearly does not
+// produce a *jsvalue.JSValue (e.g. literals, ternaries, binary/unary ops,
+// calls to known string-returning methods like toLowerCase).
+func isNonJSValueInit(node *sitter.Node, source []byte) bool {
+	if node == nil {
+		return false
+	}
+	switch node.Kind() {
+	case "number", "string", "template_string", "true", "false",
+		"ternary_expression", "binary_expression", "unary_expression":
+		return true
+	case "call_expression":
+		fnNode := node.ChildByFieldName("function")
+		if fnNode != nil && fnNode.Kind() == "member_expression" {
+			propNode := fnNode.ChildByFieldName("property")
+			if propNode != nil {
+				switch propNode.Utf8Text(source) {
+				case "toLowerCase", "toUpperCase", "trim", "trimStart", "trimEnd",
+					"toString", "replace", "replaceAll", "join", "split":
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func isConstCompatible(expr ast.Expr) bool {

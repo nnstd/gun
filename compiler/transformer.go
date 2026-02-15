@@ -121,6 +121,43 @@ func (t *Transformer) addToCurrentScope(name string, typed bool) {
 	}
 }
 
+// nodeReturnsJSValue checks whether a tree-sitter node would produce a
+// *jsvalue.JSValue expression (e.g. an untyped local, a subscript on one,
+// or a method call on one).
+func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
+	if node == nil {
+		return false
+	}
+	switch node.Kind() {
+	case "identifier":
+		return t.isUntypedLocal(node.Utf8Text(t.source))
+	case "subscript_expression":
+		objNode := node.ChildByFieldName("object")
+		return objNode != nil && t.nodeReturnsJSValue(objNode)
+	case "call_expression":
+		fnNode := node.ChildByFieldName("function")
+		if fnNode != nil && fnNode.Kind() == "member_expression" {
+			objNode := fnNode.ChildByFieldName("object")
+			return objNode != nil && t.nodeReturnsJSValue(objNode)
+		}
+	case "member_expression":
+		objNode := node.ChildByFieldName("object")
+		return objNode != nil && t.nodeReturnsJSValue(objNode)
+	}
+	return false
+}
+
+// isTypedLocal returns true if the name is a local variable with an explicit
+// type or a non-JSValue initializer (e.g. bool, string, int).
+func (t *Transformer) isTypedLocal(name string) bool {
+	for i := len(t.localScopes) - 1; i >= 0; i-- {
+		if typed, ok := t.localScopes[i][name]; ok {
+			return typed
+		}
+	}
+	return false
+}
+
 // isUntypedLocal returns true if the name is a local variable/parameter without
 // an explicit type annotation (i.e. it defaults to *jsvalue.JSValue).
 func (t *Transformer) isUntypedLocal(name string) bool {

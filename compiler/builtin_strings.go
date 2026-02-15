@@ -77,6 +77,16 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 			X:     callExpr(ident("[]rune"), obj),
 			Index: idx,
 		})
+	case "charAt":
+		// str.charAt(i) → string([]rune(str)[i])
+		var idx ast.Expr = intLit("0")
+		if len(args) > 0 {
+			idx = args[0]
+		}
+		return callExpr(ident("string"), &ast.IndexExpr{
+			X:     callExpr(ident("[]rune"), obj),
+			Index: idx,
+		})
 	case "charCodeAt":
 		// str.charCodeAt(pos) → int(str[pos])
 		var idx ast.Expr = intLit("0")
