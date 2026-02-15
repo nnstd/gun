@@ -190,7 +190,7 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 	// JS `||` used as default-value pattern (x || "fallback").
 	// When the left operand is a JSValue, emit an IIFE that checks truthiness
 	// and returns the first truthy value wrapped as JSValue.
-	if op == token.LOR && leftNode != nil && leftNode.Kind() == "identifier" && t.isUntypedLocal(leftNode.Utf8Text(t.source)) {
+	if op == token.LOR && t.nodeReturnsJSValue(leftNode) {
 		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		wrappedRight := t.wrapAsJSValue(right)
 		return &ast.CallExpr{
@@ -227,10 +227,13 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 			left = callExpr(selectorExpr(left, "String"))
 		} else if rightIsJSValue && !leftIsJSValue && isComparisonOp(op) && !isNilNode(leftNode) {
 			right = callExpr(selectorExpr(right, "String"))
-		} else if leftIsJSValue && isStringLit(right) && op == token.ADD {
+		} else if leftIsJSValue && op == token.ADD {
 			t.addImport("fmt")
 			left = callExpr(selectorExpr(ident("fmt"), "Sprint"), left)
-		} else if rightIsJSValue && isStringLit(left) && op == token.ADD {
+			if rightIsJSValue {
+				right = callExpr(selectorExpr(ident("fmt"), "Sprint"), right)
+			}
+		} else if rightIsJSValue && op == token.ADD {
 			t.addImport("fmt")
 			right = callExpr(selectorExpr(ident("fmt"), "Sprint"), right)
 		}
@@ -638,11 +641,6 @@ func isNumericLit(expr ast.Expr) bool {
 		return false
 	}
 	return lit.Kind == token.INT || lit.Kind == token.FLOAT
-}
-
-func isStringLit(expr ast.Expr) bool {
-	lit, ok := expr.(*ast.BasicLit)
-	return ok && lit.Kind == token.STRING
 }
 
 func isNilNode(node *sitter.Node) bool {
