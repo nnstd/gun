@@ -286,6 +286,20 @@ func TestDestructuringParamWithoutDefault(t *testing.T) {
 	assertContains(t, out, "name := _param0.Name")
 }
 
+func TestClassMethodLocalsUseGet(t *testing.T) {
+	// Variables declared inside class methods should be registered as locals,
+	// so property access uses .Get() instead of capitalized field access.
+	ts := `class Parser {
+	parse(input) {
+		const opts = Object.create(null);
+		return opts.verbose;
+	}
+}`
+	out := compile(t, ts)
+	assertContains(t, out, `opts.Get("verbose")`)
+	assertNotContains(t, out, "opts.Verbose")
+}
+
 func TestRestPatternParam(t *testing.T) {
 	ts := `export function foo(...args) { return args; }`
 	out := compile(t, ts)

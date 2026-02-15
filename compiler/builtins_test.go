@@ -111,6 +111,25 @@ func TestProcessExit(t *testing.T) {
 	assertContains(t, out, "os.Exit(1)")
 }
 
+func TestObjectCreateNull(t *testing.T) {
+	ts := `const obj = Object.create(null);`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewObject()")
+	assertNotContains(t, out, "Object.Create")
+}
+
+func TestObjectKeysPassthrough(t *testing.T) {
+	ts := `function f(obj: any): any { return Object.keys(obj); }`
+	out := compile(t, ts)
+	assertNotContains(t, out, "Object")
+}
+
+func TestObjectEntriesPassthrough(t *testing.T) {
+	ts := `function f(obj: any): any { return Object.entries(obj); }`
+	out := compile(t, ts)
+	assertNotContains(t, out, "Object")
+}
+
 func TestRegexTest(t *testing.T) {
 	ts := `const re = /hello/;
 function check(s: string): boolean { return re.test(s); }`
