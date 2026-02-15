@@ -21,6 +21,7 @@ type Transformer struct {
 	varTypes           map[string]string          // variable name → module type (e.g. "app" → "hono")
 	funcVarNames       map[string]bool            // package-level vars assigned function literals (can't have Go fields)
 	localScopes        []map[string]bool          // stack of local variable/parameter names that shadow imports (true = has type annotation, false = JSValue default)
+	jsvalueSliceLocals map[string]bool            // typed locals whose elements are *jsvalue.JSValue (e.g. []*jsvalue.JSValue slices)
 }
 
 func newTransformer(source []byte, pkgName, moduleName string, samePackageImports bool) *Transformer {
@@ -33,6 +34,7 @@ func newTransformer(source []byte, pkgName, moduleName string, samePackageImport
 		importedNames:      make(map[string]resolvedImport),
 		varTypes:           make(map[string]string),
 		funcVarNames:       make(map[string]bool),
+		jsvalueSliceLocals: make(map[string]bool),
 	}
 }
 
@@ -133,7 +135,18 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		return t.isUntypedLocal(node.Utf8Text(t.source))
 	case "subscript_expression":
 		objNode := node.ChildByFieldName("object")
-		return objNode != nil && t.nodeReturnsJSValue(objNode)
+		if objNode == nil {
+			return false
+		}
+		// Direct JSValue subscript (untyped local)
+		if t.nodeReturnsJSValue(objNode) {
+			return true
+		}
+		// Typed slice with JSValue elements (e.g. []*jsvalue.JSValue)
+		if objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objNode.Utf8Text(t.source)] {
+			return true
+		}
+		return false
 	case "call_expression":
 		fnNode := node.ChildByFieldName("function")
 		if fnNode != nil && fnNode.Kind() == "member_expression" {

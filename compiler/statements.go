@@ -48,6 +48,10 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 						if leftNode.Kind() == "identifier" && t.isUntypedLocal(leftNode.Utf8Text(t.source)) && !isNilIdent(rhs) {
 							rhs = t.wrapAsJSValue(rhs)
 						}
+						// Wrap RHS when assigning to a JSValue slice element (e.g. args[i] = "").
+						if leftNode.Kind() == "subscript_expression" && t.nodeReturnsJSValue(leftNode) && !isNilIdent(rhs) {
+							rhs = t.wrapAsJSValue(rhs)
+						}
 						return assignStmt([]ast.Expr{lhs}, []ast.Expr{rhs})
 					}
 				}

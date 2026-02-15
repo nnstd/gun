@@ -142,6 +142,20 @@ func jsValuePtrType() ast.Expr {
 	return ptrType(selectorExpr(ident("jsvalue"), "JSValue"))
 }
 
+// isJSValuePtrType reports whether an AST expression represents *jsvalue.JSValue.
+func isJSValuePtrType(expr ast.Expr) bool {
+	star, ok := expr.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := star.X.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	return ok && pkg.Name == "jsvalue" && sel.Sel.Name == "JSValue"
+}
+
 func sliceType(elt ast.Expr) *ast.ArrayType {
 	return &ast.ArrayType{Elt: elt}
 }

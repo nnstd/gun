@@ -109,6 +109,18 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 		typed := typeNode != nil || t.isNonJSValueInit(valueNode)
 		t.addToCurrentScope(name, typed)
 
+		// Track typed locals whose elements are *jsvalue.JSValue (array literals
+		// with JSValue elements) so subscript access is recognized as JSValue.
+		if typed && valueNode != nil && valueNode.Kind() == "array" {
+			if cl, ok := value.(*ast.CompositeLit); ok {
+				if at, ok := cl.Type.(*ast.ArrayType); ok {
+					if isJSValuePtrType(at.Elt) {
+						t.jsvalueSliceLocals[name] = true
+					}
+				}
+			}
+		}
+
 		// If const with simple literal value, use Go const
 		if isConst && value != nil && isConstCompatible(value) && (typ == nil || isConstType(typ)) {
 			decls = append(decls, constDecl(name, typ, value))

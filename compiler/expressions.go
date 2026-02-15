@@ -214,22 +214,20 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 		}
 	}
 
-	// When an untyped local (JSValue param) is compared or used in arithmetic
-	// with a numeric literal, extract the int value so Go types match.
+	// When a JSValue expression (untyped local, subscript on JSValue slice, etc.)
+	// is compared or used in arithmetic, coerce to match the other operand's type.
 	if isComparisonOp(op) || isArithmeticOp(op) {
-		leftIsJSValue := leftNode != nil && leftNode.Kind() == "identifier" && t.isUntypedLocal(leftNode.Utf8Text(t.source))
-		rightIsJSValue := rightNode != nil && rightNode.Kind() == "identifier" && t.isUntypedLocal(rightNode.Utf8Text(t.source))
+		leftIsJSValue := t.nodeReturnsJSValue(leftNode)
+		rightIsJSValue := t.nodeReturnsJSValue(rightNode)
 		if leftIsJSValue && isNumericLit(right) {
 			left = callExpr(ident("int"), callExpr(selectorExpr(left, "Number")))
 		} else if rightIsJSValue && isNumericLit(left) {
 			right = callExpr(ident("int"), callExpr(selectorExpr(right, "Number")))
 		} else if leftIsJSValue && !rightIsJSValue && isComparisonOp(op) && !isNilNode(rightNode) {
-			// JSValue compared with a non-JSValue (likely string) → coerce to string
 			left = callExpr(selectorExpr(left, "String"))
 		} else if rightIsJSValue && !leftIsJSValue && isComparisonOp(op) && !isNilNode(leftNode) {
 			right = callExpr(selectorExpr(right, "String"))
 		} else if leftIsJSValue && isStringLit(right) && op == token.ADD {
-			// JSValue + "string" → string concatenation; coerce JSValue to string
 			t.addImport("fmt")
 			left = callExpr(selectorExpr(ident("fmt"), "Sprint"), left)
 		} else if rightIsJSValue && isStringLit(left) && op == token.ADD {
