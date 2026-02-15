@@ -439,7 +439,16 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 					typ:     d.Type,
 				})
 				hoistedSet[d.Name.Name] = idx
-				t.addToCurrentScope(d.Name.Name, true)
+				// Mark as typed only if the function returns a native Go type
+				// (bool, string, etc.), not *jsvalue.JSValue. This lets ensureBool
+				// know whether a call to this function needs a != nil wrapper.
+				returnsNative := false
+				if d.Type.Results != nil && len(d.Type.Results.List) > 0 {
+					if !isJSValuePtrType(d.Type.Results.List[0].Type) {
+						returnsNative = true
+					}
+				}
+				t.addToCurrentScope(d.Name.Name, returnsNative)
 			}
 		}
 	}

@@ -782,11 +782,15 @@ func (t *Transformer) ensureBool(expr ast.Expr) ast.Expr {
 		return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
 	case *ast.CallExpr:
 		// Method calls (obj.Method()) may return *jsvalue.JSValue → need != nil.
-		// Plain function calls (isFoo()) typically return bool already.
 		if sel, ok := e.Fun.(*ast.SelectorExpr); ok {
 			if isBoolReturningMethod(sel.Sel.Name) {
 				return expr
 			}
+			return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
+		}
+		// Plain function calls: if the function is a local that returns
+		// *jsvalue.JSValue (untyped), wrap with != nil.
+		if id, ok := e.Fun.(*ast.Ident); ok && t.isUntypedLocal(id.Name) {
 			return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
 		}
 	}
