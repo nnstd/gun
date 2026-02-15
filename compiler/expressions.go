@@ -572,7 +572,15 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 		return obj
 	}
 	// Map-typed locals use normal Go map indexing — skip the JSValue path.
+	// If the index is a JSValue variable, coerce to string for the map key.
 	if objNode != nil && objNode.Kind() == "identifier" && t.mapLocals[objNode.Utf8Text(t.source)] {
+		indexNode := node.ChildByFieldName("index")
+		if indexNode != nil && indexNode.Kind() == "identifier" {
+			idxName := indexNode.Utf8Text(t.source)
+			if t.isUntypedLocal(idxName) || (func() bool { typed, ok := t.pkgVarTyped[idxName]; return ok && !typed }()) {
+				index = callExpr(selectorExpr(index, "String"))
+			}
+		}
 		return &ast.IndexExpr{X: obj, Index: index}
 	}
 	// JSValue arrays can't be indexed directly; use .Index() for numeric
