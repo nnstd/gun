@@ -339,6 +339,18 @@ func TestNestedSubscriptOnMapLocal(t *testing.T) {
 	assertNotContains(t, out, `[int(key)]`)
 }
 
+func TestNestedMemberSubscriptOnMapLocal(t *testing.T) {
+	ts := `function f(key) {
+	const flags = {arrays: {}, bools: {}};
+	flags.arrays[key] = true;
+	const v = flags.arrays[key];
+}`
+	out := compile(t, ts)
+	assertContains(t, out, `.Set(fmt.Sprint(key)`)
+	assertContains(t, out, `.Get(fmt.Sprint(key))`)
+	assertNotContains(t, out, `[int(key)]`)
+}
+
 func TestPkgLevelJSValueUsesGet(t *testing.T) {
 	ts := `let mixin;
 function f() { return mixin.format; }`

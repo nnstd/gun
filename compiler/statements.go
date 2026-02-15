@@ -40,11 +40,11 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 							}
 						}
 					}
-					// mapLocal[x][y] = value → mapLocal[x.String()].Set(key, jsvalue.From(value))
-					// The first subscript on a map local returns *jsvalue.JSValue.
+					// mapLocal[x][y] = value or mapLocal.x[y] = value → (...).Set(key, jsvalue.From(value))
+					// The first access on a map local returns *jsvalue.JSValue.
 					if leftNode.Kind() == "subscript_expression" {
 						subObj := leftNode.ChildByFieldName("object")
-						if subObj != nil && subObj.Kind() == "subscript_expression" {
+						if subObj != nil && (subObj.Kind() == "subscript_expression" || subObj.Kind() == "member_expression") {
 							innerObj := subObj.ChildByFieldName("object")
 							if innerObj != nil && innerObj.Kind() == "identifier" && t.mapLocals[innerObj.Utf8Text(t.source)] {
 								inner := t.transformExpr(subObj)

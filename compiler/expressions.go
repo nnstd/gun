@@ -583,9 +583,9 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 		}
 		return &ast.IndexExpr{X: obj, Index: index}
 	}
-	// Nested subscript on map local: mapLocal[x][y] → mapLocal[x].Get(y)
-	// The first subscript returns *jsvalue.JSValue from the map.
-	if objNode != nil && objNode.Kind() == "subscript_expression" {
+	// Nested subscript on map local: mapLocal[x][y] or mapLocal.x[y] → (...).Get(y)
+	// The first access (subscript or member) returns *jsvalue.JSValue from the map.
+	if objNode != nil && (objNode.Kind() == "subscript_expression" || objNode.Kind() == "member_expression") {
 		innerObj := objNode.ChildByFieldName("object")
 		if innerObj != nil && innerObj.Kind() == "identifier" && t.mapLocals[innerObj.Utf8Text(t.source)] {
 			indexNode := node.ChildByFieldName("index")
