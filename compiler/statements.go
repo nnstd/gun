@@ -62,17 +62,21 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 							}
 						}
 					}
-					// obj["key"] = value on JSValue → obj.Set("key", wrappedValue)
+					// obj[key] = value on JSValue → obj.Set(key, wrappedValue)
 					if leftNode.Kind() == "subscript_expression" {
 						subObj := leftNode.ChildByFieldName("object")
 						subIdx := leftNode.ChildByFieldName("index")
 						if subObj != nil && subIdx != nil &&
-							subObj.Kind() == "identifier" && t.isUntypedLocal(subObj.Utf8Text(t.source)) &&
-							(subIdx.Kind() == "string" || subIdx.Kind() == "string_literal") {
+							subObj.Kind() == "identifier" && t.isUntypedLocal(subObj.Utf8Text(t.source)) {
 							obj := t.transformExpr(subObj)
 							key := t.transformExpr(subIdx)
 							rhs := t.transformExpr(rightNode)
 							if obj != nil && key != nil && rhs != nil {
+								// Coerce non-string indices to string for .Set()
+								if subIdx.Kind() != "string" && subIdx.Kind() != "string_literal" {
+									t.addImport("fmt")
+									key = callExpr(selectorExpr(ident("fmt"), "Sprint"), key)
+								}
 								rhs = t.wrapAsJSValue(rhs)
 								return exprStmt(callExpr(selectorExpr(obj, "Set"), key, rhs))
 							}

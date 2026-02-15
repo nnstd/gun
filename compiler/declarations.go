@@ -416,8 +416,23 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 	}
 
 	var stmts []ast.Stmt
+
+	// First pass: hoist function declarations to the top (JS hoisting semantics).
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
+		if child.Kind() == "function_declaration" {
+			if s := t.transformStmt(child); s != nil {
+				stmts = append(stmts, s)
+			}
+		}
+	}
+
+	// Second pass: process all other statements in order.
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if child.Kind() == "function_declaration" {
+			continue // already hoisted
+		}
 		// Handle variable declarations directly so destructuring (and multi-decl)
 		// statements are not lost — transformStmt can only return one ast.Stmt.
 		if child.Kind() == "lexical_declaration" || child.Kind() == "variable_declaration" {
