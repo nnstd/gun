@@ -159,14 +159,32 @@ func (t *Transformer) isNonJSValueInit(node *sitter.Node) bool {
 	}
 	switch node.Kind() {
 	case "number", "string", "template_string", "true", "false",
-		"ternary_expression", "binary_expression", "unary_expression",
-		"array", "object", "new_expression":
+		"ternary_expression", "unary_expression",
+		"array", "object", "new_expression", "regex":
+		return true
+	case "binary_expression":
+		// Logical || and && return one of their operands in JS, so the result
+		// may be *jsvalue.JSValue when operands are JSValue. Only treat as
+		// non-JSValue if both operands are themselves non-JSValue.
+		opNode := node.ChildByFieldName("operator")
+		if opNode != nil {
+			op := opNode.Utf8Text(t.source)
+			if op == "||" || op == "&&" || op == "??" {
+				left := node.ChildByFieldName("left")
+				right := node.ChildByFieldName("right")
+				return t.isNonJSValueInit(left) && t.isNonJSValueInit(right)
+			}
+		}
 		return true
 	case "call_expression":
 		fnNode := node.ChildByFieldName("function")
 		if fnNode != nil && fnNode.Kind() == "member_expression" {
 			objNode := fnNode.ChildByFieldName("object")
 			propNode := fnNode.ChildByFieldName("property")
+			// Math.xxx() calls return native float64.
+			if objNode != nil && objNode.Kind() == "identifier" && objNode.Utf8Text(t.source) == "Math" {
+				return true
+			}
 			if propNode != nil {
 				prop := propNode.Utf8Text(t.source)
 				switch prop {
@@ -419,42 +437,61 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 
 	var stmts []ast.Stmt
 
-	// First pass: transform function declarations and store results.
-	// We forward-declare `var name func(...)` at the top so the name is
-	// available throughout the block (JS hoisting), but keep the full
-	// assignment at the original position so closures see surrounding vars.
-	type hoistedFunc struct {
-		name    string
-		funcLit *ast.FuncLit
-		typ     *ast.FuncType
+	// First pass: pre-scan function declarations for hoisting.
+	// Extract signatures and register names in scope/funcParamCounts,
+	// but do NOT transform bodies yet — surrounding variables and sibling
+	// hoisted functions must be registered first so that cross-references
+	// between hoisted functions (and references to outer variables like argv)
+	// resolve correctly when bodies are transformed in the second pass.
+	type hoistedInfo struct {
+		name string
+		typ  *ast.FuncType
 	}
-	var hoisted []hoistedFunc
-	hoistedSet := map[string]int{} // name → index in hoisted slice
+	var hoisted []hoistedInfo
+	hoistedSet := map[string]bool{}
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		if child.Kind() == "function_declaration" {
-			if d := t.transformFuncDecl(child, false); d != nil {
-				idx := len(hoisted)
-				hoisted = append(hoisted, hoistedFunc{
-					name:    d.Name.Name,
-					funcLit: &ast.FuncLit{Type: d.Type, Body: d.Body},
-					typ:     d.Type,
-				})
-				hoistedSet[d.Name.Name] = idx
-				// Mark as typed only if the function returns a native Go type
-				// (bool, string, etc.), not *jsvalue.JSValue. This lets ensureBool
-				// know whether a call to this function needs a != nil wrapper.
-				returnsNative := false
-				if d.Type.Results != nil && len(d.Type.Results.List) > 0 {
-					if !isJSValuePtrType(d.Type.Results.List[0].Type) {
-						returnsNative = true
-					}
+			nameNode := child.ChildByFieldName("name")
+			if nameNode == nil {
+				continue
+			}
+			name := nameNode.Utf8Text(t.source)
+
+			// Extract Go function type (params + return type) without transforming body.
+			paramsNode := child.ChildByFieldName("parameters")
+			returnTypeNode := child.ChildByFieldName("return_type")
+			paramInfo := extractParamInfo(paramsNode, t.source)
+			t.pushTypedScope(paramInfo)
+			params, _ := t.transformParams(paramsNode)
+			var results *ast.FieldList
+			if returnTypeNode != nil {
+				retType := t.getTypeAnnotation(returnTypeNode)
+				if retType != nil {
+					results = fieldList(field("", retType))
 				}
-				t.addToCurrentScope(d.Name.Name, returnsNative)
-				// Track parameter count so call sites can pad missing args with nil.
-				if d.Type.Params != nil {
-					t.funcParamCounts[d.Name.Name] = len(d.Type.Params.List)
+			}
+			// If no explicit return type but the body has return statements
+			// with values, default to *jsvalue.JSValue.
+			bodyNode := child.ChildByFieldName("body")
+			if results == nil && bodyNode != nil && nodeHasReturnValue(bodyNode) {
+				results = fieldList(field("", jsValuePtrType()))
+			}
+			t.popScope()
+
+			funcType := &ast.FuncType{Params: params, Results: results}
+			hoisted = append(hoisted, hoistedInfo{name: name, typ: funcType})
+			hoistedSet[name] = true
+
+			returnsNative := false
+			if results != nil && len(results.List) > 0 {
+				if !isJSValuePtrType(results.List[0].Type) {
+					returnsNative = true
 				}
+			}
+			t.addToCurrentScope(name, returnsNative)
+			if params != nil {
+				t.funcParamCounts[name] = len(params.List)
 			}
 		}
 	}
@@ -475,18 +512,21 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 	}
 
 	// Second pass: process all statements in order.
+	// Hoisted function bodies are transformed HERE so that all surrounding
+	// variables and sibling hoisted functions are available in scope.
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		if child.Kind() == "function_declaration" {
-			// Emit the assignment at the original position.
 			nameNode := child.ChildByFieldName("name")
 			if nameNode != nil {
 				name := nameNode.Utf8Text(t.source)
-				if idx, ok := hoistedSet[name]; ok {
-					stmts = append(stmts, assignStmt(
-						[]ast.Expr{ident(hoisted[idx].name)},
-						[]ast.Expr{hoisted[idx].funcLit},
-					))
+				if hoistedSet[name] {
+					if d := t.transformFuncDecl(child, false); d != nil {
+						stmts = append(stmts, assignStmt(
+							[]ast.Expr{ident(d.Name.Name)},
+							[]ast.Expr{&ast.FuncLit{Type: d.Type, Body: d.Body}},
+						))
+					}
 				}
 			}
 			continue

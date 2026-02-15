@@ -27,6 +27,34 @@ func transformBuiltinCall(obj, prop string, args []ast.Expr, addImport func(stri
 	return nil
 }
 
+// transformGlobalCall handles bare global function calls like isNaN(), Error(), parseInt().
+func transformGlobalCall(name string, args []ast.Expr, addImport func(string)) ast.Expr {
+	switch name {
+	case "isNaN":
+		addImport("math")
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("math"), "IsNaN"), callExpr(selectorExpr(args[0], "Number")))
+		}
+		return ident("false")
+	case "isFinite":
+		addImport("math")
+		if len(args) > 0 {
+			return &ast.UnaryExpr{
+				Op: token.NOT,
+				X:  callExpr(selectorExpr(ident("math"), "IsInf"), callExpr(selectorExpr(args[0], "Number")), intLit("0")),
+			}
+		}
+		return ident("true")
+	case "Error", "TypeError", "RangeError", "ReferenceError":
+		addImport("fmt")
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("jsvalue"), "NewString"), callExpr(selectorExpr(ident("fmt"), "Sprint"), args[0]))
+		}
+		return callExpr(selectorExpr(ident("jsvalue"), "NewString"), stringLit("error"))
+	}
+	return nil
+}
+
 // transformBuiltinMethod dispatches method calls on arbitrary receivers (e.g. x.push, x.split).
 // Returns nil if the method is not a known builtin.
 func transformBuiltinMethod(obj ast.Expr, prop string, args []ast.Expr, addImport func(string)) ast.Expr {

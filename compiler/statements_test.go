@@ -238,3 +238,16 @@ func TestTypedLocalFromStringMethod(t *testing.T) {
 	assertContains(t, out, "strings.Index(lower")
 	assertNotContains(t, out, "lower.IndexOf")
 }
+
+func TestForLoopJSValueIncrement(t *testing.T) {
+	// ii++ where ii is *jsvalue.JSValue should use jsvalue.NewNumber, not Go ++.
+	ts := `function f(args) {
+	var ii;
+	for (ii = 0; ii < args.length; ii++) {
+		console.log(ii);
+	}
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewNumber(ii.Number() + 1)")
+	assertNotContains(t, out, "ii++")
+}

@@ -501,3 +501,48 @@ func TestHoistedFuncPaddedArgs(t *testing.T) {
 	// Call with 2 args should be padded to 3 with nil
 	assertContains(t, out, ", nil)")
 }
+
+func TestHoistedFuncLiteralArgsWrapped(t *testing.T) {
+	ts := `function outer(arg) {
+	function helper(a, b) { return a; }
+	helper("_", arg);
+}`
+	out := compile(t, ts)
+	// String literal "_" should be wrapped with jsvalue.From()
+	assertContains(t, out, `jsvalue.From("_")`)
+}
+
+func TestLogicalAndWithComparisonsIsTyped(t *testing.T) {
+	// var x = a != b && c != d should be bool, not *jsvalue.JSValue
+	ts := `function f(s: string) {
+	var check = s !== s.toLowerCase() && s !== s.toUpperCase();
+	if (!check) { return s; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "!check")
+	assertNotContains(t, out, "check == nil")
+}
+
+func TestRegexLiteralIsTyped(t *testing.T) {
+	// Variables initialized from regex literals should be *regexp.Regexp, not JSValue.
+	ts := `function f(s: string) {
+	const re = /^hello/;
+	return re.test(s);
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "regexp.MustCompile")
+	assertContains(t, out, "re.MatchString")
+	assertNotContains(t, out, "fmt.Sprint(re)")
+}
+
+func TestMathCallResultIsTyped(t *testing.T) {
+	// Variables initialized from Math.min/max should be typed (float64),
+	// not treated as JSValue.
+	ts := `function f(a: number, b: number) {
+	var m = Math.min(a, b);
+	if (m > 0) { return m; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "m > 0")
+	assertNotContains(t, out, "m.Number()")
+}

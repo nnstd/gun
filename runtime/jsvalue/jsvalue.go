@@ -371,6 +371,15 @@ func (v *JSValue) Push(elems ...*JSValue) {
 	v.arrayVal = append(v.arrayVal, elems...)
 }
 
+// Call invokes the JSValue as a function with the given arguments.
+// Returns undefined if the value is not a function.
+func (v *JSValue) Call(args ...*JSValue) *JSValue {
+	if v.funcVal != nil {
+		return v.funcVal(args...)
+	}
+	return NewUndefined()
+}
+
 // Pop removes and returns the last element, or nil if empty.
 func (v *JSValue) Pop() *JSValue {
 	if len(v.arrayVal) == 0 {

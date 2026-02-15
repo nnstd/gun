@@ -13,10 +13,17 @@ func transformMathCall(prop string, args []ast.Expr, addImport func(string)) ast
 		return callExpr(selectorExpr(ident("math"), "Round"), args...)
 	case "abs":
 		return callExpr(selectorExpr(ident("math"), "Abs"), args...)
-	case "max":
-		return callExpr(selectorExpr(ident("math"), "Max"), args...)
-	case "min":
-		return callExpr(selectorExpr(ident("math"), "Min"), args...)
+	case "max", "min":
+		// min/max commonly receive mixed types (int, JSValue); coerce to float64.
+		coerced := make([]ast.Expr, len(args))
+		for i, a := range args {
+			coerced[i] = callExpr(ident("float64"), a)
+		}
+		goName := "Max"
+		if prop == "min" {
+			goName = "Min"
+		}
+		return callExpr(selectorExpr(ident("math"), goName), coerced...)
 	case "sqrt":
 		return callExpr(selectorExpr(ident("math"), "Sqrt"), args...)
 	case "pow":

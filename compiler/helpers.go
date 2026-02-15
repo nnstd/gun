@@ -280,6 +280,30 @@ func isStringType(expr ast.Expr) bool {
 
 // hasReturnValue reports whether the block contains at least one return
 // statement that carries a value.
+// nodeHasReturnValue checks a tree-sitter node for return_statement nodes
+// that have a value child (i.e. return something, not bare return).
+// Only scans the immediate function body — does not descend into nested functions.
+func nodeHasReturnValue(node *sitter.Node) bool {
+	if node == nil {
+		return false
+	}
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		kind := child.Kind()
+		if kind == "return_statement" && child.NamedChildCount() > 0 {
+			return true
+		}
+		// Don't descend into nested function bodies.
+		if kind == "function_declaration" || kind == "arrow_function" || kind == "function_expression" || kind == "function" {
+			continue
+		}
+		if nodeHasReturnValue(child) {
+			return true
+		}
+	}
+	return false
+}
+
 func hasReturnValue(body *ast.BlockStmt) bool {
 	if body == nil {
 		return false

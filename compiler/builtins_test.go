@@ -145,6 +145,20 @@ func TestArrayConcat(t *testing.T) {
 	assertNotContains(t, out, ".Concat(")
 }
 
+func TestMathMinCoercesFloat64(t *testing.T) {
+	ts := `function f(a: number, b: number): number { return Math.min(a, b); }`
+	out := compile(t, ts)
+	assertContains(t, out, "math.Min(float64(a), float64(b))")
+}
+
+func TestMathMinCoercesJSValueViaNumber(t *testing.T) {
+	// JSValue args to Math.min should use .Number(), not float64()
+	ts := `function f(x) { var n = Math.min(x, 10); return n; }`
+	out := compile(t, ts)
+	assertContains(t, out, "x.Number()")
+	assertNotContains(t, out, "float64(x)")
+}
+
 func TestBooleanIdentifier(t *testing.T) {
 	ts := `const fn = Boolean;`
 	out := compile(t, ts)

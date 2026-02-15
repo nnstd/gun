@@ -80,6 +80,14 @@ func isComparisonOp(op token.Token) bool {
 	return false
 }
 
+func isOrderingOp(op token.Token) bool {
+	switch op {
+	case token.LSS, token.GTR, token.LEQ, token.GEQ:
+		return true
+	}
+	return false
+}
+
 func isArithmeticOp(op token.Token) bool {
 	switch op {
 	case token.ADD, token.SUB, token.MUL, token.QUO, token.REM,

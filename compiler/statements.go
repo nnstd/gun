@@ -374,7 +374,25 @@ func (t *Transformer) transformForStmt(node *sitter.Node) ast.Stmt {
 			argNode := updateNode.ChildByFieldName("argument")
 			opNode := updateNode.ChildByFieldName("operator")
 			if argNode != nil {
-				if arg := t.transformExpr(argNode); arg != nil {
+				// JSValue variables can't use Go's ++ operator.
+				// ii++ → ii = jsvalue.NewNumber(ii.Number() + 1)
+				if argNode.Kind() == "identifier" && t.isUntypedLocal(argNode.Utf8Text(t.source)) {
+					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+					lhs := t.transformExpr(argNode)
+					rhs := t.transformExpr(argNode)
+					op := token.ADD
+					if opNode != nil && opNode.Utf8Text(t.source) == "--" {
+						op = token.SUB
+					}
+					post = &ast.AssignStmt{
+						Lhs: []ast.Expr{lhs},
+						Tok: token.ASSIGN,
+						Rhs: []ast.Expr{
+							callExpr(selectorExpr(ident("jsvalue"), "NewNumber"),
+								&ast.BinaryExpr{X: callExpr(selectorExpr(rhs, "Number")), Op: op, Y: intLit("1")}),
+						},
+					}
+				} else if arg := t.transformExpr(argNode); arg != nil {
 					tok := token.INC
 					if opNode != nil && opNode.Utf8Text(t.source) == "--" {
 						tok = token.DEC

@@ -230,9 +230,32 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 		} else if rightIsJSValue && isBoolLit(left) {
 			right = callExpr(selectorExpr(right, "Bool"))
 		} else if leftIsJSValue && !rightIsJSValue && isComparisonOp(op) && !isNilNode(rightNode) {
-			left = callExpr(selectorExpr(left, "String"))
+			if isOrderingOp(op) {
+				left = callExpr(ident("int"), callExpr(selectorExpr(left, "Number")))
+			} else {
+				left = callExpr(selectorExpr(left, "String"))
+			}
 		} else if rightIsJSValue && !leftIsJSValue && isComparisonOp(op) && !isNilNode(leftNode) {
-			right = callExpr(selectorExpr(right, "String"))
+			if isOrderingOp(op) {
+				right = callExpr(ident("int"), callExpr(selectorExpr(right, "Number")))
+			} else {
+				right = callExpr(selectorExpr(right, "String"))
+			}
+		} else if leftIsJSValue && !rightIsJSValue && isArithmeticOp(op) && !isNilNode(rightNode) {
+			// JSValue + typed local → numeric arithmetic (but not string concat)
+			if op == token.ADD && isStringLitNode(rightNode) {
+				t.addImport("fmt")
+				left = callExpr(selectorExpr(ident("fmt"), "Sprint"), left)
+			} else {
+				left = callExpr(selectorExpr(left, "Number"))
+			}
+		} else if rightIsJSValue && !leftIsJSValue && isArithmeticOp(op) && !isNilNode(leftNode) {
+			if op == token.ADD && isStringLitNode(leftNode) {
+				t.addImport("fmt")
+				right = callExpr(selectorExpr(ident("fmt"), "Sprint"), right)
+			} else {
+				right = callExpr(selectorExpr(right, "Number"))
+			}
 		} else if leftIsJSValue && op == token.ADD {
 			t.addImport("fmt")
 			left = callExpr(selectorExpr(ident("fmt"), "Sprint"), left)
@@ -282,6 +305,20 @@ func (t *Transformer) transformUnaryExpr(node *sitter.Node) ast.Expr {
 		// !someCall() where the call returns *jsvalue.JSValue → call() == nil
 		if argNode != nil && t.nodeReturnsJSValue(argNode) {
 			return &ast.BinaryExpr{X: arg, Op: token.EQL, Y: ident("nil")}
+		}
+		// !str.match(regex) / !str.exec(regex) → FindStringSubmatch(...) == nil
+		// These return []string in Go, not bool, so ! must become == nil.
+		if argNode != nil && argNode.Kind() == "call_expression" {
+			fnNode := argNode.ChildByFieldName("function")
+			if fnNode != nil && fnNode.Kind() == "member_expression" {
+				propNode := fnNode.ChildByFieldName("property")
+				if propNode != nil {
+					prop := propNode.Utf8Text(t.source)
+					if prop == "match" || prop == "exec" {
+						return &ast.BinaryExpr{X: arg, Op: token.EQL, Y: ident("nil")}
+					}
+				}
+			}
 		}
 		return &ast.UnaryExpr{Op: token.NOT, X: arg}
 	case "-":
@@ -411,6 +448,19 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 
 			args := t.transformArgs(argsNode)
 
+			// For Math calls, pre-coerce JSValue args to .Number() so that
+			// math.Min/Max/Floor/etc. receive float64 values.
+			if objText == "Math" && argsNode != nil {
+				for i, arg := range args {
+					if uint(i) < argsNode.NamedChildCount() {
+						argNode := argsNode.NamedChild(uint(i))
+						if argNode != nil && argNode.Kind() == "identifier" && t.isUntypedLocal(argNode.Utf8Text(t.source)) {
+							args[i] = callExpr(selectorExpr(arg, "Number"))
+						}
+					}
+				}
+			}
+
 			// Known global objects (console, Math, JSON, Object)
 			if r := transformBuiltinCall(objText, prop, args, t.addImport); r != nil {
 				return r
@@ -466,6 +516,13 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 						}
 					} else {
 						coercedArgs := t.coerceJSValueArgs(args, argsNode)
+						// push() on a []*jsvalue.JSValue slice needs args wrapped
+						if prop == "push" && objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objText] {
+							t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+							for i, a := range coercedArgs {
+								coercedArgs[i] = callExpr(selectorExpr(ident("jsvalue"), "From"), a)
+							}
+						}
 						if r := transformBuiltinMethod(obj, prop, coercedArgs, t.addImport); r != nil {
 							return r
 						}
@@ -488,6 +545,16 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 		}
 	}
 
+	// Bare global function calls: isNaN(), Error(), parseInt(), etc.
+	if fnNode.Kind() == "identifier" {
+		name := fnNode.Utf8Text(t.source)
+		args := t.transformArgs(argsNode)
+		if r := transformGlobalCall(name, args, t.addImport); r != nil {
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			return r
+		}
+	}
+
 	// When calling a function imported from a transpiled (non-runtime) module,
 	// wrap each argument with jsvalue.From() since all params are *jsvalue.JSValue.
 	if fnNode.Kind() == "identifier" {
@@ -505,19 +572,33 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 	// When calling a local function variable whose params are all *jsvalue.JSValue
 	// (untyped hoisted function), wrap non-JSValue arguments with jsvalue.From().
 	// Pad with nil if fewer args than params (JS allows omitting trailing args).
-	if fnNode.Kind() == "identifier" && t.isUntypedLocal(fnNode.Utf8Text(t.source)) {
+	if fnNode.Kind() == "identifier" {
 		fnName := fnNode.Utf8Text(t.source)
-		fun := t.transformExpr(fnNode)
-		args := t.transformArgs(argsNode)
-		for i, arg := range args {
-			args[i] = t.wrapAsJSValue(arg)
-		}
-		if expected, ok := t.funcParamCounts[fnName]; ok && len(args) < expected {
-			for len(args) < expected {
-				args = append(args, ident("nil"))
+		_, inParamCounts := t.funcParamCounts[fnName]
+		if inParamCounts {
+			fun := t.transformExpr(fnNode)
+			args := t.transformArgs(argsNode)
+			for i, arg := range args {
+				args[i] = t.wrapAsJSValue(arg)
 			}
+			if expected, ok := t.funcParamCounts[fnName]; ok && len(args) < expected {
+				for len(args) < expected {
+					args = append(args, ident("nil"))
+				}
+			}
+			return callExpr(fun, args...)
 		}
-		return callExpr(fun, args...)
+		// Untyped locals that are NOT hoisted functions hold *jsvalue.JSValue
+		// which may be a function reference — use .Call() to invoke.
+		if t.isUntypedLocal(fnName) {
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			fun := t.transformExpr(fnNode)
+			args := t.transformArgs(argsNode)
+			for i, arg := range args {
+				args[i] = t.wrapAsJSValue(arg)
+			}
+			return callExpr(selectorExpr(fun, "Call"), args...)
+		}
 	}
 
 	fun := t.transformExpr(fnNode)
@@ -677,7 +758,14 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 			t.addImport("fmt")
 			return callExpr(selectorExpr(obj, "Get"), callExpr(selectorExpr(ident("fmt"), "Sprint"), index))
 		}
-		return callExpr(selectorExpr(obj, "Index"), index)
+		// Number literals use .Index() directly.
+		if indexNode != nil && indexNode.Kind() == "number" {
+			return callExpr(selectorExpr(obj, "Index"), index)
+		}
+		// Everything else (call expressions, etc.) — use .Get() with fmt.Sprint
+		// since the result may be a string, not an int.
+		t.addImport("fmt")
+		return callExpr(selectorExpr(obj, "Get"), callExpr(selectorExpr(ident("fmt"), "Sprint"), index))
 	}
 	// Go slice indices must be integers; wrap float64 vars with int().
 	indexNode := node.ChildByFieldName("index")
@@ -774,6 +862,13 @@ func isNilNode(node *sitter.Node) bool {
 		return false
 	}
 	return node.Kind() == "null" || node.Kind() == "undefined"
+}
+
+func isStringLitNode(node *sitter.Node) bool {
+	if node == nil {
+		return false
+	}
+	return node.Kind() == "string" || node.Kind() == "template_string"
 }
 
 func isBoolReturningMethod(name string) bool {
