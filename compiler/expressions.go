@@ -497,10 +497,18 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			if _, isNsImport := t.importedNames[objText]; !isNsImport {
 				obj := t.transformExpr(objNode)
 
+				// When the receiver returns JSValue (untyped local or JSValue-returning expression) and the method is a regex method,
+				// call the package-level function (e.g., pattern.test(s) → jsvalue.MatchString(pattern, s))
+				if (isUntypedLocal || t.nodeReturnsJSValue(objNode)) && t.builtins.IsRegexMethod(prop) {
+					if r := transformRegexpMethod(obj, prop, args, t.addImport); r != nil {
+						return r
+					}
+				}
+
 				// When the receiver is an untyped local (JSValue parameter),
 				// coerce it to string for string methods, but not for array methods.
 				// Wrap the result in JSValue to maintain type consistency.
-				if isUntypedLocal && !t.builtins.IsArrayMethod(prop) {
+				if isUntypedLocal && !t.builtins.IsArrayMethod(prop) && !t.builtins.IsRegexMethod(prop) {
 					t.addImport("fmt")
 					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 					obj = callExpr(selectorExpr(ident("fmt"), "Sprint"), obj)

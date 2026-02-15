@@ -64,8 +64,25 @@ func transformBuiltinMethod(obj ast.Expr, prop string, args []ast.Expr, addImpor
 	if r := transformCollectionMethod(obj, prop, args, addImport); r != nil {
 		return r
 	}
-	if r := transformRegexpMethod(obj, prop, args, addImport); r != nil {
-		return r
+	// For typed regex values (not JSValue), use method form directly
+	// JSValue regex is handled separately in expressions.go
+	if prop == "test" && len(args) > 0 {
+		// regex.test(str) → regex.MatchString(str)
+		arg := args[0]
+		if isJSValueMethodCall(arg) {
+			addImport("fmt")
+			arg = callExpr(selectorExpr(ident("fmt"), "Sprint"), arg)
+		}
+		return callExpr(selectorExpr(obj, "MatchString"), arg)
+	}
+	if prop == "exec" && len(args) > 0 {
+		// regex.exec(str) → regex.FindStringSubmatch(str)
+		arg := args[0]
+		if isJSValueMethodCall(arg) {
+			addImport("fmt")
+			arg = callExpr(selectorExpr(ident("fmt"), "Sprint"), arg)
+		}
+		return callExpr(selectorExpr(obj, "FindStringSubmatch"), arg)
 	}
 	return nil
 }

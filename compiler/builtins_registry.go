@@ -20,6 +20,8 @@ type MethodInfo struct {
 	WrapForJSValue bool
 	// Is this an array method (vs string method)?
 	IsArrayMethod bool
+	// Is this a regex method?
+	IsRegexMethod bool
 }
 
 // BuiltinRegistry maintains metadata about all built-in methods.
@@ -34,6 +36,7 @@ func NewBuiltinRegistry() *BuiltinRegistry {
 	}
 	r.registerStringMethods()
 	r.registerArrayMethods()
+	r.registerRegexMethods()
 	return r
 }
 
@@ -58,7 +61,6 @@ func (r *BuiltinRegistry) registerStringMethods() {
 		{Name: "endsWith", ReturnType: ReturnBoolean, WrapForJSValue: true},
 		{Name: "includes", ReturnType: ReturnBoolean, WrapForJSValue: true},
 		{Name: "match", ReturnType: ReturnJSValue, WrapForJSValue: true},
-		{Name: "test", ReturnType: ReturnBoolean, WrapForJSValue: true},
 		{Name: "split", ReturnType: ReturnArray, WrapForJSValue: true},
 	}
 	for _, m := range stringMethods {
@@ -90,6 +92,16 @@ func (r *BuiltinRegistry) registerArrayMethods() {
 	}
 }
 
+func (r *BuiltinRegistry) registerRegexMethods() {
+	regexMethods := []*MethodInfo{
+		{Name: "test", ReturnType: ReturnBoolean, IsRegexMethod: true},
+		{Name: "exec", ReturnType: ReturnJSValue, IsRegexMethod: true},
+	}
+	for _, m := range regexMethods {
+		r.methods[m.Name] = m
+	}
+}
+
 // GetMethod returns metadata for a method, or nil if not found.
 func (r *BuiltinRegistry) GetMethod(name string) *MethodInfo {
 	return r.methods[name]
@@ -104,7 +116,13 @@ func (r *BuiltinRegistry) IsArrayMethod(name string) bool {
 // IsStringMethod returns true if the method is a string method.
 func (r *BuiltinRegistry) IsStringMethod(name string) bool {
 	m := r.methods[name]
-	return m != nil && !m.IsArrayMethod
+	return m != nil && !m.IsArrayMethod && !m.IsRegexMethod
+}
+
+// IsRegexMethod returns true if the method is a regex method.
+func (r *BuiltinRegistry) IsRegexMethod(name string) bool {
+	m := r.methods[name]
+	return m != nil && m.IsRegexMethod
 }
 
 // ReturnsJSValueForUntypedReceiver returns true if the method should return

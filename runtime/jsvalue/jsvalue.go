@@ -257,20 +257,34 @@ func (v *JSValue) Len() int {
 	return 0
 }
 
-// MatchString tests whether the JSValue (as a regex) matches the string s.
-// This implements JavaScript's regex.test(s) method.
+// MatchString tests whether the JSValue (as a regex) matches the given value.
+// This is a core bridge method for regex.test() when the regex is a JSValue.
+// The argument is coerced to string if needed.
 // Returns false if the JSValue is not a regex.
-func (v *JSValue) MatchString(s string) bool {
+func (v *JSValue) MatchString(s any) bool {
 	if v == nil || v.typ != TypeRegex || v.regexVal == nil {
 		return false
 	}
+
+	// Coerce argument to string
+	var str string
+	switch val := s.(type) {
+	case string:
+		str = val
+	case *JSValue:
+		str = val.String()
+	default:
+		str = fmt.Sprint(val)
+	}
+
 	// Type assert to *regexp.Regexp
 	// We use interface{} in the struct to avoid import cycles
 	if re, ok := v.regexVal.(interface{ MatchString(string) bool }); ok {
-		return re.MatchString(s)
+		return re.MatchString(str)
 	}
 	return false
 }
+
 
 
 // Call invokes the JSValue as a function with the given arguments.
@@ -394,4 +408,32 @@ func ForEach(arr *JSValue, fn func(*JSValue)) {
 	for _, elem := range arr.arrayVal {
 		fn(elem)
 	}
+}
+
+// MatchString tests whether a regex JSValue matches the given value.
+// This implements JavaScript's regex.test(s) method.
+// The value argument is coerced to string if it's a JSValue.
+// Returns false if the regex is not a valid regex JSValue.
+func MatchString(regex *JSValue, value any) bool {
+	if regex == nil || regex.typ != TypeRegex || regex.regexVal == nil {
+		return false
+	}
+
+	// Coerce argument to string
+	var str string
+	switch val := value.(type) {
+	case string:
+		str = val
+	case *JSValue:
+		str = val.String()
+	default:
+		str = fmt.Sprint(val)
+	}
+
+	// Type assert to *regexp.Regexp
+	// We use interface{} in the struct to avoid import cycles
+	if re, ok := regex.regexVal.(interface{ MatchString(string) bool }); ok {
+		return re.MatchString(str)
+	}
+	return false
 }

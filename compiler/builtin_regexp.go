@@ -3,28 +3,20 @@ package compiler
 import "go/ast"
 
 // transformRegexpMethod handles method calls on regexp objects.
+// The obj parameter should always be a JSValue expression (either an identifier
+// or wrapped with NewRegex for typed regex values).
 func transformRegexpMethod(obj ast.Expr, prop string, args []ast.Expr, addImport func(string)) ast.Expr {
 	switch prop {
 	case "test":
-		// regex.test(str) → regex.MatchString(str)
+		// regex.test(str) → jsvalue.MatchString(regex, str)
 		if len(args) > 0 {
-			arg := args[0]
-			if isJSValueMethodCall(arg) {
-				addImport("fmt")
-				arg = callExpr(selectorExpr(ident("fmt"), "Sprint"), arg)
-			}
-			return callExpr(selectorExpr(obj, "MatchString"), arg)
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "MatchString"), obj, args[0])
 		}
 	case "exec":
-		// regex.exec(str) → regex.FindStringSubmatch(str)
-		if len(args) > 0 {
-			arg := args[0]
-			if isJSValueMethodCall(arg) {
-				addImport("fmt")
-				arg = callExpr(selectorExpr(ident("fmt"), "Sprint"), arg)
-			}
-			return callExpr(selectorExpr(obj, "FindStringSubmatch"), arg)
-		}
+		// For now, exec is not supported on JSValue regex
+		// Could be added as a package-level function if needed
+		return nil
 	}
 	return nil
 }
