@@ -237,6 +237,13 @@ func TestParamObjectDestructuring(t *testing.T) {
 	assertNotContains(t, out, "{ name")
 }
 
+func TestDestructuredParamSubscript(t *testing.T) {
+	ts := `function f({ key }) { return key[0]; }`
+	out := compile(t, ts)
+	assertNotContains(t, out, "cannot index _param0")
+	assertNotContains(t, out, "[int(")
+}
+
 func TestEmptyInput(t *testing.T) {
 	out, err := Compile([]byte(""), "main", "", false)
 	if err != nil {

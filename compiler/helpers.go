@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
 	"strings"
@@ -467,6 +468,11 @@ func extractParamInfo(node *sitter.Node, source []byte) map[string]bool {
 			typeNode := param.ChildByFieldName("type")
 			if nameNode != nil && nameNode.Kind() == "identifier" {
 				info[nameNode.Utf8Text(source)] = typeNode != nil && !isAnyType(typeNode, source)
+			}
+			// Destructured parameters generate synthetic _paramN names — track
+			// them as untyped so subscript access uses .Get()/.Index().
+			if nameNode != nil && (nameNode.Kind() == "object_pattern" || nameNode.Kind() == "array_pattern") {
+				info[fmt.Sprintf("_param%d", i)] = typeNode != nil && !isAnyType(typeNode, source)
 			}
 		case "rest_parameter":
 			nameNode := param.ChildByFieldName("pattern")
