@@ -94,6 +94,11 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 						if leftNode.Kind() == "subscript_expression" && t.nodeReturnsJSValue(leftNode) && !isNilIdent(rhs) {
 							rhs = t.wrapAsJSValue(rhs)
 						}
+						// When assigning a JSValue-returning expression to a typed local
+						// (e.g. i = eatArray(...) where i is int), coerce the return value.
+						if leftNode.Kind() == "identifier" && t.isTypedLocal(leftNode.Utf8Text(t.source)) && t.nodeReturnsJSValue(rightNode) {
+							rhs = callExpr(ident("int"), callExpr(selectorExpr(rhs, "Number")))
+						}
 						return assignStmt([]ast.Expr{lhs}, []ast.Expr{rhs})
 					}
 				}

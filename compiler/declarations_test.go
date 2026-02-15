@@ -397,3 +397,35 @@ function f() { return mixin.format; }`
 	assertContains(t, out, `mixin.Get("format")`)
 	assertNotContains(t, out, "mixin.Format")
 }
+
+func TestCodePointAtTyped(t *testing.T) {
+	ts := `function f(s: string) {
+	const cp = s.codePointAt(0);
+	if (cp <= 0x1F) { return true; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "var cp = int(")
+	assertNotContains(t, out, "cp.Number()")
+}
+
+func TestJSValueComparedWithBoolLit(t *testing.T) {
+	ts := `function f(obj, key) {
+	const check = (k, m) => m;
+	if (check(key, obj) !== false) { return true; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, ".Bool() != false")
+	assertNotContains(t, out, ".String() != false")
+}
+
+func TestTypedLocalAssignedFromUntypedCall(t *testing.T) {
+	ts := `function outer(args) {
+	function inner(i, key) { return i; }
+	for (let i = 0; i < args.length; i++) {
+		i = inner(i, args[i]);
+	}
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "int(inner(")
+	assertContains(t, out, ".Number())")
+}

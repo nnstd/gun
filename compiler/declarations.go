@@ -171,7 +171,8 @@ func (t *Transformer) isNonJSValueInit(node *sitter.Node) bool {
 				prop := propNode.Utf8Text(t.source)
 				switch prop {
 				case "toLowerCase", "toUpperCase", "trim", "trimStart", "trimEnd",
-					"toString", "replace", "replaceAll", "join", "split":
+					"toString", "replace", "replaceAll", "join", "split",
+					"codePointAt", "charCodeAt", "indexOf":
 					return true
 				case "charAt":
 					// charAt on a typed local (string) returns string;

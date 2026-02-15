@@ -173,6 +173,10 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		return false
 	case "call_expression":
 		fnNode := node.ChildByFieldName("function")
+		// Plain function call to untyped local → returns *jsvalue.JSValue
+		if fnNode != nil && fnNode.Kind() == "identifier" && t.isUntypedLocal(fnNode.Utf8Text(t.source)) {
+			return true
+		}
 		if fnNode != nil && fnNode.Kind() == "member_expression" {
 			objNode := fnNode.ChildByFieldName("object")
 			propNode := fnNode.ChildByFieldName("property")

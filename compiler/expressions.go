@@ -225,6 +225,10 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 			left = callExpr(ident("int"), callExpr(selectorExpr(left, "Number")))
 		} else if rightIsJSValue && isNumericLit(left) {
 			right = callExpr(ident("int"), callExpr(selectorExpr(right, "Number")))
+		} else if leftIsJSValue && isBoolLit(right) {
+			left = callExpr(selectorExpr(left, "Bool"))
+		} else if rightIsJSValue && isBoolLit(left) {
+			right = callExpr(selectorExpr(right, "Bool"))
 		} else if leftIsJSValue && !rightIsJSValue && isComparisonOp(op) && !isNilNode(rightNode) {
 			left = callExpr(selectorExpr(left, "String"))
 		} else if rightIsJSValue && !leftIsJSValue && isComparisonOp(op) && !isNilNode(leftNode) {
@@ -726,6 +730,11 @@ func isNumericLit(expr ast.Expr) bool {
 		return false
 	}
 	return lit.Kind == token.INT || lit.Kind == token.FLOAT
+}
+
+func isBoolLit(expr ast.Expr) bool {
+	id, ok := expr.(*ast.Ident)
+	return ok && (id.Name == "true" || id.Name == "false")
 }
 
 func isNilNode(node *sitter.Node) bool {
