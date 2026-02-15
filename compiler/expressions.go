@@ -824,6 +824,14 @@ func (t *Transformer) ensureBool(expr ast.Expr) ast.Expr {
 		if id, ok := e.Fun.(*ast.Ident); ok && t.isUntypedLocal(id.Name) {
 			return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
 		}
+		// IIFE returning *jsvalue.JSValue (from || default-value pattern) → != nil
+		if fl, ok := e.Fun.(*ast.FuncLit); ok {
+			if fl.Type.Results != nil && len(fl.Type.Results.List) > 0 {
+				if isJSValuePtrType(fl.Type.Results.List[0].Type) {
+					return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
+				}
+			}
+		}
 	}
 	return expr
 }
