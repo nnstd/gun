@@ -371,6 +371,23 @@ func TestNestedMemberSubscriptOnMapLocal(t *testing.T) {
 	assertNotContains(t, out, `[int(key)]`)
 }
 
+func TestNestedFunctionDeclaration(t *testing.T) {
+	ts := `function outer(x) {
+	function inner(y) { return y; }
+	return inner(x);
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "inner := func(")
+	assertNotContains(t, out, "func inner(")
+}
+
+func TestJSValueSubscriptWithJSValueIndex(t *testing.T) {
+	ts := `function f(obj, key) { return obj[key]; }`
+	out := compile(t, ts)
+	assertContains(t, out, `obj.Get(fmt.Sprint(key))`)
+	assertNotContains(t, out, "obj.Index(key)")
+}
+
 func TestPkgLevelJSValueUsesGet(t *testing.T) {
 	ts := `let mixin;
 function f() { return mixin.format; }`

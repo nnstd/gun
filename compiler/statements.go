@@ -228,6 +228,20 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 	case "block", "statement_block":
 		return t.transformBlock(node)
 
+	case "function_declaration":
+		// Nested function declarations (JS hoists these within their scope).
+		// Go doesn't allow named func decls inside function bodies, so emit
+		// as `name := func(...) ... { ... }` variable assignment.
+		if d := t.transformFuncDecl(node, false); d != nil {
+			funcLit := &ast.FuncLit{
+				Type: d.Type,
+				Body: d.Body,
+			}
+			t.addToCurrentScope(d.Name.Name, true)
+			return assignDefine([]ast.Expr{ident(d.Name.Name)}, []ast.Expr{funcLit})
+		}
+		return nil
+
 	case "comment", "line_comment", "block_comment":
 		return nil
 

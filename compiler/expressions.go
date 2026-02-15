@@ -617,6 +617,12 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 		if indexNode != nil && (indexNode.Kind() == "string" || indexNode.Kind() == "string_literal") {
 			return callExpr(selectorExpr(obj, "Get"), index)
 		}
+		// If the index is itself a JSValue (untyped local), use .Get() with string coercion
+		// since .Index() expects int.
+		if indexNode != nil && indexNode.Kind() == "identifier" && t.isUntypedLocal(indexNode.Utf8Text(t.source)) {
+			t.addImport("fmt")
+			return callExpr(selectorExpr(obj, "Get"), callExpr(selectorExpr(ident("fmt"), "Sprint"), index))
+		}
 		return callExpr(selectorExpr(obj, "Index"), index)
 	}
 	// Go slice indices must be integers; wrap float64 vars with int().
