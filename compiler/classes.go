@@ -132,6 +132,11 @@ func (t *Transformer) transformConstructor(node *sitter.Node, className, recv st
 
 	params, paramStmts := t.transformParams(paramsNode)
 
+	// Push scope so locals declared in the constructor body are tracked.
+	paramInfo := extractParamInfo(paramsNode, t.source)
+	t.pushTypedScope(paramInfo)
+	defer t.popScope()
+
 	// Build constructor body:
 	// recv := &ClassName{}
 	// <translated body with this.x → recv.X>
@@ -172,6 +177,11 @@ func (t *Transformer) transformMethod(node *sitter.Node, className, recv string)
 
 	mName := capitalize(nameNode.Utf8Text(t.source))
 	params, paramStmts := t.transformParams(paramsNode)
+
+	// Push scope so locals declared in the method body are tracked.
+	paramInfo := extractParamInfo(paramsNode, t.source)
+	t.pushTypedScope(paramInfo)
+	defer t.popScope()
 
 	var results *ast.FieldList
 	if returnTypeNode != nil {
