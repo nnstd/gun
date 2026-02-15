@@ -295,6 +295,45 @@ func TestArrayLiteralIndexUsesNativeSubscript(t *testing.T) {
 	assertNotContains(t, out, "args.Index(")
 }
 
+func TestNegationOnSubscriptUsesNilCheck(t *testing.T) {
+	// !arr[i] where arr is []*jsvalue.JSValue should emit arr[i] == nil.
+	ts := `function f(x) { const args = [x]; if (!args[0]) { return x; } }`
+	out := compile(t, ts)
+	assertContains(t, out, "== nil")
+	assertNotContains(t, out, "!args[")
+}
+
+func TestSliceIndexWrapsFloat64WithInt(t *testing.T) {
+	// JS number vars are float64; Go slice indices must be int.
+	ts := `function f(x) { const args = [x]; let i = 0; return args[i]; }`
+	out := compile(t, ts)
+	assertContains(t, out, "args[int(i)]")
+}
+
+func TestJSValueSliceElementAssignmentWrapped(t *testing.T) {
+	// Assigning a string literal to a JSValue slice element should wrap with jsvalue.From().
+	ts := `function f(x) { const args = [x]; args[0] = "hello"; }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.From(")
+}
+
+func TestJSValueSliceElementPlusString(t *testing.T) {
+	// JSValue slice element + "" should coerce the element to string.
+	ts := `function f(x) { const args = [x]; return args[0] + ""; }`
+	out := compile(t, ts)
+	assertContains(t, out, "fmt.Sprint(")
+	assertNotContains(t, out, `args[int(0)] + ""`)
+}
+
+func TestJSValueComparedWithOwnStringMethod(t *testing.T) {
+	// str !== str.toLowerCase() should coerce str to .String() on the left,
+	// not treat both sides as JSValue.
+	ts := `function f(str) { return str !== str.toLowerCase(); }`
+	out := compile(t, ts)
+	assertContains(t, out, ".String()")
+	assertContains(t, out, "strings.ToLower")
+}
+
 func TestLocalVarPropertyAccessUsesGet(t *testing.T) {
 	// Local variables declared inside a function body should be registered
 	// in scope so property access uses .Get() instead of struct field access.
