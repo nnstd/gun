@@ -702,6 +702,13 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 		}
 
 	case "array_pattern":
+		// Check if the source value is a *jsvalue.JSValue — if so, use
+		// .Index() instead of Go's [] operator.
+		useJSIndex := false
+		if id, ok := valExpr.(*ast.Ident); ok {
+			useJSIndex = t.isUntypedLocal(id.Name) || strings.HasPrefix(id.Name, "_param")
+		}
+
 		for i := uint(0); i < pattern.NamedChildCount(); i++ {
 			child := pattern.NamedChild(i)
 
@@ -718,13 +725,19 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 					continue
 				}
 				name := nameNode.Utf8Text(t.source)
+				var rhs ast.Expr
+				if useJSIndex {
+					rhs = callExpr(selectorExpr(valExpr, "Slice"), intLit(fmt.Sprintf("%d", i)))
+				} else {
+					rhs = &ast.SliceExpr{
+						X:   valExpr,
+						Low: intLit(fmt.Sprintf("%d", i)),
+					}
+				}
 				stmts = append(stmts, &ast.AssignStmt{
 					Lhs: []ast.Expr{ident(name)},
 					Tok: token.DEFINE,
-					Rhs: []ast.Expr{&ast.SliceExpr{
-						X:   valExpr,
-						Low: intLit(fmt.Sprintf("%d", i)),
-					}},
+					Rhs: []ast.Expr{rhs},
 				})
 				continue
 			}
@@ -733,13 +746,19 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 			if name == "" {
 				continue
 			}
+			var rhs ast.Expr
+			if useJSIndex {
+				rhs = callExpr(selectorExpr(valExpr, "Index"), intLit(fmt.Sprintf("%d", i)))
+			} else {
+				rhs = &ast.IndexExpr{
+					X:     valExpr,
+					Index: intLit(fmt.Sprintf("%d", i)),
+				}
+			}
 			stmts = append(stmts, &ast.AssignStmt{
 				Lhs: []ast.Expr{ident(name)},
 				Tok: token.DEFINE,
-				Rhs: []ast.Expr{&ast.IndexExpr{
-					X:     valExpr,
-					Index: intLit(fmt.Sprintf("%d", i)),
-				}},
+				Rhs: []ast.Expr{rhs},
 			})
 		}
 	}
