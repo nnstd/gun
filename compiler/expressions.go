@@ -776,6 +776,24 @@ func isJSValueGet(expr ast.Expr) bool {
 	return sel.Sel.Name == "Get"
 }
 
+// isJSValueMethodCall returns true if the expression is a method call that
+// likely returns *jsvalue.JSValue (e.g. obj.Get(), obj.Slice(), obj.Index()).
+func isJSValueMethodCall(expr ast.Expr) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	switch sel.Sel.Name {
+	case "Get", "Slice", "Index", "Match", "CharAt":
+		return true
+	}
+	return false
+}
+
 // ensureBool wraps a non-boolean expression so it can be used in an if condition.
 // JSValue Get() calls are wrapped with .Bool(); other pointer/interface types
 // get a != nil check.

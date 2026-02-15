@@ -3,9 +3,11 @@ package compiler
 import "go/ast"
 
 func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport func(string)) ast.Expr {
-	// If the receiver is a JSValue Get() call, coerce to string for string methods.
-	if isJSValueGet(obj) {
-		obj = callExpr(selectorExpr(obj, "String"))
+	// If the receiver is a JSValue method call (Get, Slice, Index, etc.),
+	// coerce to string for string methods.
+	if isJSValueMethodCall(obj) {
+		addImport("fmt")
+		obj = callExpr(selectorExpr(ident("fmt"), "Sprint"), obj)
 	}
 
 	switch prop {
