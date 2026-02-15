@@ -221,9 +221,9 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 	if isComparisonOp(op) || isArithmeticOp(op) {
 		leftIsJSValue := t.nodeReturnsJSValue(leftNode)
 		rightIsJSValue := t.nodeReturnsJSValue(rightNode)
-		if leftIsJSValue && isNumericLit(right) {
+		if leftIsJSValue && isNumericExpr(right) {
 			left = callExpr(ident("int"), callExpr(selectorExpr(left, "Number")))
-		} else if rightIsJSValue && isNumericLit(left) {
+		} else if rightIsJSValue && isNumericExpr(left) {
 			right = callExpr(ident("int"), callExpr(selectorExpr(right, "Number")))
 		} else if leftIsJSValue && isBoolLit(right) {
 			left = callExpr(selectorExpr(left, "Bool"))
@@ -945,6 +945,23 @@ func isNumericLit(expr ast.Expr) bool {
 		return false
 	}
 	return lit.Kind == token.INT || lit.Kind == token.FLOAT
+}
+
+// isNumericExpr returns true if the expression is a numeric value (literal or unary expression like -1).
+func isNumericExpr(expr ast.Expr) bool {
+	// Check for basic numeric literal
+	if isNumericLit(expr) {
+		return true
+	}
+	// Check for unary expression (e.g., -1, +5)
+	unary, ok := expr.(*ast.UnaryExpr)
+	if !ok {
+		return false
+	}
+	if unary.Op != token.SUB && unary.Op != token.ADD {
+		return false
+	}
+	return isNumericLit(unary.X)
 }
 
 func isBoolLit(expr ast.Expr) bool {
