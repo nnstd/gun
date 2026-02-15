@@ -151,7 +151,20 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		fnNode := node.ChildByFieldName("function")
 		if fnNode != nil && fnNode.Kind() == "member_expression" {
 			objNode := fnNode.ChildByFieldName("object")
-			return objNode != nil && t.nodeReturnsJSValue(objNode)
+			propNode := fnNode.ChildByFieldName("property")
+			if objNode != nil && t.nodeReturnsJSValue(objNode) {
+				// String methods get transformed to Go stdlib calls returning string, not JSValue.
+				if propNode != nil {
+					switch propNode.Utf8Text(t.source) {
+					case "toLowerCase", "toUpperCase", "trim", "trimStart", "trimEnd",
+						"toString", "replace", "replaceAll", "join", "split",
+						"charAt", "indexOf", "lastIndexOf", "slice", "substring",
+						"startsWith", "endsWith", "includes", "match", "test":
+						return false
+					}
+				}
+				return true
+			}
 		}
 	case "member_expression":
 		objNode := node.ChildByFieldName("object")
