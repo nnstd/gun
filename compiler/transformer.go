@@ -184,8 +184,18 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 			propNode := fnNode.ChildByFieldName("property")
 			if objNode != nil && t.nodeReturnsJSValue(objNode) {
 				// String methods get transformed to Go stdlib calls returning string, not JSValue.
+				// However, some methods (charAt, match, slice) use the JSValue runtime
+				// when the receiver is an untyped local — those still return JSValue.
 				if propNode != nil {
-					switch propNode.Utf8Text(t.source) {
+					prop := propNode.Utf8Text(t.source)
+					jsValueRuntimeMethod := map[string]bool{
+						"charAt": true, "match": true, "slice": true,
+					}
+					isUntypedReceiver := objNode.Kind() == "identifier" && t.isUntypedLocal(objNode.Utf8Text(t.source))
+					if isUntypedReceiver && jsValueRuntimeMethod[prop] {
+						return true
+					}
+					switch prop {
 					case "toLowerCase", "toUpperCase", "trim", "trimStart", "trimEnd",
 						"toString", "replace", "replaceAll", "join", "split",
 						"charAt", "indexOf", "lastIndexOf", "slice", "substring",
