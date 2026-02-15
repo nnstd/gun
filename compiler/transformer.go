@@ -168,7 +168,15 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		}
 	case "member_expression":
 		objNode := node.ChildByFieldName("object")
-		return objNode != nil && t.nodeReturnsJSValue(objNode)
+		propNode := node.ChildByFieldName("property")
+		if objNode != nil && t.nodeReturnsJSValue(objNode) {
+			// .length is transformed to .Len() which returns int, not JSValue.
+			if propNode != nil && propNode.Utf8Text(t.source) == "length" {
+				return false
+			}
+			return true
+		}
+		return false
 	}
 	return false
 }
