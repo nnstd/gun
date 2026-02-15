@@ -377,7 +377,9 @@ func TestNestedFunctionDeclaration(t *testing.T) {
 	return inner(x);
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "inner := func(")
+	// Forward declaration at top, assignment at original position
+	assertContains(t, out, "var inner func(")
+	assertContains(t, out, "inner = func(")
 	assertNotContains(t, out, "func inner(")
 }
 

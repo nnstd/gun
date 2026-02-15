@@ -417,21 +417,64 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 
 	var stmts []ast.Stmt
 
-	// First pass: hoist function declarations to the top (JS hoisting semantics).
+	// First pass: transform function declarations and store results.
+	// We forward-declare `var name func(...)` at the top so the name is
+	// available throughout the block (JS hoisting), but keep the full
+	// assignment at the original position so closures see surrounding vars.
+	type hoistedFunc struct {
+		name    string
+		funcLit *ast.FuncLit
+		typ     *ast.FuncType
+	}
+	var hoisted []hoistedFunc
+	hoistedSet := map[string]int{} // name → index in hoisted slice
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		if child.Kind() == "function_declaration" {
-			if s := t.transformStmt(child); s != nil {
-				stmts = append(stmts, s)
+			if d := t.transformFuncDecl(child, false); d != nil {
+				idx := len(hoisted)
+				hoisted = append(hoisted, hoistedFunc{
+					name:    d.Name.Name,
+					funcLit: &ast.FuncLit{Type: d.Type, Body: d.Body},
+					typ:     d.Type,
+				})
+				hoistedSet[d.Name.Name] = idx
+				t.addToCurrentScope(d.Name.Name, true)
 			}
 		}
 	}
 
-	// Second pass: process all other statements in order.
+	// Emit forward declarations for hoisted functions.
+	for _, h := range hoisted {
+		stmts = append(stmts, &ast.DeclStmt{
+			Decl: &ast.GenDecl{
+				Tok: token.VAR,
+				Specs: []ast.Spec{
+					&ast.ValueSpec{
+						Names: []*ast.Ident{ident(h.name)},
+						Type:  h.typ,
+					},
+				},
+			},
+		})
+	}
+
+	// Second pass: process all statements in order.
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		if child.Kind() == "function_declaration" {
-			continue // already hoisted
+			// Emit the assignment at the original position.
+			nameNode := child.ChildByFieldName("name")
+			if nameNode != nil {
+				name := nameNode.Utf8Text(t.source)
+				if idx, ok := hoistedSet[name]; ok {
+					stmts = append(stmts, assignStmt(
+						[]ast.Expr{ident(hoisted[idx].name)},
+						[]ast.Expr{hoisted[idx].funcLit},
+					))
+				}
+			}
+			continue
 		}
 		// Handle variable declarations directly so destructuring (and multi-decl)
 		// statements are not lost — transformStmt can only return one ast.Stmt.
