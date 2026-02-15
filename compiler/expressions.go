@@ -477,6 +477,12 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			// use selector form so it compiles as obj.Method(args)
 			if objNode.Kind() == "identifier" && t.isLocalName(objText) {
 				obj := t.transformExpr(objNode)
+				// JSValue slice locals ([]*jsvalue.JSValue) don't have JSValue methods;
+				// wrap with jsvalue.NewArray() to convert to *jsvalue.JSValue first.
+				if t.jsvalueSliceLocals[objText] {
+					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+					obj = callExpr(selectorExpr(ident("jsvalue"), "NewArray"), &ast.Ident{Name: objText + "..."})
+				}
 				return callExpr(selectorExpr(obj, capitalize(prop)), args...)
 			}
 		}
@@ -663,6 +669,11 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 		// If the index is itself a JSValue (untyped local), use .Get() with string coercion
 		// since .Index() expects int.
 		if indexNode != nil && indexNode.Kind() == "identifier" && t.isUntypedLocal(indexNode.Utf8Text(t.source)) {
+			t.addImport("fmt")
+			return callExpr(selectorExpr(obj, "Get"), callExpr(selectorExpr(ident("fmt"), "Sprint"), index))
+		}
+		// Typed locals could be strings (e.g. notFlagsArgv); use .Get() with fmt.Sprint.
+		if indexNode != nil && indexNode.Kind() == "identifier" && t.isTypedLocal(indexNode.Utf8Text(t.source)) {
 			t.addImport("fmt")
 			return callExpr(selectorExpr(obj, "Get"), callExpr(selectorExpr(ident("fmt"), "Sprint"), index))
 		}

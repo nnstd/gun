@@ -472,6 +472,26 @@ func TestLenInBoolContext(t *testing.T) {
 	assertContains(t, out, "> 0")
 }
 
+func TestJSValueSliceMethodCallWrapped(t *testing.T) {
+	ts := `function f() {
+	const items = [];
+	items.forEach((x) => { return x; });
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewArray(items...)")
+	assertContains(t, out, ".ForEach(")
+}
+
+func TestTypedLocalIndexOnJSValueUsesGet(t *testing.T) {
+	ts := `function f(obj) {
+	const key = "hello";
+	return obj[key];
+}`
+	out := compile(t, ts)
+	assertContains(t, out, `.Get(fmt.Sprint(key))`)
+	assertNotContains(t, out, ".Index(key)")
+}
+
 func TestHoistedFuncPaddedArgs(t *testing.T) {
 	ts := `function outer(x) {
 	function inner(a, b, c) { return a; }
