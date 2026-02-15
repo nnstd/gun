@@ -489,11 +489,18 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 
 	// When calling a local function variable whose params are all *jsvalue.JSValue
 	// (untyped hoisted function), wrap non-JSValue arguments with jsvalue.From().
+	// Pad with nil if fewer args than params (JS allows omitting trailing args).
 	if fnNode.Kind() == "identifier" && t.isUntypedLocal(fnNode.Utf8Text(t.source)) {
+		fnName := fnNode.Utf8Text(t.source)
 		fun := t.transformExpr(fnNode)
 		args := t.transformArgs(argsNode)
 		for i, arg := range args {
 			args[i] = t.wrapAsJSValue(arg)
+		}
+		if expected, ok := t.funcParamCounts[fnName]; ok && len(args) < expected {
+			for len(args) < expected {
+				args = append(args, ident("nil"))
+			}
 		}
 		return callExpr(fun, args...)
 	}
@@ -798,7 +805,7 @@ func (t *Transformer) ensureBool(expr ast.Expr) ast.Expr {
 	}
 	// Non-boolean identifiers and selectors: treat as truthiness check → != nil
 	switch e := expr.(type) {
-	case *ast.Ident, *ast.SelectorExpr:
+	case *ast.Ident, *ast.SelectorExpr, *ast.IndexExpr:
 		return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
 	case *ast.CallExpr:
 		// Method calls (obj.Method()) may return *jsvalue.JSValue → need != nil.

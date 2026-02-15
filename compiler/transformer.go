@@ -24,6 +24,7 @@ type Transformer struct {
 	jsvalueSliceLocals map[string]bool            // typed locals whose elements are *jsvalue.JSValue (e.g. []*jsvalue.JSValue slices)
 	mapLocals          map[string]bool            // typed locals initialized from object literals (map[string]*jsvalue.JSValue)
 	pkgVarTyped        map[string]bool            // package-level variable name → true if typed (not JSValue)
+	funcParamCounts    map[string]int             // hoisted function name → parameter count (for padding missing args)
 }
 
 func newTransformer(source []byte, pkgName, moduleName string, samePackageImports bool) *Transformer {
@@ -39,6 +40,7 @@ func newTransformer(source []byte, pkgName, moduleName string, samePackageImport
 		jsvalueSliceLocals: make(map[string]bool),
 		mapLocals:          make(map[string]bool),
 		pkgVarTyped:        make(map[string]bool),
+		funcParamCounts:    make(map[string]int),
 	}
 }
 

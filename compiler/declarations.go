@@ -451,6 +451,10 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 					}
 				}
 				t.addToCurrentScope(d.Name.Name, returnsNative)
+				// Track parameter count so call sites can pad missing args with nil.
+				if d.Type.Params != nil {
+					t.funcParamCounts[d.Name.Name] = len(d.Type.Params.List)
+				}
 			}
 		}
 	}

@@ -429,3 +429,22 @@ func TestTypedLocalAssignedFromUntypedCall(t *testing.T) {
 	assertContains(t, out, "int(inner(")
 	assertContains(t, out, ".Number())")
 }
+
+func TestMapLocalInBoolContext(t *testing.T) {
+	ts := `function f(options) {
+	const config = Object.assign({}, options);
+	if (config["verbose"]) { return true; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, `config["verbose"] != nil`)
+}
+
+func TestHoistedFuncPaddedArgs(t *testing.T) {
+	ts := `function outer(x) {
+	function inner(a, b, c) { return a; }
+	inner(x, x);
+}`
+	out := compile(t, ts)
+	// Call with 2 args should be padded to 3 with nil
+	assertContains(t, out, ", nil)")
+}
