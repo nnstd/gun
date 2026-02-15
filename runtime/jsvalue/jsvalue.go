@@ -18,6 +18,7 @@ const (
 	TypeSymbol
 	TypeObject
 	TypeFunction
+	TypeRegex
 )
 
 // JSValue models a JavaScript value with typed storage and prototype chain.
@@ -34,6 +35,7 @@ type JSValue struct {
 	prototype  *JSValue
 	funcVal    func(...*JSValue) *JSValue
 	arrayVal   []*JSValue
+	regexVal   interface{} // stores *regexp.Regexp to avoid import cycle
 }
 
 var symbolCounter uint64
@@ -108,6 +110,17 @@ func NewFunction(fn func(...*JSValue) *JSValue) *JSValue {
 	}
 }
 
+// NewRegex creates a regex JSValue from a compiled regexp.
+// The regex parameter should be *regexp.Regexp but is typed as interface{}
+// to avoid import cycles.
+func NewRegex(regex interface{}) *JSValue {
+	return &JSValue{
+		typ:        TypeRegex,
+		properties: make(map[string]*PropertyDescriptor),
+		regexVal:   regex,
+	}
+}
+
 // Type returns the pre-computed type tag.
 func (v *JSValue) Type() ValueType {
 	return v.typ
@@ -134,6 +147,8 @@ func (v *JSValue) TypeString() string {
 		return "object"
 	case TypeFunction:
 		return "function"
+	case TypeRegex:
+		return "object" // In JavaScript, typeof /regex/ === "object"
 	default:
 		return "undefined"
 	}
@@ -216,6 +231,47 @@ func (v *JSValue) IsArray() bool {
 	return v != nil && v.arrayVal != nil
 }
 
+// Len returns the length of the JSValue, matching JavaScript semantics.
+// For strings: returns character count (not byte count).
+// For arrays: returns element count.
+// For objects with a length property: returns that property's numeric value.
+// Otherwise: returns 0.
+func (v *JSValue) Len() int {
+	if v == nil {
+		return 0
+	}
+	switch v.typ {
+	case TypeString:
+		// JavaScript .length on strings returns character count (UTF-16 code units)
+		// In Go, we approximate this with rune count
+		return len([]rune(v.strVal))
+	case TypeObject:
+		if v.arrayVal != nil {
+			return len(v.arrayVal)
+		}
+	}
+	// Check for length property on objects
+	if prop := v.Get("length"); prop != nil && prop.typ == TypeNumber {
+		return int(prop.numVal)
+	}
+	return 0
+}
+
+// MatchString tests whether the JSValue (as a regex) matches the string s.
+// This implements JavaScript's regex.test(s) method.
+// Returns false if the JSValue is not a regex.
+func (v *JSValue) MatchString(s string) bool {
+	if v == nil || v.typ != TypeRegex || v.regexVal == nil {
+		return false
+	}
+	// Type assert to *regexp.Regexp
+	// We use interface{} in the struct to avoid import cycles
+	if re, ok := v.regexVal.(interface{ MatchString(string) bool }); ok {
+		return re.MatchString(s)
+	}
+	return false
+}
+
 
 // Call invokes the JSValue as a function with the given arguments.
 // Returns undefined if the value is not a function.
@@ -266,6 +322,10 @@ func From(v any) *JSValue {
 		}
 		return obj
 	default:
+		// Check if it's a regex (has MatchString method)
+		if re, ok := v.(interface{ MatchString(string) bool }); ok {
+			return NewRegex(re)
+		}
 		return NewString(fmt.Sprint(val))
 	}
 }
