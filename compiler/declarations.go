@@ -189,12 +189,12 @@ func (t *Transformer) isNonJSValueInit(node *sitter.Node) bool {
 				prop := propNode.Utf8Text(t.source)
 				switch prop {
 				case "toLowerCase", "toUpperCase", "trim", "trimStart", "trimEnd",
-					"toString", "replace", "replaceAll", "join", "split",
+					"toString", "replace", "replaceAll", "join",
 					"codePointAt", "charCodeAt", "indexOf":
 					return true
-				case "charAt":
-					// charAt on a typed local (string) returns string;
-					// on a JSValue it returns *jsvalue.JSValue via runtime.
+				case "split", "charAt":
+					// On a typed local (string) these return native Go types;
+					// on a JSValue receiver they return *jsvalue.JSValue via runtime.
 					if objNode != nil && objNode.Kind() == "identifier" {
 						return !t.isUntypedLocal(objNode.Utf8Text(t.source))
 					}

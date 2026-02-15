@@ -231,13 +231,15 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 			right = callExpr(selectorExpr(right, "Bool"))
 		} else if leftIsJSValue && !rightIsJSValue && isComparisonOp(op) && !isNilNode(rightNode) {
 			if isOrderingOp(op) {
-				left = callExpr(ident("int"), callExpr(selectorExpr(left, "Number")))
+				left = callExpr(selectorExpr(left, "Number"))
+				right = callExpr(ident("float64"), right)
 			} else {
 				left = callExpr(selectorExpr(left, "String"))
 			}
 		} else if rightIsJSValue && !leftIsJSValue && isComparisonOp(op) && !isNilNode(leftNode) {
 			if isOrderingOp(op) {
-				right = callExpr(ident("int"), callExpr(selectorExpr(right, "Number")))
+				right = callExpr(selectorExpr(right, "Number"))
+				left = callExpr(ident("float64"), left)
 			} else {
 				right = callExpr(selectorExpr(right, "String"))
 			}

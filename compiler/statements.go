@@ -105,6 +105,18 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 								rhs = callExpr(ident("int"), callExpr(selectorExpr(rhs, "Number")))
 							}
 						}
+						// Ternary/conditional assigned to a []*jsvalue.JSValue local
+						// generates an IIFE returning `any`. Wrap with jsvalue.ToSlice().
+						if leftNode.Kind() == "identifier" {
+							lname := leftNode.Utf8Text(t.source)
+							if t.jsvalueSliceLocals[lname] {
+								rk := rightNode.Kind()
+								if rk == "ternary_expression" || rk == "parenthesized_expression" {
+									t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+									rhs = callExpr(selectorExpr(ident("jsvalue"), "ToSlice"), rhs)
+								}
+							}
+						}
 						return assignStmt([]ast.Expr{lhs}, []ast.Expr{rhs})
 					}
 				}
@@ -176,6 +188,12 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 			// Skip bare nil expression statements (from undefined/null)
 			if id, ok := expr.(*ast.Ident); ok && id.Name == "nil" {
 				return nil
+			}
+			// append() used as a statement (from arr.push(x)) must assign back.
+			if call, ok := expr.(*ast.CallExpr); ok {
+				if fn, ok := call.Fun.(*ast.Ident); ok && fn.Name == "append" && len(call.Args) > 0 {
+					return assignStmt([]ast.Expr{call.Args[0]}, []ast.Expr{call})
+				}
 			}
 			return exprStmt(expr)
 		}

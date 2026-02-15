@@ -546,3 +546,28 @@ func TestMathCallResultIsTyped(t *testing.T) {
 	assertContains(t, out, "m > 0")
 	assertNotContains(t, out, "m.Number()")
 }
+
+func TestSplitOnJSValueUsesLenAndIndex(t *testing.T) {
+	// split() on a JSValue param returns *jsvalue.JSValue (via FromStrings),
+	// so len() and [0] must use .Len() and .Index().
+	ts := `function f(key) {
+	const parts = key.split(".");
+	if (parts.length > 1) { return parts[0]; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, ".Len()")
+	assertNotContains(t, out, "len(parts)")
+	assertContains(t, out, ".Index(0)")
+	assertNotContains(t, out, "parts[0]")
+}
+
+func TestOrderingComparisonCoercesFloat64(t *testing.T) {
+	// When one side is JSValue and the other is int, both should become float64.
+	ts := `function f(arr, toEat) {
+	var available = 5;
+	if (available < toEat) { return true; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "float64(")
+	assertContains(t, out, ".Number()")
+}

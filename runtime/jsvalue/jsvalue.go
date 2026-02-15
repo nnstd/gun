@@ -380,6 +380,19 @@ func (v *JSValue) Call(args ...*JSValue) *JSValue {
 	return NewUndefined()
 }
 
+// ToSlice converts an any value to []*JSValue. Handles []*JSValue passthrough
+// and *JSValue (via .Array()). Used when an IIFE returns any but the target is []*JSValue.
+func ToSlice(v any) []*JSValue {
+	switch val := v.(type) {
+	case []*JSValue:
+		return val
+	case *JSValue:
+		return val.Array()
+	default:
+		return nil
+	}
+}
+
 // Pop removes and returns the last element, or nil if empty.
 func (v *JSValue) Pop() *JSValue {
 	if len(v.arrayVal) == 0 {
