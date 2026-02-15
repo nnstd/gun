@@ -21,6 +21,8 @@ func transformBuiltinCall(obj, prop string, args []ast.Expr, addImport func(stri
 		return transformNumberCall(prop, args)
 	case "process":
 		return transformProcessCall(prop, args, addImport)
+	case "Array":
+		return transformArrayCall(prop, args, addImport)
 	}
 	return nil
 }
@@ -126,6 +128,19 @@ func transformNumberCall(prop string, args []ast.Expr) ast.Expr {
 			return args[0]
 		}
 		return floatLit("0.0")
+	}
+	return nil
+}
+
+// transformArrayCall handles Array.X() calls.
+func transformArrayCall(prop string, args []ast.Expr, addImport func(string)) ast.Expr {
+	switch prop {
+	case "isArray":
+		// Array.isArray(x) → x.IsArray()
+		if len(args) > 0 {
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			return callExpr(selectorExpr(args[0], "IsArray"))
+		}
 	}
 	return nil
 }

@@ -85,7 +85,8 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 		}
 
 		// No type and no value → default to *jsvalue.JSValue
-		if typ == nil && value == nil {
+		// Also applies when value is nil literal (null/undefined).
+		if typ == nil && (value == nil || isNilIdent(value)) {
 			typ = ptrType(selectorExpr(ident("jsvalue"), "JSValue"))
 			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		}

@@ -228,6 +228,13 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 			left = callExpr(selectorExpr(left, "String"))
 		} else if rightIsJSValue && !leftIsJSValue && isComparisonOp(op) && !isNilNode(leftNode) {
 			right = callExpr(selectorExpr(right, "String"))
+		} else if leftIsJSValue && isStringLit(right) && op == token.ADD {
+			// JSValue + "string" → string concatenation; coerce JSValue to string
+			t.addImport("fmt")
+			left = callExpr(selectorExpr(ident("fmt"), "Sprint"), left)
+		} else if rightIsJSValue && isStringLit(left) && op == token.ADD {
+			t.addImport("fmt")
+			right = callExpr(selectorExpr(ident("fmt"), "Sprint"), right)
 		}
 	}
 
@@ -250,6 +257,10 @@ func (t *Transformer) transformUnaryExpr(node *sitter.Node) ast.Expr {
 
 	switch opText {
 	case "!":
+		// !jsValue → jsValue == nil (truthiness check)
+		if argNode != nil && argNode.Kind() == "identifier" && t.isUntypedLocal(argNode.Utf8Text(t.source)) {
+			return &ast.BinaryExpr{X: arg, Op: token.EQL, Y: ident("nil")}
+		}
 		return &ast.UnaryExpr{Op: token.NOT, X: arg}
 	case "-":
 		return &ast.UnaryExpr{Op: token.SUB, X: arg}
@@ -622,6 +633,11 @@ func isNumericLit(expr ast.Expr) bool {
 	return lit.Kind == token.INT || lit.Kind == token.FLOAT
 }
 
+func isStringLit(expr ast.Expr) bool {
+	lit, ok := expr.(*ast.BasicLit)
+	return ok && lit.Kind == token.STRING
+}
+
 func isNilNode(node *sitter.Node) bool {
 	if node == nil {
 		return false
@@ -632,7 +648,7 @@ func isNilNode(node *sitter.Node) bool {
 func isBoolReturningMethod(name string) bool {
 	switch name {
 	case "MatchString", "HasPrefix", "HasSuffix", "Contains", "ContainsAny",
-		"EqualFold", "IsNaN", "IsInf":
+		"EqualFold", "IsNaN", "IsInf", "IsArray":
 		return true
 	}
 	return false

@@ -43,8 +43,9 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 					lhs := t.transformExpr(leftNode)
 					rhs := t.transformExpr(rightNode)
 					if lhs != nil && rhs != nil {
-						// Wrap RHS with jsvalue.From() when assigning to an untyped local
-						if leftNode.Kind() == "identifier" && t.isUntypedLocal(leftNode.Utf8Text(t.source)) {
+						// Wrap RHS with jsvalue.From() when assigning to an untyped local,
+						// but keep nil as-is so pointer nil checks work.
+						if leftNode.Kind() == "identifier" && t.isUntypedLocal(leftNode.Utf8Text(t.source)) && !isNilIdent(rhs) {
 							rhs = t.wrapAsJSValue(rhs)
 						}
 						return assignStmt([]ast.Expr{lhs}, []ast.Expr{rhs})

@@ -206,6 +206,27 @@ func TestAssignToUntypedLocalWrapsJSValue(t *testing.T) {
 	assertContains(t, out, "jsvalue.From(")
 }
 
+func TestNilInitVarGetsJSValueType(t *testing.T) {
+	// Variables initialized with null should get *jsvalue.JSValue type,
+	// not produce "use of untyped nil".
+	ts := `function f() {
+	let x = null;
+	x = "hello";
+	return x;
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "*jsvalue.JSValue")
+	assertNotContains(t, out, "var x = nil\n")
+}
+
+func TestNilAssignmentNotWrapped(t *testing.T) {
+	// Assigning null to a JSValue var should emit nil, not jsvalue.From(nil).
+	ts := `function f(x) { x = null; return x; }`
+	out := compile(t, ts)
+	assertContains(t, out, "x = nil")
+	assertNotContains(t, out, "jsvalue.From(nil)")
+}
+
 func TestTypedLocalFromStringMethod(t *testing.T) {
 	// Variables initialized from string methods (toLowerCase etc.) should
 	// be typed locals, not treated as JSValue.

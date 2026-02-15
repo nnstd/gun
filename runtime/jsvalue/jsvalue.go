@@ -325,6 +325,23 @@ func (v *JSValue) Slice(args ...int) *JSValue {
 	return NewArray(elems...)
 }
 
+// IsArray returns true if the JSValue holds an array.
+func (v *JSValue) IsArray() bool {
+	return v != nil && v.arrayVal != nil
+}
+
+// Map applies a callback to each element and returns a new array JSValue.
+func (v *JSValue) Map(fn func(*JSValue) *JSValue) *JSValue {
+	if v.arrayVal == nil {
+		return NewArray()
+	}
+	results := make([]*JSValue, len(v.arrayVal))
+	for i, elem := range v.arrayVal {
+		results[i] = fn(elem)
+	}
+	return NewArray(results...)
+}
+
 // From wraps an arbitrary Go value as a *JSValue.
 // If the value is already a *JSValue, it is returned as-is.
 func From(v any) *JSValue {

@@ -262,6 +262,30 @@ func TestRegexTestBoolResult(t *testing.T) {
 	assertNotContains(t, out, "!= nil")
 }
 
+func TestNegationOnJSValueUsesNilCheck(t *testing.T) {
+	// !jsValue should compile to jsValue == nil, not !jsValue.
+	ts := `function f(x) { if (!x) { return true; } return false; }`
+	out := compile(t, ts)
+	assertContains(t, out, "x == nil")
+	assertNotContains(t, out, "!x")
+}
+
+func TestJSValuePlusStringCoercion(t *testing.T) {
+	// JSValue + "" should coerce the JSValue to string via fmt.Sprint.
+	ts := `function f(e) { return e + ""; }`
+	out := compile(t, ts)
+	assertContains(t, out, "fmt.Sprint(e)")
+	assertNotContains(t, out, "e + \"\"")
+}
+
+func TestArrayIsArray(t *testing.T) {
+	// Array.isArray(x) should compile to x.IsArray().
+	ts := `function f(x) { if (Array.isArray(x)) { return x; } }`
+	out := compile(t, ts)
+	assertContains(t, out, "x.IsArray()")
+	assertNotContains(t, out, "Array.")
+}
+
 func TestLocalVarPropertyAccessUsesGet(t *testing.T) {
 	// Local variables declared inside a function body should be registered
 	// in scope so property access uses .Get() instead of struct field access.

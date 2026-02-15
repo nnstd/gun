@@ -467,6 +467,12 @@ func extractParamInfo(node *sitter.Node, source []byte) map[string]bool {
 	return info
 }
 
+// isNilIdent returns true if the expression is the identifier "nil".
+func isNilIdent(expr ast.Expr) bool {
+	id, ok := expr.(*ast.Ident)
+	return ok && id.Name == "nil"
+}
+
 // isAnyType returns true when a type_annotation node resolves to TS "any",
 // which maps to *jsvalue.JSValue in Go and should be treated as untyped.
 func isAnyType(typeNode *sitter.Node, source []byte) bool {
