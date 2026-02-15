@@ -166,6 +166,10 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		if objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objNode.Utf8Text(t.source)] {
 			return true
 		}
+		// Map local subscript returns *jsvalue.JSValue
+		if objNode.Kind() == "identifier" && t.mapLocals[objNode.Utf8Text(t.source)] {
+			return true
+		}
 		return false
 	case "call_expression":
 		fnNode := node.ChildByFieldName("function")
@@ -191,6 +195,13 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		propNode := node.ChildByFieldName("property")
 		if objNode != nil && t.nodeReturnsJSValue(objNode) {
 			// .length is transformed to .Len() which returns int, not JSValue.
+			if propNode != nil && propNode.Utf8Text(t.source) == "length" {
+				return false
+			}
+			return true
+		}
+		// Map local member access returns *jsvalue.JSValue
+		if objNode != nil && objNode.Kind() == "identifier" && t.mapLocals[objNode.Utf8Text(t.source)] {
 			if propNode != nil && propNode.Utf8Text(t.source) == "length" {
 				return false
 			}
