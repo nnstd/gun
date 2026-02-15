@@ -16,7 +16,7 @@ func transformBuiltinCall(obj, prop string, args []ast.Expr, addImport func(stri
 	case "JSON":
 		return transformJSONCall(prop, args, addImport)
 	case "Object":
-		return transformObjectCall(prop, args)
+		return transformObjectCall(prop, args, addImport)
 	case "Number":
 		return transformNumberCall(prop, args)
 	case "process":

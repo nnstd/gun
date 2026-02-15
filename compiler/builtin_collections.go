@@ -27,12 +27,16 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 	return nil
 }
 
-func transformObjectCall(prop string, args []ast.Expr) ast.Expr {
+func transformObjectCall(prop string, args []ast.Expr, addImport func(string)) ast.Expr {
 	switch prop {
-	case "keys", "values", "assign":
+	case "keys", "values", "entries", "assign":
 		if len(args) > 0 {
 			return args[0]
 		}
+	case "create":
+		// Object.create(null) → jsvalue.NewObject()
+		addImport("github.com/nnstd/gun/runtime/jsvalue")
+		return callExpr(selectorExpr(ident("jsvalue"), "NewObject"))
 	}
 	return nil
 }
