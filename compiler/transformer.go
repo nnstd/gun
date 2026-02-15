@@ -123,6 +123,22 @@ func (t *Transformer) addToCurrentScope(name string, typed bool) {
 	}
 }
 
+// isPkgLevelVar returns true if the node is an identifier that refers to a
+// package-level variable (not in any local scope and not an imported name).
+func (t *Transformer) isPkgLevelVar(node *sitter.Node) bool {
+	if node == nil || node.Kind() != "identifier" {
+		return false
+	}
+	name := node.Utf8Text(t.source)
+	if t.isLocalName(name) {
+		return false
+	}
+	if _, ok := t.importedNames[name]; ok {
+		return false
+	}
+	return true
+}
+
 // nodeReturnsJSValue checks whether a tree-sitter node would produce a
 // *jsvalue.JSValue expression (e.g. an untyped local, a subscript on one,
 // or a method call on one).

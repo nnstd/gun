@@ -190,7 +190,9 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 	// JS `||` used as default-value pattern (x || "fallback").
 	// When the left operand is a JSValue, emit an IIFE that checks truthiness
 	// and returns the first truthy value wrapped as JSValue.
-	if op == token.LOR && t.nodeReturnsJSValue(leftNode) {
+	// Also handle package-level vars (not in local scope, not imported) which
+	// default to *jsvalue.JSValue.
+	if op == token.LOR && (t.nodeReturnsJSValue(leftNode) || t.isPkgLevelVar(leftNode)) {
 		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		wrappedRight := t.wrapAsJSValue(right)
 		return &ast.CallExpr{

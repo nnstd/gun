@@ -74,6 +74,21 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 							t.addImport("fmt")
 							rhs = callExpr(selectorExpr(ident("fmt"), "Sprint"), rhs)
 						}
+						// When the LHS is a JSValue expression (subscript on JSValue slice,
+						// untyped local), convert += to regular assignment with string concat:
+						// lhs += rhs → lhs = jsvalue.From(fmt.Sprint(lhs) + fmt.Sprint(rhs))
+						if t.nodeReturnsJSValue(leftNode) && opText == "+=" {
+							t.addImport("fmt")
+							t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+							concat := &ast.BinaryExpr{
+								X:  callExpr(selectorExpr(ident("fmt"), "Sprint"), lhs),
+								Op: token.ADD,
+								Y:  callExpr(selectorExpr(ident("fmt"), "Sprint"), rhs),
+							}
+							return assignStmt([]ast.Expr{lhs}, []ast.Expr{
+								callExpr(selectorExpr(ident("jsvalue"), "From"), concat),
+							})
+						}
 						return &ast.AssignStmt{
 							Lhs: []ast.Expr{lhs},
 							Tok: mapAugmentedOp(opText),
