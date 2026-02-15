@@ -25,6 +25,7 @@ type Transformer struct {
 	mapLocals          map[string]bool            // typed locals initialized from object literals (map[string]*jsvalue.JSValue)
 	pkgVarTyped        map[string]bool            // package-level variable name → true if typed (not JSValue)
 	funcParamCounts    map[string]int             // hoisted function name → parameter count (for padding missing args)
+	builtins           *BuiltinRegistry           // registry of built-in methods and their metadata
 }
 
 func newTransformer(source []byte, pkgName, moduleName string, samePackageImports bool) *Transformer {
@@ -41,6 +42,7 @@ func newTransformer(source []byte, pkgName, moduleName string, samePackageImport
 		mapLocals:          make(map[string]bool),
 		pkgVarTyped:        make(map[string]bool),
 		funcParamCounts:    make(map[string]int),
+		builtins:           NewBuiltinRegistry(),
 	}
 }
 
@@ -183,23 +185,19 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 			objNode := fnNode.ChildByFieldName("object")
 			propNode := fnNode.ChildByFieldName("property")
 			if objNode != nil && t.nodeReturnsJSValue(objNode) {
-				// String methods get transformed to Go stdlib calls returning string, not JSValue.
-				// However, some methods (charAt, match, slice) use the JSValue runtime
-				// when the receiver is an untyped local — those still return JSValue.
+				// String methods on untyped locals (JSValue parameters) are wrapped
+				// to return JSValue, maintaining type consistency.
 				if propNode != nil {
 					prop := propNode.Utf8Text(t.source)
-					jsValueRuntimeMethod := map[string]bool{
-						"charAt": true, "match": true, "slice": true,
-					}
 					isUntypedReceiver := objNode.Kind() == "identifier" && t.isUntypedLocal(objNode.Utf8Text(t.source))
-					if isUntypedReceiver && jsValueRuntimeMethod[prop] {
+
+					// String methods on untyped receivers return JSValue (wrapped)
+					if isUntypedReceiver && t.builtins.ReturnsJSValueForUntypedReceiver(prop) {
 						return true
 					}
-					switch prop {
-					case "toLowerCase", "toUpperCase", "trim", "trimStart", "trimEnd",
-						"toString", "replace", "replaceAll", "join", "split",
-						"charAt", "indexOf", "lastIndexOf", "slice", "substring",
-						"startsWith", "endsWith", "includes", "match", "test":
+
+					// String methods on typed receivers return native Go types
+					if !isUntypedReceiver && t.builtins.IsStringMethod(prop) {
 						return false
 					}
 				}

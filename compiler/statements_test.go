@@ -197,13 +197,14 @@ func TestAugmentedAssignJSValueToString(t *testing.T) {
 
 func TestAssignToUntypedLocalWrapsJSValue(t *testing.T) {
 	// Assigning a string expression to an untyped local (JSValue) should
-	// wrap with jsvalue.From().
+	// wrap the result with jsvalue.NewString() (or other specific constructor).
 	ts := `function f(s) {
 	s = s.toLowerCase();
 	return s;
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.From(")
+	assertContains(t, out, "jsvalue.NewString(")
+	assertContains(t, out, "strings.ToLower(")
 }
 
 func TestNilInitVarGetsJSValueType(t *testing.T) {

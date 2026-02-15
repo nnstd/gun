@@ -199,11 +199,10 @@ func TestJSOrDefaultPattern(t *testing.T) {
 }
 
 func TestCharAtOnJSValueUsesRuntime(t *testing.T) {
-	// charAt on a JSValue param should use the runtime .CharAt() method.
+	// charAt on a JSValue param should coerce to string and use rune indexing.
 	ts := `function f(s) { return s.charAt(0); }`
 	out := compile(t, ts)
-	assertContains(t, out, "s.CharAt(0)")
-	assertNotContains(t, out, "[]rune")
+	assertContains(t, out, "string([]rune(fmt.Sprint(s))[0])")
 }
 
 func TestCharAtOnStringUsesBuiltin(t *testing.T) {

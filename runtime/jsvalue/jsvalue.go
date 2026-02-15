@@ -2,7 +2,6 @@ package jsvalue
 
 import (
 	"fmt"
-	"regexp"
 	"sync/atomic"
 )
 
@@ -211,165 +210,12 @@ func (v *JSValue) Index(i int) *JSValue {
 	return NewUndefined()
 }
 
-// Len returns the length of the value as an int.
-// For strings, returns the character count; for arrays, the element count;
-// otherwise checks the "length" property.
-func (v *JSValue) Len() int {
-	switch v.typ {
-	case TypeString:
-		return len(v.strVal)
-	case TypeObject:
-		if v.arrayVal != nil {
-			return len(v.arrayVal)
-		}
-	}
-	if prop := v.Get("length"); prop.typ == TypeNumber {
-		return int(prop.numVal)
-	}
-	return 0
-}
-
-// MatchString treats the JSValue as a regex pattern and tests it against s.
-// If the value is a string, it compiles it as a regexp and matches.
-func (v *JSValue) MatchString(s string) bool {
-	if v.typ == TypeString && v.strVal != "" {
-		re, err := regexp.Compile(v.strVal)
-		if err != nil {
-			return false
-		}
-		return re.MatchString(s)
-	}
-	return false
-}
-
-// Match implements JS String.prototype.match(regexp).
-// Returns an array JSValue of match strings, or null if no match.
-func (v *JSValue) Match(re *regexp.Regexp) *JSValue {
-	if v.typ != TypeString {
-		return NewNull()
-	}
-	matches := re.FindAllString(v.strVal, -1)
-	if matches == nil {
-		return NewNull()
-	}
-	elems := make([]*JSValue, len(matches))
-	for i, m := range matches {
-		elems[i] = NewString(m)
-	}
-	return NewArray(elems...)
-}
-
-// CharAt implements JS String.prototype.charAt(index).
-// Returns the character at the given position as a single-character string JSValue.
-func (v *JSValue) CharAt(pos int) *JSValue {
-	if v.typ != TypeString {
-		return NewString("")
-	}
-	runes := []rune(v.strVal)
-	if pos < 0 || pos >= len(runes) {
-		return NewString("")
-	}
-	return NewString(string(runes[pos]))
-}
-
-// CodePointAt returns the Unicode code point at the given position.
-func (v *JSValue) CodePointAt(pos int) int {
-	if v.typ != TypeString {
-		return 0
-	}
-	runes := []rune(v.strVal)
-	if pos < 0 || pos >= len(runes) {
-		return 0
-	}
-	return int(runes[pos])
-}
-
-// Slice implements JS Array.prototype.slice(start, end).
-// Returns a new array JSValue with elements from start to end.
-func (v *JSValue) Slice(args ...int) *JSValue {
-	if v.arrayVal == nil {
-		return NewArray()
-	}
-	n := len(v.arrayVal)
-	start := 0
-	end := n
-	if len(args) > 0 {
-		start = args[0]
-		if start < 0 {
-			start = n + start
-			if start < 0 {
-				start = 0
-			}
-		}
-		if start > n {
-			start = n
-		}
-	}
-	if len(args) > 1 {
-		end = args[1]
-		if end < 0 {
-			end = n + end
-			if end < 0 {
-				end = 0
-			}
-		}
-		if end > n {
-			end = n
-		}
-	}
-	if start >= end {
-		return NewArray()
-	}
-	elems := make([]*JSValue, end-start)
-	copy(elems, v.arrayVal[start:end])
-	return NewArray(elems...)
-}
 
 // IsArray returns true if the JSValue holds an array.
 func (v *JSValue) IsArray() bool {
 	return v != nil && v.arrayVal != nil
 }
 
-// Map applies a callback to each element and returns a new array JSValue.
-func (v *JSValue) Map(fn func(*JSValue) *JSValue) *JSValue {
-	if v.arrayVal == nil {
-		return NewArray()
-	}
-	results := make([]*JSValue, len(v.arrayVal))
-	for i, elem := range v.arrayVal {
-		results[i] = fn(elem)
-	}
-	return NewArray(results...)
-}
-
-// Filter returns a new array containing elements for which fn returns true.
-func (v *JSValue) Filter(fn func(*JSValue) bool) *JSValue {
-	if v.arrayVal == nil {
-		return NewArray()
-	}
-	var results []*JSValue
-	for _, elem := range v.arrayVal {
-		if fn(elem) {
-			results = append(results, elem)
-		}
-	}
-	return NewArray(results...)
-}
-
-// ForEach calls fn for each element in the array.
-func (v *JSValue) ForEach(fn func(*JSValue)) {
-	if v.arrayVal == nil {
-		return
-	}
-	for _, elem := range v.arrayVal {
-		fn(elem)
-	}
-}
-
-// Push appends elements to the internal array (mutating).
-func (v *JSValue) Push(elems ...*JSValue) {
-	v.arrayVal = append(v.arrayVal, elems...)
-}
 
 // Call invokes the JSValue as a function with the given arguments.
 // Returns undefined if the value is not a function.
@@ -393,15 +239,6 @@ func ToSlice(v any) []*JSValue {
 	}
 }
 
-// Pop removes and returns the last element, or nil if empty.
-func (v *JSValue) Pop() *JSValue {
-	if len(v.arrayVal) == 0 {
-		return nil
-	}
-	last := v.arrayVal[len(v.arrayVal)-1]
-	v.arrayVal = v.arrayVal[:len(v.arrayVal)-1]
-	return last
-}
 
 // From wraps an arbitrary Go value as a *JSValue.
 // If the value is already a *JSValue, it is returned as-is.
@@ -442,24 +279,6 @@ func FromStrings(ss []string) *JSValue {
 	return NewArray(elems...)
 }
 
-// Join concatenates array elements into a string with the given separator.
-func (v *JSValue) Join(sep string) string {
-	if v.arrayVal == nil {
-		return ""
-	}
-	parts := make([]string, len(v.arrayVal))
-	for i, elem := range v.arrayVal {
-		parts[i] = elem.String()
-	}
-	result := ""
-	for i, p := range parts {
-		if i > 0 {
-			result += sep
-		}
-		result += p
-	}
-	return result
-}
 
 // Truthy implements JavaScript truthiness semantics.
 // Returns false for nil, undefined, null, false, 0, NaN, and "".
@@ -478,5 +297,41 @@ func Truthy(v *JSValue) bool {
 		return v.strVal != ""
 	default:
 		return true
+	}
+}
+
+// Map applies fn to each element and returns a new array.
+func Map(arr *JSValue, fn func(*JSValue) *JSValue) *JSValue {
+	if arr == nil || arr.arrayVal == nil {
+		return NewArray()
+	}
+	results := make([]*JSValue, len(arr.arrayVal))
+	for i, elem := range arr.arrayVal {
+		results[i] = fn(elem)
+	}
+	return NewArray(results...)
+}
+
+// Filter returns a new array containing elements for which fn returns true.
+func Filter(arr *JSValue, fn func(*JSValue) bool) *JSValue {
+	if arr == nil || arr.arrayVal == nil {
+		return NewArray()
+	}
+	var results []*JSValue
+	for _, elem := range arr.arrayVal {
+		if fn(elem) {
+			results = append(results, elem)
+		}
+	}
+	return NewArray(results...)
+}
+
+// ForEach calls fn for each element in the array.
+func ForEach(arr *JSValue, fn func(*JSValue)) {
+	if arr == nil || arr.arrayVal == nil {
+		return
+	}
+	for _, elem := range arr.arrayVal {
+		fn(elem)
 	}
 }

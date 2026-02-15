@@ -258,6 +258,15 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 			} else {
 				right = callExpr(selectorExpr(right, "Number"))
 			}
+		} else if leftIsJSValue && rightIsJSValue && isComparisonOp(op) {
+			// Both sides are JSValue: coerce both to native types for value comparison
+			if isOrderingOp(op) {
+				left = callExpr(selectorExpr(left, "Number"))
+				right = callExpr(selectorExpr(right, "Number"))
+			} else {
+				left = callExpr(selectorExpr(left, "String"))
+				right = callExpr(selectorExpr(right, "String"))
+			}
 		} else if leftIsJSValue && op == token.ADD {
 			t.addImport("fmt")
 			left = callExpr(selectorExpr(ident("fmt"), "Sprint"), left)
@@ -487,47 +496,123 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			isUntypedLocal := objNode.Kind() == "identifier" && t.isUntypedLocal(objText)
 			if _, isNsImport := t.importedNames[objText]; !isNsImport {
 				obj := t.transformExpr(objNode)
-				// Methods with JSValue runtime equivalents (charAt, match,
-				// slice) skip the string builtin path entirely when the
-				// receiver is JSValue — they use the runtime method directly.
-				jsValueRuntimeMethod := map[string]bool{
-					"charAt": true, "match": true, "slice": true,
-				}
-				skipBuiltin := isUntypedLocal && jsValueRuntimeMethod[prop]
-				if !skipBuiltin {
-					// When the receiver is an untyped local (JSValue parameter),
-					// coerce it and non-literal args to Go string so builtin
-					// string methods like strings.Replace compile correctly.
-					if isUntypedLocal {
-						t.addImport("fmt")
-						obj = callExpr(selectorExpr(ident("fmt"), "Sprint"), obj)
-						coercedArgs := make([]ast.Expr, len(args))
-						copy(coercedArgs, args)
-						for i, arg := range coercedArgs {
-							if _, isLit := arg.(*ast.BasicLit); !isLit {
-								coercedArgs[i] = callExpr(selectorExpr(ident("fmt"), "Sprint"), arg)
-							}
+
+				// When the receiver is an untyped local (JSValue parameter),
+				// coerce it to string for string methods, but not for array methods.
+				// Wrap the result in JSValue to maintain type consistency.
+				if isUntypedLocal && !t.builtins.IsArrayMethod(prop) {
+					t.addImport("fmt")
+					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+					obj = callExpr(selectorExpr(ident("fmt"), "Sprint"), obj)
+					coercedArgs := make([]ast.Expr, len(args))
+					copy(coercedArgs, args)
+					for i, arg := range coercedArgs {
+						if _, isLit := arg.(*ast.BasicLit); !isLit {
+							coercedArgs[i] = callExpr(selectorExpr(ident("fmt"), "Sprint"), arg)
 						}
-						if r := transformBuiltinMethod(obj, prop, coercedArgs, t.addImport); r != nil {
-							// split returns []string but caller may need *jsvalue.JSValue
-							if prop == "split" {
-								t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-								return callExpr(selectorExpr(ident("jsvalue"), "FromStrings"), r)
-							}
+					}
+					if r := transformBuiltinMethod(obj, prop, coercedArgs, t.addImport); r != nil {
+						// Wrap result in JSValue based on return type
+						switch prop {
+						case "split":
+							// split returns []string → wrap with FromStrings
+							return callExpr(selectorExpr(ident("jsvalue"), "FromStrings"), r)
+						case "indexOf", "lastIndexOf", "search":
+							// These return int → wrap with NewNumber
+							return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), callExpr(ident("float64"), r))
+						case "startsWith", "endsWith", "includes":
+							// These return bool → wrap with NewBool
+							return callExpr(selectorExpr(ident("jsvalue"), "NewBool"), r)
+						case "match":
+							// match returns special handling - might already be wrapped
 							return r
+						default:
+							// String methods (charAt, toLowerCase, toUpperCase, trim, replace, etc.) → wrap with NewString
+							return callExpr(selectorExpr(ident("jsvalue"), "NewString"), r)
 						}
-					} else {
-						coercedArgs := t.coerceJSValueArgs(args, argsNode)
-						// push() on a []*jsvalue.JSValue slice needs args wrapped
-						if prop == "push" && objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objText] {
-							t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-							for i, a := range coercedArgs {
-								coercedArgs[i] = callExpr(selectorExpr(ident("jsvalue"), "From"), a)
-							}
+					}
+				} else if isUntypedLocal && t.builtins.IsArrayMethod(prop) {
+					// For array methods on untyped locals (JSValue parameters), apply JSValue coercion
+					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+
+					// Handle slice specially with array coercion
+					if prop == "slice" {
+						// args.slice(1) → jsvalue.NewArray(args.Array()[1:]...)
+						sliceExpr := &ast.SliceExpr{X: callExpr(selectorExpr(obj, "Array"))}
+						if len(args) >= 1 {
+							sliceExpr.Low = args[0]
 						}
-						if r := transformBuiltinMethod(obj, prop, coercedArgs, t.addImport); r != nil {
-							return r
+						if len(args) >= 2 {
+							sliceExpr.High = args[1]
 						}
+						return &ast.CallExpr{
+							Fun:      selectorExpr(ident("jsvalue"), "NewArray"),
+							Args:     []ast.Expr{sliceExpr},
+							Ellipsis: token.Pos(1),
+						}
+					}
+
+					// Handle concat with array coercion
+					if prop == "concat" && len(args) > 0 {
+						wrapped := make([]ast.Expr, len(args))
+						for i, a := range args {
+							wrapped[i] = callExpr(selectorExpr(ident("jsvalue"), "From"), a)
+						}
+						appendArgs := append([]ast.Expr{callExpr(selectorExpr(obj, "Array"))}, wrapped...)
+						appendCall := &ast.CallExpr{
+							Fun:  ident("append"),
+							Args: appendArgs,
+						}
+						return &ast.CallExpr{
+							Fun:      selectorExpr(ident("jsvalue"), "NewArray"),
+							Args:     []ast.Expr{appendCall},
+							Ellipsis: token.Pos(1),
+						}
+					}
+
+					// Handle join with array coercion
+					if prop == "join" && len(args) > 0 {
+						// Need to convert each element to string and join
+						// For now, pass through to transformBuiltinMethod
+					}
+
+					// Handle map/filter/forEach with package-level functions
+					if prop == "map" || prop == "filter" || prop == "forEach" {
+						funcName := capitalize(prop)
+						return callExpr(selectorExpr(ident("jsvalue"), funcName), append([]ast.Expr{obj}, args...)...)
+					}
+
+					// Handle length with array coercion
+					if prop == "length" {
+						return callExpr(ident("len"), callExpr(selectorExpr(obj, "Array")))
+					}
+
+					// For other array methods, pass through to transformBuiltinMethod
+					if r := transformBuiltinMethod(obj, prop, args, t.addImport); r != nil {
+						return r
+					}
+				} else {
+					// [].concat(x) → just x; skip coercion so JSValue args stay as-is.
+					if prop == "concat" {
+						if cl, ok := obj.(*ast.CompositeLit); ok && len(cl.Elts) == 0 && len(args) > 0 {
+							return args[0]
+						}
+					}
+					coercedArgs := t.coerceJSValueArgs(args, argsNode)
+					// push() on a []*jsvalue.JSValue slice needs args wrapped
+					if prop == "push" && objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objText] {
+						t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+						for i, a := range coercedArgs {
+							coercedArgs[i] = callExpr(selectorExpr(ident("jsvalue"), "From"), a)
+						}
+					}
+					// map/filter/forEach on JSValue slice locals need the receiver wrapped
+					if (prop == "map" || prop == "filter" || prop == "forEach") && objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objText] {
+						t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+						obj = callExpr(selectorExpr(ident("jsvalue"), "NewArray"), &ast.Ident{Name: objText + "..."})
+					}
+					if r := transformBuiltinMethod(obj, prop, coercedArgs, t.addImport); r != nil {
+						return r
 					}
 				}
 			}
@@ -906,8 +991,8 @@ func isJSValueMethodCall(expr ast.Expr) bool {
 		return false
 	}
 	switch sel.Sel.Name {
-	case "Get", "Slice", "Index", "Match", "CharAt",
-		"Map", "Filter", "Pop", "FromStrings", "NewArray", "From":
+	case "Get", "Index", "NewArray", "From", "Call",
+		"Map", "Filter", "ForEach", "FromStrings", "ToSlice":
 		return true
 	}
 	return false
