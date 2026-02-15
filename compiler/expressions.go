@@ -556,8 +556,13 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 	if index == nil {
 		return obj
 	}
-	// JSValue arrays can't be indexed directly; use .Index() method.
+	// JSValue arrays can't be indexed directly; use .Index() for numeric
+	// keys and .Get() for string keys.
 	if objNode != nil && objNode.Kind() == "identifier" && t.isUntypedLocal(objNode.Utf8Text(t.source)) {
+		indexNode := node.ChildByFieldName("index")
+		if indexNode != nil && (indexNode.Kind() == "string" || indexNode.Kind() == "string_literal") {
+			return callExpr(selectorExpr(obj, "Get"), index)
+		}
 		return callExpr(selectorExpr(obj, "Index"), index)
 	}
 	// Go slice indices must be integers; wrap float64 vars with int().
