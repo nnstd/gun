@@ -109,6 +109,12 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 		typed := typeNode != nil || t.isNonJSValueInit(valueNode)
 		t.addToCurrentScope(name, typed)
 
+		// Track package-level variable types so property access on untyped
+		// package vars uses .Get() instead of capitalized selectors.
+		if len(t.localScopes) == 0 {
+			t.pkgVarTyped[name] = typed
+		}
+
 		// Track typed locals whose elements are *jsvalue.JSValue (array literals
 		// with JSValue elements) so subscript access is recognized as JSValue.
 		if typed && valueNode != nil && valueNode.Kind() == "array" {

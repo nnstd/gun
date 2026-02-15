@@ -300,9 +300,37 @@ func TestClassMethodLocalsUseGet(t *testing.T) {
 	assertNotContains(t, out, "opts.Verbose")
 }
 
+func TestMapLocalFromObjectAssign(t *testing.T) {
+	ts := `function f(options) {
+	const config = Object.assign({key: true}, options);
+	return config.key;
+}`
+	out := compile(t, ts)
+	assertContains(t, out, `config["key"]`)
+	assertNotContains(t, out, `config.Get("key")`)
+}
+
 func TestRestPatternParam(t *testing.T) {
 	ts := `export function foo(...args) { return args; }`
 	out := compile(t, ts)
 	assertContains(t, out, "args ...*jsvalue.JSValue")
 	assertNotContains(t, out, "...args")
+}
+
+func TestMapLocalSubscriptAccess(t *testing.T) {
+	ts := `function f(options) {
+	const config = Object.assign({key: true}, options);
+	return config['key'];
+}`
+	out := compile(t, ts)
+	assertContains(t, out, `config["key"]`)
+	assertNotContains(t, out, `config.Get("key")`)
+}
+
+func TestPkgLevelJSValueUsesGet(t *testing.T) {
+	ts := `let mixin;
+function f() { return mixin.format; }`
+	out := compile(t, ts)
+	assertContains(t, out, `mixin.Get("format")`)
+	assertNotContains(t, out, "mixin.Format")
 }

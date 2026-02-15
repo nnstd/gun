@@ -371,3 +371,23 @@ func From(v any) *JSValue {
 		return NewString(fmt.Sprint(val))
 	}
 }
+
+// Truthy implements JavaScript truthiness semantics.
+// Returns false for nil, undefined, null, false, 0, NaN, and "".
+func Truthy(v *JSValue) bool {
+	if v == nil {
+		return false
+	}
+	switch v.typ {
+	case TypeUndefined, TypeNull:
+		return false
+	case TypeBoolean:
+		return v.boolVal
+	case TypeNumber:
+		return v.numVal != 0 && v.numVal == v.numVal // NaN != NaN
+	case TypeString:
+		return v.strVal != ""
+	default:
+		return true
+	}
+}

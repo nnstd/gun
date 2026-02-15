@@ -548,6 +548,16 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 		return callExpr(selectorExpr(obj, "Get"), stringLit(prop))
 	}
 
+	// Package-level untyped variables default to *jsvalue.JSValue —
+	// use .Get() for property access just like local JSValue vars.
+	if objNode.Kind() == "identifier" {
+		name := objNode.Utf8Text(t.source)
+		if typed, ok := t.pkgVarTyped[name]; ok && !typed {
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			return callExpr(selectorExpr(obj, "Get"), stringLit(prop))
+		}
+	}
+
 	return selectorExpr(obj, capitalize(prop))
 }
 
@@ -560,6 +570,10 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 	}
 	if index == nil {
 		return obj
+	}
+	// Map-typed locals use normal Go map indexing — skip the JSValue path.
+	if objNode != nil && objNode.Kind() == "identifier" && t.mapLocals[objNode.Utf8Text(t.source)] {
+		return &ast.IndexExpr{X: obj, Index: index}
 	}
 	// JSValue arrays can't be indexed directly; use .Index() for numeric
 	// keys and .Get() for string keys.

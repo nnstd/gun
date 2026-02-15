@@ -4,6 +4,10 @@ import "go/ast"
 
 func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addImport func(string)) ast.Expr {
 	switch prop {
+	case "concat":
+		if len(args) > 0 {
+			return callExpr(ident("append"), append([]ast.Expr{obj}, args...)...)
+		}
 	case "push":
 		if len(args) > 0 {
 			return callExpr(ident("append"), append([]ast.Expr{obj}, args...)...)

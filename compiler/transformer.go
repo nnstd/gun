@@ -23,6 +23,7 @@ type Transformer struct {
 	localScopes        []map[string]bool          // stack of local variable/parameter names that shadow imports (true = has type annotation, false = JSValue default)
 	jsvalueSliceLocals map[string]bool            // typed locals whose elements are *jsvalue.JSValue (e.g. []*jsvalue.JSValue slices)
 	mapLocals          map[string]bool            // typed locals initialized from object literals (map[string]*jsvalue.JSValue)
+	pkgVarTyped        map[string]bool            // package-level variable name → true if typed (not JSValue)
 }
 
 func newTransformer(source []byte, pkgName, moduleName string, samePackageImports bool) *Transformer {
@@ -37,6 +38,7 @@ func newTransformer(source []byte, pkgName, moduleName string, samePackageImport
 		funcVarNames:       make(map[string]bool),
 		jsvalueSliceLocals: make(map[string]bool),
 		mapLocals:          make(map[string]bool),
+		pkgVarTyped:        make(map[string]bool),
 	}
 }
 

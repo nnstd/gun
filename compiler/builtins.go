@@ -220,6 +220,9 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 	case "Number":
 		// Number as standalone (used as Number(x) call) — identity for numeric values
 		return ident("float64")
+	case "Boolean":
+		addImport("github.com/nnstd/gun/runtime/jsvalue")
+		return selectorExpr(ident("jsvalue"), "Truthy")
 	default:
 		return ident(sanitizeIdent(name))
 	}

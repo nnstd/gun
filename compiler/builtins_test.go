@@ -137,3 +137,17 @@ function check(s: string): boolean { return re.test(s); }`
 	assertContains(t, out, ".MatchString(s)")
 	assertNotContains(t, out, ".Test(")
 }
+
+func TestArrayConcat(t *testing.T) {
+	ts := `function f(arr: number[]): any { return arr.concat(1); }`
+	out := compile(t, ts)
+	assertContains(t, out, "append(arr, 1)")
+	assertNotContains(t, out, ".Concat(")
+}
+
+func TestBooleanIdentifier(t *testing.T) {
+	ts := `const fn = Boolean;`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Truthy")
+	assertNotContains(t, out, "Boolean")
+}
