@@ -244,6 +244,19 @@ func TestDestructuredParamSubscript(t *testing.T) {
 	assertNotContains(t, out, "[int(")
 }
 
+func TestArrayDestructuredParamUsesIndex(t *testing.T) {
+	ts := `function f(arr) {
+	arr.forEach(([key, value]) => {
+		return key;
+	});
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "_param0.Index(0)")
+	assertContains(t, out, "_param0.Index(1)")
+	assertNotContains(t, out, "_param0[0]")
+	assertNotContains(t, out, "_param0[1]")
+}
+
 func TestEmptyInput(t *testing.T) {
 	out, err := Compile([]byte(""), "main", "", false)
 	if err != nil {
