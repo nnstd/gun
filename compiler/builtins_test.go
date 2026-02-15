@@ -151,3 +151,13 @@ func TestBooleanIdentifier(t *testing.T) {
 	assertContains(t, out, "jsvalue.Truthy")
 	assertNotContains(t, out, "Boolean")
 }
+
+func TestPushOnMapLocalValue(t *testing.T) {
+	ts := `function f(key) {
+	const flags = {keys: []};
+	flags.keys.push(key);
+}`
+	out := compile(t, ts)
+	assertContains(t, out, `.Push(`)
+	assertNotContains(t, out, "append(flags")
+}

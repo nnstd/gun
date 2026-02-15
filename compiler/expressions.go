@@ -401,6 +401,20 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 				return r
 			}
 
+			// When the receiver is a map local value (e.g. flags.keys, flags["keys"]),
+			// the result is *jsvalue.JSValue — use JSValue methods directly instead
+			// of Go builtin transforms like append().
+			if (objNode.Kind() == "member_expression" || objNode.Kind() == "subscript_expression") && func() bool {
+				inner := objNode.ChildByFieldName("object")
+				return inner != nil && inner.Kind() == "identifier" && t.mapLocals[inner.Utf8Text(t.source)]
+			}() {
+				obj := t.transformExpr(objNode)
+				for i, arg := range args {
+					args[i] = t.wrapAsJSValue(arg)
+				}
+				return callExpr(selectorExpr(obj, capitalize(prop)), args...)
+			}
+
 			// Method transforms on arbitrary receivers (string/collection methods)
 			// Skip if the object is a namespace import (it's a package, not a value)
 			isUntypedLocal := objNode.Kind() == "identifier" && t.isUntypedLocal(objText)

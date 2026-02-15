@@ -366,6 +366,11 @@ func (v *JSValue) ForEach(fn func(*JSValue)) {
 	}
 }
 
+// Push appends elements to the internal array (mutating).
+func (v *JSValue) Push(elems ...*JSValue) {
+	v.arrayVal = append(v.arrayVal, elems...)
+}
+
 // Pop removes and returns the last element, or nil if empty.
 func (v *JSValue) Pop() *JSValue {
 	if len(v.arrayVal) == 0 {
