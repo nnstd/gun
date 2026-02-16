@@ -505,10 +505,10 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 					}
 				}
 
-				// When the receiver is an untyped local (JSValue parameter),
+				// When the receiver returns JSValue (untyped local or JSValue-returning expression),
 				// coerce it to string for string methods, but not for array methods.
 				// Wrap the result in JSValue to maintain type consistency.
-				if isUntypedLocal && !t.builtins.IsArrayMethod(prop) && !t.builtins.IsRegexMethod(prop) {
+				if (isUntypedLocal || t.nodeReturnsJSValue(objNode)) && !t.builtins.IsArrayMethod(prop) && !t.builtins.IsRegexMethod(prop) {
 					t.addImport("fmt")
 					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 					obj = callExpr(selectorExpr(ident("fmt"), "Sprint"), obj)
@@ -1074,9 +1074,11 @@ func (t *Transformer) ensureBool(expr ast.Expr) ast.Expr {
 		if e.Name == "true" || e.Name == "false" {
 			return expr
 		}
-		// Typed locals (bool, string, int, etc.) are already usable as-is.
+		// Check if it's a typed local with a boolean type
 		if t.isTypedLocal(e.Name) {
-			return expr
+			if typeName, ok := t.typedLocalTypes[e.Name]; ok && typeName == "bool" {
+				return expr
+			}
 		}
 	}
 	// JSValue Get() call → .Bool()
@@ -1117,6 +1119,7 @@ func (t *Transformer) ensureBool(expr ast.Expr) ast.Expr {
 	}
 	return expr
 }
+
 
 // coerceJSValueArgs wraps JSValue identifier args with fmt.Sprint() so they
 // can be passed to functions expecting string (e.g. regexp.MatchString).

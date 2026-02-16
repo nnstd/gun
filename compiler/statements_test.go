@@ -229,14 +229,14 @@ func TestNilAssignmentNotWrapped(t *testing.T) {
 }
 
 func TestTypedLocalFromStringMethod(t *testing.T) {
-	// Variables initialized from string methods (toLowerCase etc.) should
-	// be typed locals, not treated as JSValue.
+	// Variables initialized from string methods on JSValue receivers (toLowerCase etc.)
+	// should be tracked as JSValue locals and coerced when used with native Go functions.
 	ts := `function f(s) {
 	const lower = s.toLowerCase();
 	return lower.indexOf("x");
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "strings.Index(lower")
+	assertContains(t, out, "strings.Index(fmt.Sprint(lower)")
 	assertNotContains(t, out, "lower.IndexOf")
 }
 

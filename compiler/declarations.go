@@ -9,6 +9,30 @@ import (
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
+// getTypeString converts a Go AST type expression to a string representation.
+func getTypeString(typ ast.Expr) string {
+	if typ == nil {
+		return ""
+	}
+	switch t := typ.(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.StarExpr:
+		return "*" + getTypeString(t.X)
+	case *ast.ArrayType:
+		if t.Len == nil {
+			return "[]" + getTypeString(t.Elt)
+		}
+		return "[...]" + getTypeString(t.Elt)
+	case *ast.MapType:
+		return "map[" + getTypeString(t.Key) + "]" + getTypeString(t.Value)
+	case *ast.SelectorExpr:
+		return getTypeString(t.X) + "." + t.Sel.Name
+	default:
+		return ""
+	}
+}
+
 func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 	var decls []ast.Decl
 	isConst := false
@@ -109,6 +133,19 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 		typed := typeNode != nil || t.isNonJSValueInit(valueNode)
 		t.addToCurrentScope(name, typed)
 
+		// Track the actual Go type of typed locals for proper boolean conversion.
+		// For boolean literals, infer the type even if there's no explicit annotation.
+		if typed && len(t.localScopes) > 0 {
+			if typ != nil {
+				t.typedLocalTypes[name] = getTypeString(typ)
+			} else if value != nil {
+				// Infer type from value for type tracking (without adding explicit annotation)
+				if id, ok := value.(*ast.Ident); ok && (id.Name == "true" || id.Name == "false") {
+					t.typedLocalTypes[name] = "bool"
+				}
+			}
+		}
+
 		// Track package-level variable types so property access on untyped
 		// package vars uses .Get() instead of capitalized selectors.
 		if len(t.localScopes) == 0 {
@@ -137,6 +174,12 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 					t.mapLocals[name] = true
 				}
 			}
+		}
+
+		// Track locals that hold *jsvalue.JSValue (not slices or maps)
+		// so method calls on them are properly coerced.
+		if !typed && valueNode != nil && t.nodeReturnsJSValue(valueNode) {
+			t.jsvalueLocals[name] = true
 		}
 
 		// If const with simple literal value, use Go const
@@ -187,17 +230,21 @@ func (t *Transformer) isNonJSValueInit(node *sitter.Node) bool {
 			}
 			if propNode != nil {
 				prop := propNode.Utf8Text(t.source)
+				// String methods: on typed receivers (native strings) they return native Go types;
+				// on JSValue receivers (untyped parameters or JSValue locals) they return *jsvalue.JSValue.
 				switch prop {
 				case "toLowerCase", "toUpperCase", "trim", "trimStart", "trimEnd",
 					"toString", "replace", "replaceAll", "join",
-					"codePointAt", "charCodeAt", "indexOf":
-					return true
-				case "split", "charAt":
-					// On a typed local (string) these return native Go types;
-					// on a JSValue receiver they return *jsvalue.JSValue via runtime.
-					if objNode != nil && objNode.Kind() == "identifier" {
-						return !t.isUntypedLocal(objNode.Utf8Text(t.source))
+					"codePointAt", "charCodeAt", "indexOf", "split", "charAt":
+					if objNode != nil {
+						// If receiver returns JSValue, the method call also returns JSValue
+						return !t.nodeReturnsJSValue(objNode)
 					}
+					return true
+				case "match", "exec":
+					// match/exec always return native Go types ([]string) regardless of receiver,
+					// because the transpiler transforms them to FindStringSubmatch which returns []string
+					return true
 				}
 			}
 		}

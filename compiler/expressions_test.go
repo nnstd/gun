@@ -227,9 +227,8 @@ func TestFuncExprTrailingReturn(t *testing.T) {
 }
 
 func TestCharAtTypedVsJSValue(t *testing.T) {
-	// charAt on a typed string local should produce a string result,
-	// while charAt on a JSValue param should produce a JSValue result.
-	// Comparing the two must coerce the JSValue side to .String().
+	// charAt on JSValue locals should produce JSValue results.
+	// When comparing two JSValue results, both should be coerced to .String().
 	ts := `function f(str) {
 	const lower = str.toLowerCase();
 	const chrLower = lower.charAt(0);
@@ -237,8 +236,8 @@ func TestCharAtTypedVsJSValue(t *testing.T) {
 	return chrLower !== chrString;
 }`
 	out := compile(t, ts)
+	assertContains(t, out, "chrLower.String()")
 	assertContains(t, out, "chrString.String()")
-	assertNotContains(t, out, "chrLower.String()")
 }
 
 func TestNullComparisonNoStringCoercion(t *testing.T) {

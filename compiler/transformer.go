@@ -21,8 +21,10 @@ type Transformer struct {
 	varTypes           map[string]string          // variable name → module type (e.g. "app" → "hono")
 	funcVarNames       map[string]bool            // package-level vars assigned function literals (can't have Go fields)
 	localScopes        []map[string]bool          // stack of local variable/parameter names that shadow imports (true = has type annotation, false = JSValue default)
+	jsvalueLocals      map[string]bool            // local variables that hold *jsvalue.JSValue (not slices or maps)
 	jsvalueSliceLocals map[string]bool            // typed locals whose elements are *jsvalue.JSValue (e.g. []*jsvalue.JSValue slices)
 	mapLocals          map[string]bool            // typed locals initialized from object literals (map[string]*jsvalue.JSValue)
+	typedLocalTypes    map[string]string          // typed local name → Go type name (e.g. "bool", "string", "[]string")
 	pkgVarTyped        map[string]bool            // package-level variable name → true if typed (not JSValue)
 	funcParamCounts    map[string]int             // hoisted function name → parameter count (for padding missing args)
 	builtins           *BuiltinRegistry           // registry of built-in methods and their metadata
@@ -38,8 +40,10 @@ func newTransformer(source []byte, pkgName, moduleName string, samePackageImport
 		importedNames:      make(map[string]resolvedImport),
 		varTypes:           make(map[string]string),
 		funcVarNames:       make(map[string]bool),
+		jsvalueLocals:      make(map[string]bool),
 		jsvalueSliceLocals: make(map[string]bool),
 		mapLocals:          make(map[string]bool),
+		typedLocalTypes:    make(map[string]string),
 		pkgVarTyped:        make(map[string]bool),
 		funcParamCounts:    make(map[string]int),
 		builtins:           NewBuiltinRegistry(),
@@ -156,7 +160,8 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 	}
 	switch node.Kind() {
 	case "identifier":
-		return t.isUntypedLocal(node.Utf8Text(t.source))
+		name := node.Utf8Text(t.source)
+		return t.isUntypedLocal(name) || t.jsvalueLocals[name]
 	case "subscript_expression":
 		objNode := node.ChildByFieldName("object")
 		if objNode == nil {
@@ -188,23 +193,45 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 				return true
 			}
 		}
+		// Call to jsvalue package functions (NewString, NewNumber, etc.) → returns *jsvalue.JSValue
+		if fnNode != nil && fnNode.Kind() == "member_expression" {
+			objNode := fnNode.ChildByFieldName("object")
+			propNode := fnNode.ChildByFieldName("property")
+			if objNode != nil && propNode != nil {
+				objText := objNode.Utf8Text(t.source)
+				propText := propNode.Utf8Text(t.source)
+				// Check if calling jsvalue package functions
+				if objText == "jsvalue" || (objNode.Kind() == "identifier" && t.importedNames[objText].goImportPath == "github.com/nnstd/gun/runtime/jsvalue") {
+					// JSValue factory functions
+					if propText == "NewString" || propText == "NewNumber" || propText == "NewBool" ||
+						propText == "NewArray" || propText == "NewObject" || propText == "NewNull" ||
+						propText == "NewUndefined" || propText == "NewSymbol" || propText == "NewBigInt" ||
+						propText == "NewFunction" || propText == "NewRegex" || propText == "From" ||
+						propText == "FromStrings" {
+						return true
+					}
+				}
+			}
+		}
 		if fnNode != nil && fnNode.Kind() == "member_expression" {
 			objNode := fnNode.ChildByFieldName("object")
 			propNode := fnNode.ChildByFieldName("property")
 			if objNode != nil && t.nodeReturnsJSValue(objNode) {
-				// String methods on untyped locals (JSValue parameters) are wrapped
-				// to return JSValue, maintaining type consistency.
+				// String methods on JSValue receivers (untyped parameters or JSValue locals)
+				// are wrapped to return JSValue, maintaining type consistency.
 				if propNode != nil {
 					prop := propNode.Utf8Text(t.source)
-					isUntypedReceiver := objNode.Kind() == "identifier" && t.isUntypedLocal(objNode.Utf8Text(t.source))
+					// Check if receiver is a JSValue (untyped parameter or JSValue local)
+					isJSValueReceiver := objNode.Kind() == "identifier" &&
+						(t.isUntypedLocal(objNode.Utf8Text(t.source)) || t.jsvalueLocals[objNode.Utf8Text(t.source)])
 
-					// String methods on untyped receivers return JSValue (wrapped)
-					if isUntypedReceiver && t.builtins.ReturnsJSValueForUntypedReceiver(prop) {
+					// String methods on JSValue receivers return JSValue (wrapped)
+					if isJSValueReceiver && t.builtins.ReturnsJSValueForUntypedReceiver(prop) {
 						return true
 					}
 
 					// String methods on typed receivers return native Go types
-					if !isUntypedReceiver && t.builtins.IsStringMethod(prop) {
+					if !isJSValueReceiver && t.builtins.IsStringMethod(prop) {
 						return false
 					}
 				}
