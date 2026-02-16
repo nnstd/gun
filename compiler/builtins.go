@@ -61,7 +61,7 @@ func transformBuiltinMethod(obj ast.Expr, prop string, args []ast.Expr, addImpor
 	if r := transformStringMethod(obj, prop, args, addImport); r != nil {
 		return r
 	}
-	if r := transformCollectionMethod(obj, prop, args, addImport); r != nil {
+	if r := transformCollectionMethod(obj, prop, args, addImport, false); r != nil {
 		return r
 	}
 	// For typed regex values (not JSValue), use method form directly

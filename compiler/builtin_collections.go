@@ -5,7 +5,7 @@ import (
 	"go/token"
 )
 
-func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addImport func(string)) ast.Expr {
+func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addImport func(string), isJSValueReceiver bool) ast.Expr {
 	switch prop {
 	case "concat":
 		if len(args) > 0 {
@@ -14,7 +14,7 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 				return args[0]
 			}
 			// JSValue receiver: coerce to array, append, wrap result
-			if isJSValueMethodCall(obj) {
+			if isJSValueReceiver || isJSValueMethodCall(obj) {
 				addImport("github.com/nnstd/gun/runtime/jsvalue")
 				wrapped := make([]ast.Expr, len(args))
 				for i, a := range args {
@@ -38,7 +38,7 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 	case "push":
 		if len(args) > 0 {
 			// JSValue receiver: coerce to array, append, wrap result
-			if isJSValueMethodCall(obj) {
+			if isJSValueReceiver || isJSValueMethodCall(obj) {
 				addImport("github.com/nnstd/gun/runtime/jsvalue")
 				wrapped := make([]ast.Expr, len(args))
 				for i, a := range args {
@@ -59,9 +59,62 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 			}
 			return callExpr(ident("append"), append([]ast.Expr{obj}, args...)...)
 		}
+	case "pop":
+		// JSValue receiver: get last element from array
+		if isJSValueReceiver || isJSValueMethodCall(obj) {
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			// Create IIFE: func() *jsvalue.JSValue { arr := obj.Array(); if len(arr) > 0 { return arr[len(arr)-1] }; return jsvalue.NewUndefined() }()
+			arrIdent := ident("_arr")
+			arrDecl := &ast.AssignStmt{
+				Lhs: []ast.Expr{arrIdent},
+				Tok: token.DEFINE,
+				Rhs: []ast.Expr{callExpr(selectorExpr(obj, "Array"))},
+			}
+			lenCheck := &ast.BinaryExpr{
+				X:  callExpr(ident("len"), arrIdent),
+				Op: token.GTR,
+				Y:  &ast.BasicLit{Kind: token.INT, Value: "0"},
+			}
+			lastIndex := &ast.BinaryExpr{
+				X:  callExpr(ident("len"), arrIdent),
+				Op: token.SUB,
+				Y:  &ast.BasicLit{Kind: token.INT, Value: "1"},
+			}
+			returnLast := &ast.ReturnStmt{
+				Results: []ast.Expr{&ast.IndexExpr{X: arrIdent, Index: lastIndex}},
+			}
+			ifStmt := &ast.IfStmt{
+				Cond: lenCheck,
+				Body: &ast.BlockStmt{List: []ast.Stmt{returnLast}},
+			}
+			returnUndef := &ast.ReturnStmt{
+				Results: []ast.Expr{callExpr(selectorExpr(ident("jsvalue"), "NewUndefined"))},
+			}
+			iife := &ast.CallExpr{
+				Fun: &ast.FuncLit{
+					Type: &ast.FuncType{
+						Results: &ast.FieldList{
+							List: []*ast.Field{{Type: &ast.StarExpr{X: selectorExpr(ident("jsvalue"), "JSValue")}}},
+						},
+					},
+					Body: &ast.BlockStmt{
+						List: []ast.Stmt{arrDecl, ifStmt, returnUndef},
+					},
+				},
+			}
+			return iife
+		}
+		// For typed arrays: arr[len(arr)-1]
+		lenCall := callExpr(ident("len"), obj)
+		lastIndex := &ast.BinaryExpr{
+			X:  lenCall,
+			Op: token.SUB,
+			Y:  &ast.BasicLit{Kind: token.INT, Value: "1"},
+		}
+		return &ast.IndexExpr{X: obj, Index: lastIndex}
 	case "length":
 		// JSValue receiver: use len(obj.Array()) for arrays or len(obj.String()) for strings
-		if isJSValueMethodCall(obj) {
+		if isJSValueReceiver || isJSValueMethodCall(obj) {
 			// For now, assume array - string length should be handled by string methods
 			return callExpr(ident("len"), callExpr(selectorExpr(obj, "Array")))
 		}
@@ -72,7 +125,7 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 		}
 	case "slice":
 		// JSValue receiver: coerce to array, slice, wrap result
-		if isJSValueMethodCall(obj) {
+		if isJSValueReceiver || isJSValueMethodCall(obj) {
 			addImport("github.com/nnstd/gun/runtime/jsvalue")
 			sliceExpr := &ast.SliceExpr{X: callExpr(selectorExpr(obj, "Array"))}
 			if len(args) >= 1 {

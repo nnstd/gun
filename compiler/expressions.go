@@ -478,17 +478,18 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			}
 
 			// When the receiver is a map local value (e.g. flags.keys, flags["keys"]),
-			// the result is *jsvalue.JSValue — use JSValue methods directly instead
-			// of Go builtin transforms like append().
+			// the result is *jsvalue.JSValue — route to collection method transformation
 			if (objNode.Kind() == "member_expression" || objNode.Kind() == "subscript_expression") && func() bool {
 				inner := objNode.ChildByFieldName("object")
 				return inner != nil && inner.Kind() == "identifier" && t.mapLocals[inner.Utf8Text(t.source)]
-			}() {
+			}() && t.builtins.IsArrayMethod(prop) {
 				obj := t.transformExpr(objNode)
 				for i, arg := range args {
 					args[i] = t.wrapAsJSValue(arg)
 				}
-				return callExpr(selectorExpr(obj, capitalize(prop)), args...)
+				if r := transformCollectionMethod(obj, prop, args, t.addImport, true); r != nil {
+					return r
+				}
 			}
 
 			// Method transforms on arbitrary receivers (string/collection methods)
@@ -540,8 +541,8 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 							return callExpr(selectorExpr(ident("jsvalue"), "NewString"), r)
 						}
 					}
-				} else if isUntypedLocal && t.builtins.IsArrayMethod(prop) {
-					// For array methods on untyped locals (JSValue parameters), apply JSValue coercion
+				} else if (isUntypedLocal || t.nodeReturnsJSValue(objNode)) && t.builtins.IsArrayMethod(prop) {
+					// For array methods on JSValue receivers (untyped locals or JSValue-returning expressions), apply JSValue coercion
 					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 
 					// Handle slice specially with array coercion

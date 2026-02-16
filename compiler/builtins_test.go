@@ -172,6 +172,7 @@ func TestPushOnMapLocalValue(t *testing.T) {
 	flags.keys.push(key);
 }`
 	out := compile(t, ts)
-	assertContains(t, out, `.Push(`)
-	assertNotContains(t, out, "append(flags")
+	assertContains(t, out, `append(flags["keys"].Array()`)
+	assertContains(t, out, "jsvalue.NewArray")
+	assertNotContains(t, out, `.Push(`)
 }
