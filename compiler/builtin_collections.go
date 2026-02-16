@@ -105,7 +105,9 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 			// For JSValue arrays, use jsvalue.Includes wrapper
 			if isJSValueReceiver || isJSValueMethodCall(obj) {
 				addImport("github.com/nnstd/gun/runtime/jsvalue")
-				return callExpr(selectorExpr(ident("jsvalue"), "Includes"), obj, args[0])
+				// Wrap the argument with jsvalue.From to ensure it's a JSValue
+				wrappedArg := callExpr(selectorExpr(ident("jsvalue"), "From"), args[0])
+				return callExpr(selectorExpr(ident("jsvalue"), "Includes"), obj, wrappedArg)
 			}
 			// For typed arrays, use slices.Contains
 			addImport("slices")
