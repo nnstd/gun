@@ -210,8 +210,8 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 						return true
 					}
 				}
-				// Object.keys() returns JSValue (will be transformed to jsvalue.Keys())
-				if objText == "Object" && propText == "keys" {
+				// Object.keys(), Object.entries(), Object.values() return JSValue
+				if objText == "Object" && (propText == "keys" || propText == "entries" || propText == "values") {
 					return true
 				}
 				// [].concat(x) is optimized to just x, so if x returns JSValue, the concat call returns JSValue
