@@ -466,28 +466,28 @@ func Pop(arr *JSValue) *JSValue {
 }
 
 // Join joins array elements into a string with separator.
-func Join(arr *JSValue, sep string) string {
+func Join(arr *JSValue, sep string) *JSValue {
 	if arr == nil || arr.arrayVal == nil {
-		return ""
+		return NewString("")
 	}
 	strs := make([]string, len(arr.arrayVal))
 	for i, elem := range arr.arrayVal {
 		strs[i] = fmt.Sprint(elem)
 	}
-	return strings.Join(strs, sep)
+	return NewString(strings.Join(strs, sep))
 }
 
 // Includes checks if array contains a value.
-func Includes(arr *JSValue, val *JSValue) bool {
+func Includes(arr *JSValue, val *JSValue) *JSValue {
 	if arr == nil || arr.arrayVal == nil {
-		return false
+		return NewBool(false)
 	}
 	for _, elem := range arr.arrayVal {
 		if elem == val {
-			return true
+			return NewBool(true)
 		}
 	}
-	return false
+	return NewBool(false)
 }
 
 // OrDefault implements JavaScript || operator with truthiness semantics.
@@ -611,13 +611,13 @@ func CharAt(val *JSValue, index int) *JSValue {
 }
 
 // StartsWith checks if a JSValue string starts with prefix.
-func StartsWith(val *JSValue, prefix string) bool {
-	return strings.HasPrefix(fmt.Sprint(val), prefix)
+func StartsWith(val *JSValue, prefix string) *JSValue {
+	return NewBool(strings.HasPrefix(fmt.Sprint(val), prefix))
 }
 
 // EndsWith checks if a JSValue string ends with suffix.
-func EndsWith(val *JSValue, suffix string) bool {
-	return strings.HasSuffix(fmt.Sprint(val), suffix)
+func EndsWith(val *JSValue, suffix string) *JSValue {
+	return NewBool(strings.HasSuffix(fmt.Sprint(val), suffix))
 }
 
 // Repeat repeats a JSValue string count times.
