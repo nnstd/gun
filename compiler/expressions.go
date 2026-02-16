@@ -38,10 +38,12 @@ func (t *Transformer) transformExpr(node *sitter.Node) ast.Expr {
 		return t.transformTemplateString(node)
 
 	case "true":
-		return ident("true")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		return callExpr(selectorExpr(ident("jsvalue"), "NewBool"), ident("true"))
 
 	case "false":
-		return ident("false")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		return callExpr(selectorExpr(ident("jsvalue"), "NewBool"), ident("false"))
 
 	case "null", "undefined":
 		return ident("nil")
@@ -1071,8 +1073,14 @@ func (t *Transformer) ensureBool(expr ast.Expr) ast.Expr {
 		}
 		// Plain function calls: if the function is a local that returns
 		// *jsvalue.JSValue (untyped), wrap with != nil.
-		if id, ok := e.Fun.(*ast.Ident); ok && t.isUntypedLocal(id.Name) {
-			return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
+		if id, ok := e.Fun.(*ast.Ident); ok {
+			if t.isUntypedLocal(id.Name) {
+				return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
+			}
+			// Imported functions from transpiled modules return *jsvalue.JSValue
+			if _, isImported := t.importedNames[id.Name]; isImported {
+				return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
+			}
 		}
 		// IIFE returning *jsvalue.JSValue (from || default-value pattern) → != nil
 		if fl, ok := e.Fun.(*ast.FuncLit); ok {
