@@ -545,48 +545,6 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 					// For array methods on JSValue receivers (untyped locals or JSValue-returning expressions), apply JSValue coercion
 					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 
-					// Handle slice specially with array coercion
-					if prop == "slice" {
-						// args.slice(1) → jsvalue.NewArray(args.Array()[1:]...)
-						arrExpr := callExpr(selectorExpr(obj, "Array"))
-						sliceExpr := &ast.SliceExpr{X: arrExpr}
-						if len(args) >= 1 {
-							sliceExpr.Low = normalizeSliceIndex(args[0], arrExpr)
-						}
-						if len(args) >= 2 {
-							sliceExpr.High = normalizeSliceIndex(args[1], arrExpr)
-						}
-						return &ast.CallExpr{
-							Fun:      selectorExpr(ident("jsvalue"), "NewArray"),
-							Args:     []ast.Expr{sliceExpr},
-							Ellipsis: token.Pos(1),
-						}
-					}
-
-					// Handle concat with array coercion
-					if prop == "concat" && len(args) > 0 {
-						wrapped := make([]ast.Expr, len(args))
-						for i, a := range args {
-							wrapped[i] = callExpr(selectorExpr(ident("jsvalue"), "From"), a)
-						}
-						appendArgs := append([]ast.Expr{callExpr(selectorExpr(obj, "Array"))}, wrapped...)
-						appendCall := &ast.CallExpr{
-							Fun:  ident("append"),
-							Args: appendArgs,
-						}
-						return &ast.CallExpr{
-							Fun:      selectorExpr(ident("jsvalue"), "NewArray"),
-							Args:     []ast.Expr{appendCall},
-							Ellipsis: token.Pos(1),
-						}
-					}
-
-					// Handle join with array coercion
-					if prop == "join" && len(args) > 0 {
-						// Need to convert each element to string and join
-						// For now, pass through to transformBuiltinMethod
-					}
-
 					// Handle map/filter/forEach with package-level functions
 					if prop == "map" || prop == "filter" || prop == "forEach" {
 						funcName := capitalize(prop)

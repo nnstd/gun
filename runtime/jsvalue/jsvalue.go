@@ -2,6 +2,7 @@ package jsvalue
 
 import (
 	"fmt"
+	"strings"
 	"sync/atomic"
 )
 
@@ -436,4 +437,190 @@ func MatchString(regex *JSValue, value any) bool {
 		return re.MatchString(str)
 	}
 	return false
+}
+
+// IsTruthy returns true if the JSValue is truthy in JavaScript semantics.
+// This is a method version of the Truthy function.
+func (v *JSValue) IsTruthy() bool {
+	return Truthy(v)
+}
+
+// normalizeIndex converts negative indices to positive ones.
+// In JavaScript, arr[-1] means arr[len(arr)-1].
+func normalizeIndex(idx int, length int) int {
+	if idx < 0 {
+		return length + idx
+	}
+	return idx
+}
+
+// Pop returns the last element of an array, or undefined if empty.
+func Pop(arr *JSValue) *JSValue {
+	if arr == nil || arr.arrayVal == nil {
+		return NewUndefined()
+	}
+	if len(arr.arrayVal) == 0 {
+		return NewUndefined()
+	}
+	return arr.arrayVal[len(arr.arrayVal)-1]
+}
+
+// Join joins array elements into a string with separator.
+func Join(arr *JSValue, sep string) string {
+	if arr == nil || arr.arrayVal == nil {
+		return ""
+	}
+	strs := make([]string, len(arr.arrayVal))
+	for i, elem := range arr.arrayVal {
+		strs[i] = fmt.Sprint(elem)
+	}
+	return strings.Join(strs, sep)
+}
+
+// Includes checks if array contains a value.
+func Includes(arr *JSValue, val *JSValue) bool {
+	if arr == nil || arr.arrayVal == nil {
+		return false
+	}
+	for _, elem := range arr.arrayVal {
+		if elem == val {
+			return true
+		}
+	}
+	return false
+}
+
+// OrDefault implements JavaScript || operator with truthiness semantics.
+func OrDefault(val *JSValue, fallback *JSValue) *JSValue {
+	if val == nil || !val.IsTruthy() {
+		return fallback
+	}
+	return val
+}
+
+// Slice slices array with support for negative indices.
+func Slice(arr *JSValue, args ...int) *JSValue {
+	if arr == nil || arr.arrayVal == nil {
+		return NewArray()
+	}
+
+	length := len(arr.arrayVal)
+	start := 0
+	end := length
+
+	if len(args) >= 1 {
+		start = normalizeIndex(args[0], length)
+	}
+	if len(args) >= 2 {
+		end = normalizeIndex(args[1], length)
+	}
+
+	// Clamp to valid range
+	if start < 0 {
+		start = 0
+	}
+	if start > length {
+		start = length
+	}
+	if end < 0 {
+		end = 0
+	}
+	if end > length {
+		end = length
+	}
+	if end < start {
+		end = start
+	}
+
+	return NewArray(arr.arrayVal[start:end]...)
+}
+
+// Concat concatenates arrays and values.
+func Concat(arr *JSValue, items ...*JSValue) *JSValue {
+	if arr == nil || arr.arrayVal == nil {
+		return NewArray(items...)
+	}
+	result := make([]*JSValue, len(arr.arrayVal), len(arr.arrayVal)+len(items))
+	copy(result, arr.arrayVal)
+	result = append(result, items...)
+	return NewArray(result...)
+}
+
+// Push appends items to array (returns new array in Go).
+func Push(arr *JSValue, items ...*JSValue) *JSValue {
+	if arr == nil || arr.arrayVal == nil {
+		return NewArray(items...)
+	}
+	result := append(arr.arrayVal, items...)
+	return NewArray(result...)
+}
+
+// Shift returns first element, or undefined if empty.
+func Shift(arr *JSValue) *JSValue {
+	if arr == nil || arr.arrayVal == nil || len(arr.arrayVal) == 0 {
+		return NewUndefined()
+	}
+	return arr.arrayVal[0]
+}
+
+// Unshift prepends items to array.
+func Unshift(arr *JSValue, items ...*JSValue) *JSValue {
+	if arr == nil || arr.arrayVal == nil {
+		return NewArray(items...)
+	}
+	result := make([]*JSValue, 0, len(items)+len(arr.arrayVal))
+	result = append(result, items...)
+	result = append(result, arr.arrayVal...)
+	return NewArray(result...)
+}
+
+// ToLowerCase converts a JSValue to lowercase string and wraps it.
+func ToLowerCase(val *JSValue) *JSValue {
+	return NewString(strings.ToLower(fmt.Sprint(val)))
+}
+
+// ToUpperCase converts a JSValue to uppercase string and wraps it.
+func ToUpperCase(val *JSValue) *JSValue {
+	return NewString(strings.ToUpper(fmt.Sprint(val)))
+}
+
+// Trim trims whitespace from a JSValue string.
+func Trim(val *JSValue) *JSValue {
+	return NewString(strings.TrimSpace(fmt.Sprint(val)))
+}
+
+// Split splits a JSValue string by separator.
+func Split(val *JSValue, sep string) *JSValue {
+	parts := strings.Split(fmt.Sprint(val), sep)
+	return FromStrings(parts)
+}
+
+// Replace replaces all occurrences of old with new in a JSValue string.
+func Replace(val *JSValue, old, new string) *JSValue {
+	return NewString(strings.Replace(fmt.Sprint(val), old, new, -1))
+}
+
+// CharAt returns the character at the given index.
+func CharAt(val *JSValue, index int) *JSValue {
+	s := fmt.Sprint(val)
+	runes := []rune(s)
+	if index < 0 || index >= len(runes) {
+		return NewString("")
+	}
+	return NewString(string(runes[index]))
+}
+
+// StartsWith checks if a JSValue string starts with prefix.
+func StartsWith(val *JSValue, prefix string) bool {
+	return strings.HasPrefix(fmt.Sprint(val), prefix)
+}
+
+// EndsWith checks if a JSValue string ends with suffix.
+func EndsWith(val *JSValue, suffix string) bool {
+	return strings.HasSuffix(fmt.Sprint(val), suffix)
+}
+
+// Repeat repeats a JSValue string count times.
+func Repeat(val *JSValue, count int) *JSValue {
+	return NewString(strings.Repeat(fmt.Sprint(val), count))
 }

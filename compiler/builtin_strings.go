@@ -3,11 +3,19 @@ package compiler
 import "go/ast"
 
 func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport func(string)) ast.Expr {
-	// If the receiver is a JSValue method call (Get, Slice, Index, etc.),
-	// coerce to string for string methods.
-	// For join, the receiver is an array — use JSValue .Join() directly.
+	// Check if the receiver is a JSValue method call
 	wasJSValue := isJSValueMethodCall(obj)
-	if wasJSValue && prop != "join" {
+
+	// Store original obj for JSValue wrapper calls
+	origObj := obj
+
+	// For non-JSValue wrapper methods, coerce to string
+	needsCoercion := wasJSValue && prop != "join" &&
+		prop != "toLowerCase" && prop != "toUpperCase" && prop != "trim" &&
+		prop != "split" && prop != "replace" && prop != "replaceAll" &&
+		prop != "charAt" && prop != "startsWith" && prop != "endsWith" && prop != "repeat"
+
+	if needsCoercion {
 		addImport("fmt")
 		obj = callExpr(selectorExpr(ident("fmt"), "Sprint"), obj)
 	}
@@ -22,8 +30,12 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 			return callExpr(selectorExpr(ident("strings"), "Index"), obj, args[0])
 		}
 	case "split":
-		addImport("strings")
 		if len(args) > 0 {
+			if wasJSValue {
+				addImport("github.com/nnstd/gun/runtime/jsvalue")
+				return callExpr(selectorExpr(ident("jsvalue"), "Split"), origObj, args[0])
+			}
+			addImport("strings")
 			return callExpr(selectorExpr(ident("strings"), "Split"), obj, args[0])
 		}
 	case "join":
@@ -36,6 +48,10 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 			return callExpr(selectorExpr(ident("strings"), "Join"), obj, args[0])
 		}
 	case "trim":
+		if wasJSValue {
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "Trim"), origObj)
+		}
 		addImport("strings")
 		return callExpr(selectorExpr(ident("strings"), "TrimSpace"), obj)
 	case "trimStart", "trimLeft":
@@ -45,24 +61,44 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 		addImport("strings")
 		return callExpr(selectorExpr(ident("strings"), "TrimRight"), obj, stringLit(" \\t\\n\\r"))
 	case "repeat":
-		addImport("strings")
 		if len(args) > 0 {
+			if wasJSValue {
+				addImport("github.com/nnstd/gun/runtime/jsvalue")
+				return callExpr(selectorExpr(ident("jsvalue"), "Repeat"), origObj, args[0])
+			}
+			addImport("strings")
 			return callExpr(selectorExpr(ident("strings"), "Repeat"), obj, args[0])
 		}
 	case "toLowerCase":
+		if wasJSValue {
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "ToLowerCase"), origObj)
+		}
 		addImport("strings")
 		return callExpr(selectorExpr(ident("strings"), "ToLower"), obj)
 	case "toUpperCase":
+		if wasJSValue {
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "ToUpperCase"), origObj)
+		}
 		addImport("strings")
 		return callExpr(selectorExpr(ident("strings"), "ToUpper"), obj)
 	case "startsWith":
-		addImport("strings")
 		if len(args) > 0 {
+			if wasJSValue {
+				addImport("github.com/nnstd/gun/runtime/jsvalue")
+				return callExpr(selectorExpr(ident("jsvalue"), "StartsWith"), origObj, args[0])
+			}
+			addImport("strings")
 			return callExpr(selectorExpr(ident("strings"), "HasPrefix"), obj, args[0])
 		}
 	case "endsWith":
-		addImport("strings")
 		if len(args) > 0 {
+			if wasJSValue {
+				addImport("github.com/nnstd/gun/runtime/jsvalue")
+				return callExpr(selectorExpr(ident("jsvalue"), "EndsWith"), origObj, args[0])
+			}
+			addImport("strings")
 			return callExpr(selectorExpr(ident("strings"), "HasSuffix"), obj, args[0])
 		}
 	case "includes":
@@ -71,13 +107,21 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 			return callExpr(selectorExpr(ident("strings"), "Contains"), obj, args[0])
 		}
 	case "replace":
-		addImport("strings")
 		if len(args) >= 2 {
+			if wasJSValue {
+				addImport("github.com/nnstd/gun/runtime/jsvalue")
+				return callExpr(selectorExpr(ident("jsvalue"), "Replace"), origObj, args[0], args[1])
+			}
+			addImport("strings")
 			return callExpr(selectorExpr(ident("strings"), "Replace"), obj, args[0], args[1], intLit("1"))
 		}
 	case "replaceAll":
-		addImport("strings")
 		if len(args) >= 2 {
+			if wasJSValue {
+				addImport("github.com/nnstd/gun/runtime/jsvalue")
+				return callExpr(selectorExpr(ident("jsvalue"), "Replace"), origObj, args[0], args[1])
+			}
+			addImport("strings")
 			return callExpr(selectorExpr(ident("strings"), "ReplaceAll"), obj, args[0], args[1])
 		}
 	case "codePointAt":
@@ -91,6 +135,14 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 			Index: idx,
 		})
 	case "charAt":
+		if wasJSValue {
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			var idx ast.Expr = intLit("0")
+			if len(args) > 0 {
+				idx = args[0]
+			}
+			return callExpr(selectorExpr(ident("jsvalue"), "CharAt"), origObj, idx)
+		}
 		// str.charAt(i) → string([]rune(str)[i])
 		var idx ast.Expr = intLit("0")
 		if len(args) > 0 {

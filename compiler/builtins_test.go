@@ -172,9 +172,10 @@ func TestPushOnMapLocalValue(t *testing.T) {
 	flags.keys.push(key);
 }`
 	out := compile(t, ts)
-	assertContains(t, out, `append(flags["keys"].Array()`)
-	assertContains(t, out, "jsvalue.NewArray")
-	assertNotContains(t, out, `.Push(`)
+	// Should use jsvalue.Push wrapper
+	assertContains(t, out, `jsvalue.Push(flags["keys"]`)
+	assertContains(t, out, "jsvalue.From")
+	assertNotContains(t, out, `append(flags["keys"].Array()`)
 }
 
 func TestPopOnJSValueArray(t *testing.T) {
@@ -182,12 +183,10 @@ func TestPopOnJSValueArray(t *testing.T) {
 	return arr.pop();
 }`
 	out := compile(t, ts)
-	// Should generate IIFE with array coercion and bounds check
-	assertContains(t, out, "_arr := arr.Array()")
-	assertContains(t, out, "if len(_arr) > 0")
-	assertContains(t, out, "return _arr[len(_arr)-1]")
-	assertContains(t, out, "jsvalue.NewUndefined()")
-	assertNotContains(t, out, `.Pop(`)
+	// Should use jsvalue.Pop wrapper
+	assertContains(t, out, "jsvalue.Pop(arr)")
+	assertNotContains(t, out, "_arr := arr.Array()")
+	assertNotContains(t, out, "if len(_arr) > 0")
 }
 
 func TestPopOnMapLocalValue(t *testing.T) {
@@ -196,11 +195,9 @@ func TestPopOnMapLocalValue(t *testing.T) {
 	return flags.keys.pop();
 }`
 	out := compile(t, ts)
-	// Should generate IIFE for pop on map subscript
-	assertContains(t, out, "_arr :=")
-	assertContains(t, out, `flags["keys"].Array()`)
-	assertContains(t, out, "if len(_arr) > 0")
-	assertNotContains(t, out, `.Pop(`)
+	// Should use jsvalue.Pop wrapper
+	assertContains(t, out, `jsvalue.Pop(flags["keys"])`)
+	assertNotContains(t, out, "_arr :=")
 }
 
 func TestNegativeSliceIndex(t *testing.T) {
@@ -218,10 +215,9 @@ func TestNegativeSliceIndexOnJSValue(t *testing.T) {
 	return arr.slice(1, -2);
 }`
 	out := compile(t, ts)
-	// Should convert negative indices for JSValue arrays
-	assertContains(t, out, "len(arr.Array())-2")
-	assertContains(t, out, "jsvalue.NewArray")
-	assertNotContains(t, out, ":-2")
+	// Should use jsvalue.Slice wrapper which handles negative indices internally
+	assertContains(t, out, "jsvalue.Slice(arr, 1, -2)")
+	assertNotContains(t, out, "len(arr.Array())")
 }
 
 func TestJoinOnJSValueArray(t *testing.T) {
@@ -229,13 +225,10 @@ func TestJoinOnJSValueArray(t *testing.T) {
 	return arr.join(",");
 }`
 	out := compile(t, ts)
-	// Should generate IIFE that converts elements to strings and joins
-	assertContains(t, out, "_arr := arr.Array()")
-	assertContains(t, out, "make([]string, len(_arr))")
-	assertContains(t, out, "fmt.Sprint(_elem)")
-	assertContains(t, out, "strings.Join(_strs,")
-	// Ensure it's not calling a JSValue method
-	assertNotContains(t, out, "arr.Join(")
+	// Should use jsvalue.Join wrapper
+	assertContains(t, out, `jsvalue.Join(arr, ",")`)
+	assertNotContains(t, out, "_arr := arr.Array()")
+	assertNotContains(t, out, "make([]string")
 }
 
 func TestJoinOnMapResult(t *testing.T) {
@@ -244,10 +237,9 @@ func TestJoinOnMapResult(t *testing.T) {
 	return arr.map(x => x).join(".");
 }`
 	out := compile(t, ts)
-	// Should generate IIFE for join on map result
+	// Should use jsvalue.Map and jsvalue.Join wrappers
 	assertContains(t, out, "jsvalue.Map(arr,")
-	assertContains(t, out, "_arr :=")
-	assertContains(t, out, "strings.Join(_strs,")
-	// Ensure it's using strings.Join, not a JSValue method
-	assertNotContains(t, out, ").Join(")
+	assertContains(t, out, `jsvalue.Join(`)
+	assertNotContains(t, out, "_arr :=")
+	assertNotContains(t, out, "strings.Join")
 }
