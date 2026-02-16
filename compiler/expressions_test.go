@@ -351,3 +351,35 @@ func TestNegatedMatchUsesNilCheck(t *testing.T) {
 	assertContains(t, out, "== nil")
 	assertNotContains(t, out, "!regexp")
 }
+
+func TestMatchResultInBooleanContext(t *testing.T) {
+	// Match results should be checked with != nil, not .String() != ""
+	ts := `function f(arg) {
+	if (arg.match(/^--.+/)) {
+		return true;
+	}
+	return false;
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "FindStringSubmatch")
+	assertContains(t, out, "!= nil")
+	assertNotContains(t, out, ".String()")
+}
+
+func TestMatchResultNotTreatedAsJSValue(t *testing.T) {
+	// Match results return []string, not JSValue, so they shouldn't be coerced with .String()
+	ts := `function f(s) {
+	const m = s.match(/^test/);
+	if (m) {
+		return m[0];
+	}
+	return "";
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "FindStringSubmatch")
+	assertContains(t, out, "m != nil")
+	assertContains(t, out, "m[0]")
+	// Should not treat match result as JSValue
+	assertNotContains(t, out, "m.String()")
+	assertNotContains(t, out, "m.Index(")
+}

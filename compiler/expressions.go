@@ -548,12 +548,13 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 					// Handle slice specially with array coercion
 					if prop == "slice" {
 						// args.slice(1) → jsvalue.NewArray(args.Array()[1:]...)
-						sliceExpr := &ast.SliceExpr{X: callExpr(selectorExpr(obj, "Array"))}
+						arrExpr := callExpr(selectorExpr(obj, "Array"))
+						sliceExpr := &ast.SliceExpr{X: arrExpr}
 						if len(args) >= 1 {
-							sliceExpr.Low = args[0]
+							sliceExpr.Low = normalizeSliceIndex(args[0], arrExpr)
 						}
 						if len(args) >= 2 {
-							sliceExpr.High = args[1]
+							sliceExpr.High = normalizeSliceIndex(args[1], arrExpr)
 						}
 						return &ast.CallExpr{
 							Fun:      selectorExpr(ident("jsvalue"), "NewArray"),
@@ -597,8 +598,8 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 						return callExpr(ident("len"), callExpr(selectorExpr(obj, "Array")))
 					}
 
-					// For other array methods, pass through to transformBuiltinMethod
-					if r := transformBuiltinMethod(obj, prop, args, t.addImport); r != nil {
+					// For other array methods, call transformCollectionMethod with isJSValueReceiver=true
+					if r := transformCollectionMethod(obj, prop, args, t.addImport, true); r != nil {
 						return r
 					}
 				} else {

@@ -176,3 +176,50 @@ func TestPushOnMapLocalValue(t *testing.T) {
 	assertContains(t, out, "jsvalue.NewArray")
 	assertNotContains(t, out, `.Push(`)
 }
+
+func TestPopOnJSValueArray(t *testing.T) {
+	ts := `function f(arr) {
+	return arr.pop();
+}`
+	out := compile(t, ts)
+	// Should generate IIFE with array coercion and bounds check
+	assertContains(t, out, "_arr := arr.Array()")
+	assertContains(t, out, "if len(_arr) > 0")
+	assertContains(t, out, "return _arr[len(_arr)-1]")
+	assertContains(t, out, "jsvalue.NewUndefined()")
+	assertNotContains(t, out, `.Pop(`)
+}
+
+func TestPopOnMapLocalValue(t *testing.T) {
+	ts := `function f() {
+	const flags = {keys: [1, 2, 3]};
+	return flags.keys.pop();
+}`
+	out := compile(t, ts)
+	// Should generate IIFE for pop on map subscript
+	assertContains(t, out, "_arr :=")
+	assertContains(t, out, `flags["keys"].Array()`)
+	assertContains(t, out, "if len(_arr) > 0")
+	assertNotContains(t, out, `.Pop(`)
+}
+
+func TestNegativeSliceIndex(t *testing.T) {
+	ts := `function f(arr: number[]): number[] {
+	return arr.slice(0, -1);
+}`
+	out := compile(t, ts)
+	// Should convert -1 to len(arr)-1 (Go formatter adds spaces around :)
+	assertContains(t, out, "len(arr)-1")
+	assertNotContains(t, out, ":-1")
+}
+
+func TestNegativeSliceIndexOnJSValue(t *testing.T) {
+	ts := `function f(arr) {
+	return arr.slice(1, -2);
+}`
+	out := compile(t, ts)
+	// Should convert negative indices for JSValue arrays
+	assertContains(t, out, "len(arr.Array())-2")
+	assertContains(t, out, "jsvalue.NewArray")
+	assertNotContains(t, out, ":-2")
+}
