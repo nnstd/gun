@@ -214,6 +214,20 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 				if objText == "Object" && propText == "keys" {
 					return true
 				}
+				// [].concat(x) is optimized to just x, so if x returns JSValue, the concat call returns JSValue
+				if propText == "concat" && objNode.Kind() == "array" {
+					// Check if it's an empty array
+					if objNode.NamedChildCount() == 0 {
+						// Check if the first argument returns JSValue
+						argsNode := node.ChildByFieldName("arguments")
+						if argsNode != nil && argsNode.NamedChildCount() > 0 {
+							firstArg := argsNode.NamedChild(0)
+							if firstArg != nil && t.nodeReturnsJSValue(firstArg) {
+								return true
+							}
+						}
+					}
+				}
 			}
 		}
 		if fnNode != nil && fnNode.Kind() == "member_expression" {
