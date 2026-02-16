@@ -143,7 +143,8 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 		}
 	case "map", "filter", "forEach":
 		// Transform to package-level function calls: arr.map(fn) → jsvalue.Map(arr, fn)
-		if len(args) > 0 {
+		// Only for JSValue receivers - typed arrays are handled elsewhere
+		if len(args) > 0 && (isJSValueReceiver || isJSValueMethodCall(obj)) {
 			addImport("github.com/nnstd/gun/runtime/jsvalue")
 			funcName := capitalize(prop) // Map, Filter, ForEach
 			return callExpr(selectorExpr(ident("jsvalue"), funcName), append([]ast.Expr{obj}, args...)...)
@@ -156,7 +157,13 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 
 func transformObjectCall(prop string, args []ast.Expr, addImport func(string)) ast.Expr {
 	switch prop {
-	case "keys", "values", "entries", "assign":
+	case "keys":
+		// Object.keys(obj) → jsvalue.Keys(obj)
+		if len(args) > 0 {
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "Keys"), args[0])
+		}
+	case "values", "entries", "assign":
 		if len(args) > 0 {
 			return args[0]
 		}

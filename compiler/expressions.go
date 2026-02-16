@@ -1005,8 +1005,11 @@ func isJSValueMethodCall(expr ast.Expr) bool {
 		return false
 	}
 	switch sel.Sel.Name {
-	case "Get", "Index", "NewArray", "From", "Call",
-		"Map", "Filter", "ForEach", "FromStrings", "ToSlice":
+	case "Get", "Index", "NewArray", "From", "Call", "Keys",
+		"Map", "Filter", "ForEach", "FromStrings", "ToSlice",
+		"Join", "Pop", "Includes", "Slice", "Concat", "Push", "Shift", "Unshift",
+		"ToLowerCase", "ToUpperCase", "Trim", "Split", "Replace", "CharAt",
+		"StartsWith", "EndsWith", "Repeat", "OrDefault":
 		return true
 	}
 	return false

@@ -624,3 +624,17 @@ func EndsWith(val *JSValue, suffix string) *JSValue {
 func Repeat(val *JSValue, count int) *JSValue {
 	return NewString(strings.Repeat(fmt.Sprint(val), count))
 }
+
+// Keys returns the keys of an object as a JSValue array.
+// Implements Object.keys() semantics.
+func Keys(obj *JSValue) *JSValue {
+	if obj == nil {
+		return NewArray()
+	}
+	keys := obj.OwnKeys()
+	result := make([]*JSValue, len(keys))
+	for i, key := range keys {
+		result[i] = NewString(key)
+	}
+	return NewArray(result...)
+}

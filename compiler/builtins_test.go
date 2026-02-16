@@ -118,9 +118,10 @@ func TestObjectCreateNull(t *testing.T) {
 	assertNotContains(t, out, "Object.Create")
 }
 
-func TestObjectKeysPassthrough(t *testing.T) {
+func TestObjectKeysTransform(t *testing.T) {
 	ts := `function f(obj: any): any { return Object.keys(obj); }`
 	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Keys(obj)")
 	assertNotContains(t, out, "Object")
 }
 
