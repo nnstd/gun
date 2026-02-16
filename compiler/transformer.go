@@ -221,6 +221,12 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 				// are wrapped to return JSValue, maintaining type consistency.
 				if propNode != nil {
 					prop := propNode.Utf8Text(t.source)
+
+					// match and exec always return []string, not JSValue
+					if prop == "match" || prop == "exec" {
+						return false
+					}
+
 					// Check if receiver is a JSValue (untyped parameter or JSValue local)
 					isJSValueReceiver := objNode.Kind() == "identifier" &&
 						(t.isUntypedLocal(objNode.Utf8Text(t.source)) || t.jsvalueLocals[objNode.Utf8Text(t.source)])

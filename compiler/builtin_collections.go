@@ -5,6 +5,25 @@ import (
 	"go/token"
 )
 
+// normalizeSliceIndex converts negative slice indices to len(arr) - abs(index).
+// In JavaScript, arr.slice(0, -1) means "from start to one before the end".
+// In Go, we need to convert -1 to len(arr)-1.
+func normalizeSliceIndex(index ast.Expr, arr ast.Expr) ast.Expr {
+	// Check if index is a negative literal
+	if unary, ok := index.(*ast.UnaryExpr); ok && unary.Op == token.SUB {
+		if lit, ok := unary.X.(*ast.BasicLit); ok && lit.Kind == token.INT {
+			// Negative literal: convert -N to len(arr)-N
+			return &ast.BinaryExpr{
+				X:  callExpr(ident("len"), arr),
+				Op: token.SUB,
+				Y:  lit,
+			}
+		}
+	}
+	// Non-negative or non-literal: use as-is
+	return index
+}
+
 func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addImport func(string), isJSValueReceiver bool) ast.Expr {
 	switch prop {
 	case "concat":
@@ -129,10 +148,10 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 			addImport("github.com/nnstd/gun/runtime/jsvalue")
 			sliceExpr := &ast.SliceExpr{X: callExpr(selectorExpr(obj, "Array"))}
 			if len(args) >= 1 {
-				sliceExpr.Low = args[0]
+				sliceExpr.Low = normalizeSliceIndex(args[0], callExpr(selectorExpr(obj, "Array")))
 			}
 			if len(args) >= 2 {
-				sliceExpr.High = args[1]
+				sliceExpr.High = normalizeSliceIndex(args[1], callExpr(selectorExpr(obj, "Array")))
 			}
 			// Wrap in NewArray with spread: jsvalue.NewArray(sliceExpr...)
 			return &ast.CallExpr{
@@ -142,10 +161,10 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 			}
 		}
 		if len(args) >= 2 {
-			return &ast.SliceExpr{X: obj, Low: args[0], High: args[1]}
+			return &ast.SliceExpr{X: obj, Low: normalizeSliceIndex(args[0], obj), High: normalizeSliceIndex(args[1], obj)}
 		}
 		if len(args) == 1 {
-			return &ast.SliceExpr{X: obj, Low: args[0]}
+			return &ast.SliceExpr{X: obj, Low: normalizeSliceIndex(args[0], obj)}
 		}
 	case "map", "filter", "forEach":
 		// Transform to package-level function calls: arr.map(fn) → jsvalue.Map(arr, fn)
