@@ -26,17 +26,20 @@ type MethodInfo struct {
 
 // BuiltinRegistry maintains metadata about all built-in methods.
 type BuiltinRegistry struct {
-	methods map[string]*MethodInfo
+	methods              map[string]*MethodInfo
+	jsvaluePackageFuncs  map[string]bool // JSValue package-level functions that return *jsvalue.JSValue
 }
 
 // NewBuiltinRegistry creates and initializes the built-in method registry.
 func NewBuiltinRegistry() *BuiltinRegistry {
 	r := &BuiltinRegistry{
-		methods: make(map[string]*MethodInfo),
+		methods:             make(map[string]*MethodInfo),
+		jsvaluePackageFuncs: make(map[string]bool),
 	}
 	r.registerStringMethods()
 	r.registerArrayMethods()
 	r.registerRegexMethods()
+	r.registerJSValuePackageFunctions()
 	return r
 }
 
@@ -139,4 +142,40 @@ func (r *BuiltinRegistry) GetReturnType(name string) MethodReturnType {
 		return ReturnJSValue // default
 	}
 	return m.ReturnType
+}
+
+// registerJSValuePackageFunctions registers all jsvalue package-level functions
+// that return *jsvalue.JSValue. These are used to identify JSValue-returning
+// call expressions in nodeReturnsJSValue and isJSValueMethodCall.
+func (r *BuiltinRegistry) registerJSValuePackageFunctions() {
+	// Factory functions
+	funcs := []string{
+		"NewString", "NewNumber", "NewBool",
+		"NewArray", "NewObject", "NewNull",
+		"NewUndefined", "NewSymbol", "NewBigInt",
+		"NewFunction", "NewRegex",
+		"From", "FromStrings",
+		// Object methods
+		"Keys",
+		// Array wrapper functions
+		"Join", "Pop", "Includes",
+		"Slice", "Concat", "Push",
+		"Shift", "Unshift",
+		"Map", "Filter", "ForEach",
+		// String wrapper functions
+		"ToLowerCase", "ToUpperCase", "Trim",
+		"Split", "Replace", "CharAt",
+		"StartsWith", "EndsWith", "Repeat",
+		// Logical operators
+		"OrDefault",
+	}
+	for _, name := range funcs {
+		r.jsvaluePackageFuncs[name] = true
+	}
+}
+
+// IsJSValuePackageFunction returns true if the name is a jsvalue package-level
+// function that returns *jsvalue.JSValue.
+func (r *BuiltinRegistry) IsJSValuePackageFunction(name string) bool {
+	return r.jsvaluePackageFuncs[name]
 }

@@ -9,6 +9,9 @@ import (
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
+// globalBuiltins is a shared builtins registry used by package-level functions.
+var globalBuiltins = NewBuiltinRegistry()
+
 // Transformer walks a tree-sitter TypeScript AST and builds a go/ast.File.
 type Transformer struct {
 	source             []byte
@@ -202,19 +205,8 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 				propText := propNode.Utf8Text(t.source)
 				// Check if calling jsvalue package functions
 				if objText == "jsvalue" || (objNode.Kind() == "identifier" && t.importedNames[objText].goImportPath == "github.com/nnstd/gun/runtime/jsvalue") {
-					// JSValue factory functions and wrapper functions
-					if propText == "NewString" || propText == "NewNumber" || propText == "NewBool" ||
-						propText == "NewArray" || propText == "NewObject" || propText == "NewNull" ||
-						propText == "NewUndefined" || propText == "NewSymbol" || propText == "NewBigInt" ||
-						propText == "NewFunction" || propText == "NewRegex" || propText == "From" ||
-						propText == "FromStrings" || propText == "Keys" ||
-						propText == "Join" || propText == "Pop" || propText == "Includes" ||
-						propText == "Slice" || propText == "Concat" || propText == "Push" ||
-						propText == "Shift" || propText == "Unshift" ||
-						propText == "ToLowerCase" || propText == "ToUpperCase" || propText == "Trim" ||
-						propText == "Split" || propText == "Replace" || propText == "CharAt" ||
-						propText == "StartsWith" || propText == "EndsWith" || propText == "Repeat" ||
-						propText == "OrDefault" {
+					// Check if this is a JSValue package function that returns *jsvalue.JSValue
+					if t.builtins.IsJSValuePackageFunction(propText) {
 						return true
 					}
 				}

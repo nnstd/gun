@@ -1004,12 +1004,15 @@ func isJSValueMethodCall(expr ast.Expr) bool {
 	if !ok {
 		return false
 	}
+
+	// Check if it's a jsvalue package function
+	if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "jsvalue" {
+		return globalBuiltins.IsJSValuePackageFunction(sel.Sel.Name)
+	}
+
+	// Check for other JSValue methods (Get, Index, etc.)
 	switch sel.Sel.Name {
-	case "Get", "Index", "NewArray", "From", "Call", "Keys",
-		"Map", "Filter", "ForEach", "FromStrings", "ToSlice",
-		"Join", "Pop", "Includes", "Slice", "Concat", "Push", "Shift", "Unshift",
-		"ToLowerCase", "ToUpperCase", "Trim", "Split", "Replace", "CharAt",
-		"StartsWith", "EndsWith", "Repeat", "OrDefault":
+	case "Get", "Index", "Call", "ToSlice":
 		return true
 	}
 	return false
