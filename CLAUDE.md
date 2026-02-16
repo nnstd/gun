@@ -58,6 +58,132 @@ Key design patterns:
 - `runtime/hono` — minimal Hono web framework with routing, `Context`, and `http.Handler` implementation
 - `runtime/jsvalue` — `JSValue` runtime type modeling JavaScript value semantics: typed factories, prototype chain, property descriptors
 
+## Transpiler Practices and Conventions
+
+### Wrapper Function Approach
+
+When implementing transformations for JavaScript/TypeScript methods, prefer **runtime wrapper functions** over inline code generation:
+
+**❌ Avoid:** Generating verbose inline IIFEs or complex expressions in the compiler
+```go
+// Bad: 30+ lines of IIFE generation in compiler
+return &ast.CallExpr{
+    Fun: &ast.FuncLit{
+        Type: &ast.FuncType{...},
+        Body: &ast.BlockStmt{
+            List: []ast.Stmt{arrDecl, ifStmt, returnUndef},
+        },
+    },
+}
+```
+
+**✅ Prefer:** Simple wrapper function calls
+```go
+// Good: 1 line in compiler, complexity in runtime
+return callExpr(selectorExpr(ident("jsvalue"), "Pop"), obj)
+```
+
+### Wrapper Function Design Rules
+
+When adding wrapper functions to `runtime/jsvalue/`:
+
+1. **Return Type Consistency:** Always return `*jsvalue.JSValue`, never primitive types
+   ```go
+   // ✅ Correct
+   func Includes(arr *JSValue, val *JSValue) *JSValue {
+       return NewBool(result)
+   }
+
+   // ❌ Wrong - causes type mismatches in transpiled code
+   func Includes(arr *JSValue, val *JSValue) bool {
+       return result
+   }
+   ```
+
+2. **Nil Safety:** All wrapper functions must handle nil inputs gracefully
+   ```go
+   func Pop(arr *JSValue) *JSValue {
+       if arr == nil || arr.arrayVal == nil {
+           return NewUndefined()
+       }
+       // ... implementation
+   }
+   ```
+
+3. **JavaScript Semantics:** Maintain JS behavior (undefined for empty arrays, negative indices, truthiness, etc.)
+   ```go
+   func Slice(arr *JSValue, args ...int) *JSValue {
+       // Handle negative indices like JavaScript
+       if idx < 0 {
+           idx = length + idx
+       }
+       // ...
+   }
+   ```
+
+4. **Package-Level Functions:** Implement as package-level functions, not methods on `*JSValue`
+   ```go
+   // ✅ Correct
+   func Pop(arr *JSValue) *JSValue
+
+   // ❌ Wrong - harder to call from compiler
+   func (v *JSValue) Pop() *JSValue
+   ```
+
+### Compiler Transformation Rules
+
+When updating compiler transformations to use wrapper functions:
+
+1. **Wrap Arguments:** Always wrap literal arguments with `jsvalue.From()` when calling wrapper functions
+   ```go
+   // ✅ Correct
+   wrappedArg := callExpr(selectorExpr(ident("jsvalue"), "From"), args[0])
+   return callExpr(selectorExpr(ident("jsvalue"), "Includes"), obj, wrappedArg)
+
+   // ❌ Wrong - causes "cannot use 42 as *jsvalue.JSValue" errors
+   return callExpr(selectorExpr(ident("jsvalue"), "Includes"), obj, args[0])
+   ```
+
+2. **Import Management:** Add the jsvalue import when using wrapper functions
+   ```go
+   addImport("github.com/nnstd/gun/runtime/jsvalue")
+   ```
+
+3. **Fallback for Typed Arrays:** Keep native Go transformations for typed arrays
+   ```go
+   if isJSValueReceiver || isJSValueMethodCall(obj) {
+       // Use jsvalue wrapper
+       return callExpr(selectorExpr(ident("jsvalue"), "Pop"), obj)
+   }
+   // For typed arrays: arr[len(arr)-1]
+   return &ast.IndexExpr{X: obj, Index: lastIndex}
+   ```
+
+### When to Add Wrapper Functions
+
+Add wrapper functions when:
+- The transformation generates 10+ lines of code
+- The transformation uses IIFEs for control flow
+- The same logic is needed in multiple places
+- The operation has complex JavaScript semantics (negative indices, truthiness, etc.)
+
+Keep inline transformations when:
+- The transformation is 1-2 lines
+- It's a direct mapping to Go stdlib (e.g., `Math.floor` → `math.Floor`)
+- No special JavaScript semantics are needed
+
+### Testing Wrapper Functions
+
+1. **Runtime tests** in `runtime/jsvalue/jsvalue_test.go`:
+   - Test nil safety
+   - Test edge cases (empty arrays, negative indices, etc.)
+   - Test JavaScript semantics
+
+2. **Compiler tests** in `compiler/builtins_test.go`:
+   - Verify wrapper function calls are generated
+   - Check that arguments are properly wrapped
+   - Ensure no IIFEs are generated
+
 ## Test conventions
 
 All compiler tests live in `compiler/*_test.go` and follow this pattern:
