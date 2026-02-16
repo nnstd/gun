@@ -247,6 +247,26 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 				return true
 			}
 		}
+	case "parenthesized_expression":
+		// Unwrap parentheses and check the inner expression
+		if node.NamedChildCount() > 0 {
+			return t.nodeReturnsJSValue(node.NamedChild(0))
+		}
+		return false
+	case "binary_expression":
+		// Logical OR (||) expressions are transformed to IIFEs that return JSValue
+		// when either operand is JSValue or when used in JSValue context
+		opNode := node.ChildByFieldName("operator")
+		if opNode != nil && opNode.Utf8Text(t.source) == "||" {
+			leftNode := node.ChildByFieldName("left")
+			rightNode := node.ChildByFieldName("right")
+			// If either operand returns JSValue, the || expression returns JSValue
+			if (leftNode != nil && t.nodeReturnsJSValue(leftNode)) ||
+				(rightNode != nil && t.nodeReturnsJSValue(rightNode)) {
+				return true
+			}
+		}
+		return false
 	case "member_expression":
 		objNode := node.ChildByFieldName("object")
 		propNode := node.ChildByFieldName("property")
