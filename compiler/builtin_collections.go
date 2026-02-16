@@ -140,7 +140,49 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 		return callExpr(ident("len"), obj)
 	case "includes":
 		if len(args) > 0 {
-			return callExpr(ident("contains"), append([]ast.Expr{obj}, args...)...)
+			// For JSValue arrays, generate a loop-based check
+			if isJSValueReceiver || isJSValueMethodCall(obj) {
+				addImport("github.com/nnstd/gun/runtime/jsvalue")
+				// Generate: func() bool { for _, elem := range obj.Array() { if elem == args[0] { return true } }; return false }()
+				elemIdent := ident("_elem")
+				arrCall := callExpr(selectorExpr(obj, "Array"))
+				rangeStmt := &ast.RangeStmt{
+					Key:   ident("_"),
+					Value: elemIdent,
+					Tok:   token.DEFINE,
+					X:     arrCall,
+					Body: &ast.BlockStmt{
+						List: []ast.Stmt{
+							&ast.IfStmt{
+								Cond: &ast.BinaryExpr{
+									X:  elemIdent,
+									Op: token.EQL,
+									Y:  args[0],
+								},
+								Body: &ast.BlockStmt{
+									List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{ident("true")}}},
+								},
+							},
+						},
+					},
+				}
+				iife := &ast.CallExpr{
+					Fun: &ast.FuncLit{
+						Type: &ast.FuncType{
+							Results: &ast.FieldList{
+								List: []*ast.Field{{Type: ident("bool")}},
+							},
+						},
+						Body: &ast.BlockStmt{
+							List: []ast.Stmt{rangeStmt, &ast.ReturnStmt{Results: []ast.Expr{ident("false")}}},
+						},
+					},
+				}
+				return iife
+			}
+			// For typed arrays, use slices.Contains
+			addImport("slices")
+			return callExpr(selectorExpr(ident("slices"), "Contains"), obj, args[0])
 		}
 	case "slice":
 		// JSValue receiver: coerce to array, slice, wrap result
@@ -165,6 +207,93 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 		}
 		if len(args) == 1 {
 			return &ast.SliceExpr{X: obj, Low: normalizeSliceIndex(args[0], obj)}
+		}
+	case "join":
+		// JSValue receiver: convert array elements to strings and join
+		if isJSValueReceiver || isJSValueMethodCall(obj) {
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			addImport("strings")
+			addImport("fmt")
+
+			// Determine separator (default to ",")
+			var sep ast.Expr = &ast.BasicLit{Kind: token.STRING, Value: `","`}
+			if len(args) >= 1 {
+				sep = args[0]
+			}
+
+			// Generate IIFE:
+			// func() string {
+			//     arr := obj.Array()
+			//     strs := make([]string, len(arr))
+			//     for i, elem := range arr {
+			//         strs[i] = fmt.Sprint(elem)
+			//     }
+			//     return strings.Join(strs, sep)
+			// }()
+
+			arrIdent := ident("_arr")
+			strsIdent := ident("_strs")
+			iIdent := ident("_i")
+			elemIdent := ident("_elem")
+
+			// arr := obj.Array()
+			arrDecl := &ast.AssignStmt{
+				Lhs: []ast.Expr{arrIdent},
+				Tok: token.DEFINE,
+				Rhs: []ast.Expr{callExpr(selectorExpr(obj, "Array"))},
+			}
+
+			// strs := make([]string, len(arr))
+			strsDecl := &ast.AssignStmt{
+				Lhs: []ast.Expr{strsIdent},
+				Tok: token.DEFINE,
+				Rhs: []ast.Expr{
+					callExpr(
+						ident("make"),
+						&ast.ArrayType{Elt: ident("string")},
+						callExpr(ident("len"), arrIdent),
+					),
+				},
+			}
+
+			// for i, elem := range arr { strs[i] = fmt.Sprint(elem) }
+			forLoop := &ast.RangeStmt{
+				Key:   iIdent,
+				Value: elemIdent,
+				Tok:   token.DEFINE,
+				X:     arrIdent,
+				Body: &ast.BlockStmt{
+					List: []ast.Stmt{
+						&ast.AssignStmt{
+							Lhs: []ast.Expr{&ast.IndexExpr{X: strsIdent, Index: iIdent}},
+							Tok: token.ASSIGN,
+							Rhs: []ast.Expr{callExpr(selectorExpr(ident("fmt"), "Sprint"), elemIdent)},
+						},
+					},
+				},
+			}
+
+			// return strings.Join(strs, sep)
+			returnStmt := &ast.ReturnStmt{
+				Results: []ast.Expr{
+					callExpr(selectorExpr(ident("strings"), "Join"), strsIdent, sep),
+				},
+			}
+
+			// Build the IIFE
+			iife := &ast.CallExpr{
+				Fun: &ast.FuncLit{
+					Type: &ast.FuncType{
+						Results: &ast.FieldList{
+							List: []*ast.Field{{Type: ident("string")}},
+						},
+					},
+					Body: &ast.BlockStmt{
+						List: []ast.Stmt{arrDecl, strsDecl, forLoop, returnStmt},
+					},
+				},
+			}
+			return iife
 		}
 	case "map", "filter", "forEach":
 		// Transform to package-level function calls: arr.map(fn) → jsvalue.Map(arr, fn)

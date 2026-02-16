@@ -223,3 +223,31 @@ func TestNegativeSliceIndexOnJSValue(t *testing.T) {
 	assertContains(t, out, "jsvalue.NewArray")
 	assertNotContains(t, out, ":-2")
 }
+
+func TestJoinOnJSValueArray(t *testing.T) {
+	ts := `function f(arr) {
+	return arr.join(",");
+}`
+	out := compile(t, ts)
+	// Should generate IIFE that converts elements to strings and joins
+	assertContains(t, out, "_arr := arr.Array()")
+	assertContains(t, out, "make([]string, len(_arr))")
+	assertContains(t, out, "fmt.Sprint(_elem)")
+	assertContains(t, out, "strings.Join(_strs,")
+	// Ensure it's not calling a JSValue method
+	assertNotContains(t, out, "arr.Join(")
+}
+
+func TestJoinOnMapResult(t *testing.T) {
+	// Test join on the result of map (which returns JSValue)
+	ts := `function f(arr) {
+	return arr.map(x => x).join(".");
+}`
+	out := compile(t, ts)
+	// Should generate IIFE for join on map result
+	assertContains(t, out, "jsvalue.Map(arr,")
+	assertContains(t, out, "_arr :=")
+	assertContains(t, out, "strings.Join(_strs,")
+	// Ensure it's using strings.Join, not a JSValue method
+	assertNotContains(t, out, ").Join(")
+}
