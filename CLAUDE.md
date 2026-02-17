@@ -184,6 +184,183 @@ Keep inline transformations when:
    - Check that arguments are properly wrapped
    - Ensure no IIFEs are generated
 
+## JSValue Usage Patterns
+
+The `runtime/jsvalue` package provides the `JSValue` type that models JavaScript value semantics in Go. Understanding when and how to use JSValue is critical for correct transpilation.
+
+### When to Use JSValue vs Native Go Types
+
+**Use JSValue (`*jsvalue.JSValue`) for:**
+- Untyped function parameters (no TypeScript type annotation)
+- Destructured variables from objects/arrays
+- Variables that may hold different types at runtime
+- Return values from functions without explicit return type annotations
+- Default values in destructuring patterns
+
+**Use native Go types for:**
+- Variables with explicit TypeScript type annotations (`: number`, `: string`, `: boolean`)
+- Function parameters with type annotations
+- Function return types with explicit annotations
+- Literals in regular variable declarations
+
+### Boolean Literal Handling
+
+Boolean literals have context-dependent behavior:
+
+**Regular variable declarations** → Plain Go booleans:
+```typescript
+const flag = false;
+if (!flag) { return true; }
+```
+```go
+var flag = false
+if !flag {
+    return true
+}
+```
+
+**Destructuring with defaults** → JSValue:
+```typescript
+const { enabled = true } = options;
+if (!enabled) { return "disabled"; }
+```
+```go
+enabled := jsvalue.NewBool(true)
+if !enabled.Bool() {
+    return "disabled"
+}
+```
+
+**Key principle:** Destructured fields are always JSValue because they come from objects that may have undefined properties.
+
+### Type Coercion Patterns
+
+**Augmented assignment with numeric types:**
+```typescript
+let width: number = 0;
+width += someJSValue;
+```
+```go
+var width float64 = 0
+width += someJSValue.Number()
+```
+
+**Augmented assignment with string types:**
+```typescript
+let result = "";
+result += someJSValue;
+```
+```go
+var result = ""
+result += fmt.Sprint(someJSValue)
+```
+
+**Negation operator on JSValue:**
+```typescript
+if (!jsValue) { ... }
+```
+```go
+if !jsValue.Bool() { ... }
+```
+
+**Comparison operators:**
+```typescript
+if (jsValue === false) { ... }
+```
+```go
+if jsValue.Bool() == false { ... }
+```
+
+### Destructuring and JSValue
+
+All destructured variables are tracked as JSValue, regardless of their default values:
+
+```typescript
+function f(options) {
+    const { name, age = 0, enabled = false } = options;
+    // name, age, and enabled are all JSValue
+}
+```
+
+```go
+func f(options *jsvalue.JSValue) *jsvalue.JSValue {
+    var name = options.Name
+    var age = jsvalue.NewNumber(0)
+    var enabled = jsvalue.NewBool(false)
+    // All three are *jsvalue.JSValue
+}
+```
+
+**Why?** Because `options` might not have these properties, so the variables must be able to hold the default value OR the property value, both as JSValue.
+
+### Function Return Types
+
+**Explicit return type annotation** → Use the annotated type:
+```typescript
+function isOk(x: number): boolean { return x > 0; }
+```
+```go
+func isOk(x float64) bool {
+    return x > 0
+}
+```
+
+**No return type annotation** → Default to JSValue:
+```typescript
+function process(x) { return x; }
+```
+```go
+func process(x *jsvalue.JSValue) *jsvalue.JSValue {
+    return x
+}
+```
+
+The compiler tracks function return types in `funcReturnTypes map[string]string` so that `ensureBool()` can avoid adding `!= nil` checks to functions that return `bool`.
+
+### Truthiness Semantics
+
+JavaScript truthiness is implemented via the `.Bool()` method on JSValue:
+
+**Falsy values in JavaScript:**
+- `false`, `0`, `""`, `null`, `undefined`, `NaN`
+
+**Truthy values:**
+- Everything else, including `[]`, `{}`, `"0"`, `"false"`
+
+**Implementation:**
+```go
+if !jsValue.Bool() {
+    // Handles all falsy cases correctly
+}
+```
+
+**Never use nil checks for truthiness:**
+```go
+// ❌ Wrong - only checks if pointer is nil
+if jsValue == nil { ... }
+
+// ✅ Correct - checks JavaScript truthiness
+if !jsValue.Bool() { ... }
+```
+
+### Common Pitfalls
+
+1. **Comparing JSValue to nil for truthiness**
+   - `jsValue == nil` only checks if the pointer is nil
+   - Use `!jsValue.Bool()` for JavaScript truthiness
+
+2. **Forgetting to wrap default values in destructuring**
+   - Default values must be wrapped: `jsvalue.NewBool(false)`, not `false`
+   - The `wrapInJSValue()` helper handles this automatically
+
+3. **Adding `!= nil` to boolean function calls**
+   - Functions with `: boolean` return type return `bool`, not `*jsvalue.JSValue`
+   - Check `funcReturnTypes` before adding nil checks
+
+4. **Using wrong coercion for augmented assignment**
+   - Numeric types need `.Number()`, not `fmt.Sprint()`
+   - String types need `fmt.Sprint()`, not `.String()` (which may not exist)
+
 ## Test conventions
 
 All compiler tests live in `compiler/*_test.go` and follow this pattern:
