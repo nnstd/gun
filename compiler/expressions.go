@@ -307,18 +307,6 @@ func (t *Transformer) transformUnaryExpr(node *sitter.Node) ast.Expr {
 
 	switch opText {
 	case "!":
-		// !jsValue → jsValue == nil (truthiness check)
-		if argNode != nil && argNode.Kind() == "identifier" && t.isUntypedLocal(argNode.Utf8Text(t.source)) {
-			return &ast.BinaryExpr{X: arg, Op: token.EQL, Y: ident("nil")}
-		}
-		// !arr[i] where elements are *jsvalue.JSValue → arr[i] == nil
-		if argNode != nil && argNode.Kind() == "subscript_expression" {
-			return &ast.BinaryExpr{X: arg, Op: token.EQL, Y: ident("nil")}
-		}
-		// !someCall() where the call returns *jsvalue.JSValue → call() == nil
-		if argNode != nil && t.nodeReturnsJSValue(argNode) {
-			return &ast.BinaryExpr{X: arg, Op: token.EQL, Y: ident("nil")}
-		}
 		// !str.match(regex) / !str.exec(regex) → FindStringSubmatch(...) == nil
 		// These return []string in Go, not bool, so ! must become == nil.
 		if argNode != nil && argNode.Kind() == "call_expression" {
@@ -332,6 +320,10 @@ func (t *Transformer) transformUnaryExpr(node *sitter.Node) ast.Expr {
 					}
 				}
 			}
+		}
+		// !jsValue → !jsValue.Bool() (logical NOT with truthiness conversion)
+		if argNode != nil && t.nodeReturnsJSValue(argNode) {
+			return &ast.UnaryExpr{Op: token.NOT, X: callExpr(selectorExpr(arg, "Bool"))}
 		}
 		return &ast.UnaryExpr{Op: token.NOT, X: arg}
 	case "-":
@@ -983,6 +975,16 @@ func isBoolReturningMethod(name string) bool {
 	return false
 }
 
+// isGoBuiltin returns true if the name is a Go built-in function.
+func isGoBuiltin(name string) bool {
+	switch name {
+	case "append", "cap", "close", "complex", "copy", "delete", "imag",
+		"len", "make", "new", "panic", "print", "println", "real", "recover":
+		return true
+	}
+	return false
+}
+
 func isJSValueGet(expr ast.Expr) bool {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
@@ -1079,6 +1081,11 @@ func (t *Transformer) ensureBool(expr ast.Expr) ast.Expr {
 			}
 			// Imported functions from transpiled modules return *jsvalue.JSValue
 			if _, isImported := t.importedNames[id.Name]; isImported {
+				return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
+			}
+			// All other plain function calls (including local functions in the same package)
+			// return *jsvalue.JSValue by default, unless they're known Go built-ins.
+			if !isGoBuiltin(id.Name) {
 				return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
 			}
 		}

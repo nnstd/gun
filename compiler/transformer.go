@@ -162,6 +162,9 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		return false
 	}
 	switch node.Kind() {
+	case "true", "false":
+		// Boolean literals are wrapped in jsvalue.NewBool()
+		return true
 	case "identifier":
 		name := node.Utf8Text(t.source)
 		return t.isUntypedLocal(name) || t.jsvalueLocals[name]

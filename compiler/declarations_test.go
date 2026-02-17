@@ -291,8 +291,8 @@ func TestDestructuringParamWithDefault(t *testing.T) {
 	assertContains(t, out, "...*jsvalue.JSValue")
 	// Should extract from variadic args
 	assertContains(t, out, "if len(_args0) > 0")
-	// Destructuring default should still be emitted
-	assertContains(t, out, "onlyFirst := false")
+	// Destructuring default should be emitted with JSValue wrapper
+	assertContains(t, out, "onlyFirst := jsvalue.NewBool(false)")
 	// Synthetic param should be referenced to avoid unused error
 	assertContains(t, out, "_ = _param0")
 }
@@ -570,4 +570,100 @@ func TestOrderingComparisonCoercesFloat64(t *testing.T) {
 	out := compile(t, ts)
 	assertContains(t, out, "float64(")
 	assertContains(t, out, ".Number()")
+}
+
+func TestDestructuringWithBooleanDefaults(t *testing.T) {
+	// Destructured fields with boolean default values should be JSValue
+	// and the ! operator should work correctly.
+	ts := `function f(options) {
+	const { flag = false } = options;
+	if (!flag) { return true; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewBool(false)")
+	assertContains(t, out, "!flag.Bool()")
+	assertNotContains(t, out, "!flag)")
+}
+
+func TestDestructuringWithMultipleBooleanDefaults(t *testing.T) {
+	// Multiple destructured boolean fields should all be JSValue.
+	ts := `function f(options) {
+	const { enabled = true, disabled = false } = options;
+	if (!enabled || !disabled) { return true; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewBool(true)")
+	assertContains(t, out, "jsvalue.NewBool(false)")
+	assertContains(t, out, "!enabled.Bool()")
+	assertContains(t, out, "!disabled.Bool()")
+}
+
+func TestDestructuringShorthandPattern(t *testing.T) {
+	// Shorthand destructuring pattern should track variables as JSValue.
+	ts := `function f(obj) {
+	const { name } = obj;
+	if (!name) { return "default"; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "var name = obj.Name")
+	assertContains(t, out, "!name.Bool()")
+}
+
+func TestDestructuringPairPattern(t *testing.T) {
+	// Pair pattern destructuring should track variables as JSValue.
+	ts := `function f(obj) {
+	const { key: value } = obj;
+	if (!value) { return "default"; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "var value = obj.Key")
+	assertContains(t, out, "!value.Bool()")
+}
+
+func TestBooleanLiteralWithNotOperator(t *testing.T) {
+	// Boolean literals should be wrapped in JSValue and ! operator should work.
+	ts := `function test() {
+	const flag = false;
+	if (!flag) { return true; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewBool(false)")
+	assertContains(t, out, "!flag.Bool()")
+}
+
+func TestBooleanLiteralInExpression(t *testing.T) {
+	// Boolean literals in expressions should be wrapped in JSValue.
+	ts := `function test() {
+	const enabled = true;
+	const options = { active: !enabled };
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewBool(true)")
+	assertContains(t, out, "!enabled.Bool()")
+}
+
+func TestArrayDestructuringWithBooleans(t *testing.T) {
+	// Array destructured elements should be JSValue and ! operator should work.
+	ts := `function f(arr) {
+	const [first, second] = arr;
+	if (!first || !second) { return "default"; }
+}`
+	out := compile(t, ts)
+	// When arr is JSValue param, uses .Index() instead of []
+	assertContains(t, out, "var first = arr.Index(0)")
+	assertContains(t, out, "var second = arr.Index(1)")
+	assertContains(t, out, "!first.Bool()")
+	assertContains(t, out, "!second.Bool()")
+}
+
+func TestArrayDestructuringWithRestPattern(t *testing.T) {
+	// Array rest pattern should also track as JSValue.
+	ts := `function f(arr) {
+	const [first, ...rest] = arr;
+	if (!first) { return rest; }
+}`
+	out := compile(t, ts)
+	// When arr is JSValue param, uses .Index() instead of []
+	assertContains(t, out, "var first = arr.Index(0)")
+	assertContains(t, out, "!first.Bool()")
 }

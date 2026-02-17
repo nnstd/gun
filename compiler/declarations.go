@@ -201,7 +201,7 @@ func (t *Transformer) isNonJSValueInit(node *sitter.Node) bool {
 		return false
 	}
 	switch node.Kind() {
-	case "number", "string", "template_string", "true", "false",
+	case "number", "string", "template_string",
 		"ternary_expression", "unary_expression",
 		"array", "object", "new_expression", "regex":
 		return true
@@ -832,6 +832,9 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 					Tok: token.DEFINE,
 					Rhs: []ast.Expr{selectorExpr(valExpr, capitalize(name))},
 				})
+				// All destructured fields are JSValue (properties from objects)
+				t.addToCurrentScope(name, false)
+				t.jsvalueLocals[name] = true
 			case "pair_pattern":
 				keyNode := child.ChildByFieldName("key")
 				valNode := child.ChildByFieldName("value")
@@ -843,6 +846,9 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 						Tok: token.DEFINE,
 						Rhs: []ast.Expr{selectorExpr(valExpr, capitalize(key))},
 					})
+					// All destructured fields are JSValue (properties from objects)
+					t.addToCurrentScope(name, false)
+					t.jsvalueLocals[name] = true
 				}
 			case "object_assignment_pattern":
 				// { ambiguousIsNarrow = true } = options
@@ -857,8 +863,9 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 						Tok: token.DEFINE,
 						Rhs: []ast.Expr{defaultVal},
 					})
-					// Register as typed so ensureBool knows the concrete type
-					t.addToCurrentScope(goName, true)
+					// All destructured fields are JSValue (properties from objects)
+					t.addToCurrentScope(goName, false)
+					t.jsvalueLocals[goName] = true
 				}
 			}
 		}
@@ -901,6 +908,9 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 					Tok: token.DEFINE,
 					Rhs: []ast.Expr{rhs},
 				})
+				// All destructured array elements are JSValue
+				t.addToCurrentScope(name, false)
+				t.jsvalueLocals[name] = true
 				continue
 			}
 
@@ -922,6 +932,9 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 				Tok: token.DEFINE,
 				Rhs: []ast.Expr{rhs},
 			})
+			// All destructured array elements are JSValue
+			t.addToCurrentScope(name, false)
+			t.jsvalueLocals[name] = true
 		}
 	}
 
