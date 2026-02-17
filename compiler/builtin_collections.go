@@ -32,14 +32,30 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 			if cl, ok := obj.(*ast.CompositeLit); ok && len(cl.Elts) == 0 {
 				return args[0]
 			}
+			// Check if receiver is array literal with JSValue elements
+			isJSValueArrayLit := false
+			if cl, ok := obj.(*ast.CompositeLit); ok {
+				if at, ok := cl.Type.(*ast.ArrayType); ok {
+					if isJSValuePtrType(at.Elt) {
+						isJSValueArrayLit = true
+					}
+				}
+			}
 			// JSValue receiver: use jsvalue.Concat wrapper
-			if isJSValueReceiver || isJSValueMethodCall(obj) {
+			if isJSValueReceiver || isJSValueMethodCall(obj) || isJSValueArrayLit {
 				addImport("github.com/nnstd/gun/runtime/jsvalue")
 				wrapped := make([]ast.Expr, len(args))
 				for i, a := range args {
 					wrapped[i] = callExpr(selectorExpr(ident("jsvalue"), "From"), a)
 				}
-				concatArgs := append([]ast.Expr{obj}, wrapped...)
+				// Wrap array literal in jsvalue.NewArray if needed
+				receiver := obj
+				if isJSValueArrayLit {
+					if cl, ok := obj.(*ast.CompositeLit); ok {
+						receiver = callExpr(selectorExpr(ident("jsvalue"), "NewArray"), cl.Elts...)
+					}
+				}
+				concatArgs := append([]ast.Expr{receiver}, wrapped...)
 				return callExpr(selectorExpr(ident("jsvalue"), "Concat"), concatArgs...)
 			}
 			return callExpr(ident("append"), append([]ast.Expr{obj}, args...)...)
@@ -171,6 +187,9 @@ func transformObjectCall(prop string, args []ast.Expr, addImport func(string)) a
 		// Object.create(null) → jsvalue.NewObject()
 		addImport("github.com/nnstd/gun/runtime/jsvalue")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewObject"))
+	case "defineProperty":
+		// Object.defineProperty() → skip (Go doesn't support property descriptors)
+		return ident("nil")
 	}
 	return nil
 }
