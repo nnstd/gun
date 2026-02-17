@@ -208,6 +208,20 @@ func TestAugmentedAssignJSValueToNumber(t *testing.T) {
 	assertNotContains(t, out, "width += fmt.Sprint(jsval)")
 }
 
+func TestAugmentedAssignImportedFunctionToNumber(t *testing.T) {
+	// When an imported function (which returns JSValue) is used in augmented
+	// assignment with a numeric local, the RHS should be coerced with .Number().
+	ts := `import * as lib from 'some-lib';
+function f() {
+	let width: number = 0;
+	width += lib.getValue();
+	return width;
+}`
+	out := compileWithModule(t, ts, "test")
+	assertContains(t, out, "width += some_lib.GetValue().Number()")
+	assertNotContains(t, out, "width += some_lib.GetValue())")
+}
+
 func TestAssignToUntypedLocalWrapsJSValue(t *testing.T) {
 	// Assigning a string expression to an untyped local (JSValue) should
 	// wrap the result with jsvalue.NewString() (or other specific constructor).

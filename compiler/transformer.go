@@ -209,6 +209,14 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 				if objText == "Object" && (propText == "keys" || propText == "entries" || propText == "values") {
 					return true
 				}
+				// Check if this is a call to an imported package function
+				// By default, imported functions return *jsvalue.JSValue
+				if objNode.Kind() == "identifier" {
+					if _, isImported := t.importedNames[objText]; isImported {
+						// This is a call to an imported function, assume it returns JSValue
+						return true
+					}
+				}
 				// [].concat(x) is optimized to just x, so if x returns JSValue, the concat call returns JSValue
 				if propText == "concat" && objNode.Kind() == "array" {
 					// Check if it's an empty array
