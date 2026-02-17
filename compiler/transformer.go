@@ -30,6 +30,7 @@ type Transformer struct {
 	typedLocalTypes    map[string]string          // typed local name → Go type name (e.g. "bool", "string", "[]string")
 	pkgVarTyped        map[string]bool            // package-level variable name → true if typed (not JSValue)
 	funcParamCounts    map[string]int             // hoisted function name → parameter count (for padding missing args)
+	funcReturnTypes    map[string]string          // function name → Go return type (e.g. "bool", "*jsvalue.JSValue")
 	builtins           *BuiltinRegistry           // registry of built-in methods and their metadata
 }
 
@@ -49,6 +50,7 @@ func newTransformer(source []byte, pkgName, moduleName string, samePackageImport
 		typedLocalTypes:    make(map[string]string),
 		pkgVarTyped:        make(map[string]bool),
 		funcParamCounts:    make(map[string]int),
+		funcReturnTypes:    make(map[string]string),
 		builtins:           NewBuiltinRegistry(),
 	}
 }
@@ -162,9 +164,6 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		return false
 	}
 	switch node.Kind() {
-	case "true", "false":
-		// Boolean literals are wrapped in jsvalue.NewBool()
-		return true
 	case "identifier":
 		name := node.Utf8Text(t.source)
 		return t.isUntypedLocal(name) || t.jsvalueLocals[name]

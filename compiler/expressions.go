@@ -38,12 +38,10 @@ func (t *Transformer) transformExpr(node *sitter.Node) ast.Expr {
 		return t.transformTemplateString(node)
 
 	case "true":
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-		return callExpr(selectorExpr(ident("jsvalue"), "NewBool"), ident("true"))
+		return ident("true")
 
 	case "false":
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-		return callExpr(selectorExpr(ident("jsvalue"), "NewBool"), ident("false"))
+		return ident("false")
 
 	case "null", "undefined":
 		return ident("nil")
@@ -1082,6 +1080,13 @@ func (t *Transformer) ensureBool(expr ast.Expr) ast.Expr {
 			// Imported functions from transpiled modules return *jsvalue.JSValue
 			if _, isImported := t.importedNames[id.Name]; isImported {
 				return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
+			}
+			// Check if this function has a known return type
+			if retType, ok := t.funcReturnTypes[id.Name]; ok {
+				// If it returns bool, don't add != nil
+				if retType == "bool" {
+					return expr
+				}
 			}
 			// All other plain function calls (including local functions in the same package)
 			// return *jsvalue.JSValue by default, unless they're known Go built-ins.

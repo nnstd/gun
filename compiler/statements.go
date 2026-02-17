@@ -8,6 +8,17 @@ import (
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
+// isNumericType returns true if the type name represents a numeric Go type.
+func isNumericType(typeName string) bool {
+	switch typeName {
+	case "int", "int8", "int16", "int32", "int64",
+		"uint", "uint8", "uint16", "uint32", "uint64",
+		"float32", "float64":
+		return true
+	}
+	return false
+}
+
 func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 	if node == nil {
 		return nil
@@ -134,10 +145,17 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 					}
 					if lhs != nil && rhs != nil {
 						// When a typed local (string/int) is combined with a JSValue,
-						// coerce the RHS to a string via fmt.Sprint().
+						// coerce the RHS appropriately based on the type.
 						if leftNode.Kind() == "identifier" && t.isTypedLocal(leftNode.Utf8Text(t.source)) && t.nodeReturnsJSValue(rightNode) {
-							t.addImport("fmt")
-							rhs = callExpr(selectorExpr(ident("fmt"), "Sprint"), rhs)
+							varName := leftNode.Utf8Text(t.source)
+							if typeName, ok := t.typedLocalTypes[varName]; ok && isNumericType(typeName) {
+								// Numeric type: convert JSValue to number
+								rhs = callExpr(selectorExpr(rhs, "Number"))
+							} else {
+								// String type: convert JSValue to string
+								t.addImport("fmt")
+								rhs = callExpr(selectorExpr(ident("fmt"), "Sprint"), rhs)
+							}
 						}
 						// When the LHS is a JSValue expression (subscript on JSValue slice,
 						// untyped local), convert += to regular assignment with string concat:

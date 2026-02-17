@@ -271,8 +271,9 @@ func TestObjectDestructuringWithDefaults(t *testing.T) {
 		return ambiguousIsNarrow;
 	}`
 	out := compile(t, ts)
-	assertContains(t, out, "ambiguousIsNarrow = true")
-	assertContains(t, out, "countAnsiEscapeCodes = false")
+	// Destructured fields with defaults are now JSValue
+	assertContains(t, out, "ambiguousIsNarrow = jsvalue.NewBool(true)")
+	assertContains(t, out, "countAnsiEscapeCodes = jsvalue.NewBool(false)")
 }
 
 func TestGoBuiltinParamSanitized(t *testing.T) {
@@ -621,25 +622,29 @@ func TestDestructuringPairPattern(t *testing.T) {
 }
 
 func TestBooleanLiteralWithNotOperator(t *testing.T) {
-	// Boolean literals should be wrapped in JSValue and ! operator should work.
+	// Boolean literals in regular declarations should be plain Go booleans.
 	ts := `function test() {
 	const flag = false;
 	if (!flag) { return true; }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.NewBool(false)")
-	assertContains(t, out, "!flag.Bool()")
+	assertContains(t, out, "var flag = false")
+	assertContains(t, out, "if !flag")
+	// The return statement will wrap in JSValue (function returns *jsvalue.JSValue),
+	// but the variable declaration and condition should use plain boolean
+	assertNotContains(t, out, "var flag = jsvalue.NewBool")
 }
 
 func TestBooleanLiteralInExpression(t *testing.T) {
-	// Boolean literals in expressions should be wrapped in JSValue.
+	// Boolean literals in regular declarations should be plain Go booleans.
 	ts := `function test() {
 	const enabled = true;
 	const options = { active: !enabled };
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.NewBool(true)")
-	assertContains(t, out, "!enabled.Bool()")
+	assertContains(t, out, "var enabled = true")
+	assertContains(t, out, "!enabled")
+	assertNotContains(t, out, "jsvalue.NewBool(true)")
 }
 
 func TestArrayDestructuringWithBooleans(t *testing.T) {

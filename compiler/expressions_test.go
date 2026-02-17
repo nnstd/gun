@@ -261,11 +261,10 @@ func TestRegexTestBoolResult(t *testing.T) {
 }
 
 func TestNegationOnJSValueUsesNilCheck(t *testing.T) {
-	// !jsValue should compile to jsValue == nil, not !jsValue.
+	// !jsValue should compile to !jsValue.Bool() for proper JavaScript truthiness semantics.
 	ts := `function f(x) { if (!x) { return true; } return false; }`
 	out := compile(t, ts)
-	assertContains(t, out, "x == nil")
-	assertNotContains(t, out, "!x")
+	assertContains(t, out, "!x.Bool()")
 }
 
 func TestJSValuePlusStringCoercion(t *testing.T) {
@@ -294,11 +293,10 @@ func TestArrayLiteralIndexUsesNativeSubscript(t *testing.T) {
 }
 
 func TestNegationOnSubscriptUsesNilCheck(t *testing.T) {
-	// !arr[i] where arr is []*jsvalue.JSValue should emit arr[i] == nil.
+	// !arr[i] where arr is []*jsvalue.JSValue should use .Bool() for truthiness.
 	ts := `function f(x) { const args = [x]; if (!args[0]) { return x; } }`
 	out := compile(t, ts)
-	assertContains(t, out, "== nil")
-	assertNotContains(t, out, "!args[")
+	assertContains(t, out, "!args[0].Bool()")
 }
 
 func TestSliceIndexWrapsFloat64WithInt(t *testing.T) {

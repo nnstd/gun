@@ -195,6 +195,19 @@ func TestAugmentedAssignJSValueToString(t *testing.T) {
 	assertContains(t, out, "result += fmt.Sprint(item)")
 }
 
+func TestAugmentedAssignJSValueToNumber(t *testing.T) {
+	// When a typed numeric local is combined with a JSValue via +=,
+	// the RHS should be coerced with .Number().
+	ts := `function f(jsval) {
+	let width: number = 0;
+	width += jsval;
+	return width;
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "width += jsval.Number()")
+	assertNotContains(t, out, "width += fmt.Sprint(jsval)")
+}
+
 func TestAssignToUntypedLocalWrapsJSValue(t *testing.T) {
 	// Assigning a string expression to an untyped local (JSValue) should
 	// wrap the result with jsvalue.NewString() (or other specific constructor).

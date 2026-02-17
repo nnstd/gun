@@ -33,6 +33,31 @@ func getTypeString(typ ast.Expr) string {
 	}
 }
 
+// wrapInJSValue wraps a Go expression in the appropriate JSValue constructor
+// based on the original tree-sitter node type.
+func (t *Transformer) wrapInJSValue(node *sitter.Node, expr ast.Expr) ast.Expr {
+	if node == nil || expr == nil {
+		return expr
+	}
+
+	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+
+	switch node.Kind() {
+	case "true", "false":
+		// Boolean literals: wrap in jsvalue.NewBool()
+		return callExpr(selectorExpr(ident("jsvalue"), "NewBool"), expr)
+	case "number":
+		// Number literals: wrap in jsvalue.NewNumber()
+		return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), expr)
+	case "string", "template_string":
+		// String literals: wrap in jsvalue.NewString()
+		return callExpr(selectorExpr(ident("jsvalue"), "NewString"), expr)
+	default:
+		// Other expressions: wrap in jsvalue.From()
+		return callExpr(selectorExpr(ident("jsvalue"), "From"), expr)
+	}
+}
+
 func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 	var decls []ast.Decl
 	isConst := false
@@ -201,7 +226,7 @@ func (t *Transformer) isNonJSValueInit(node *sitter.Node) bool {
 		return false
 	}
 	switch node.Kind() {
-	case "number", "string", "template_string",
+	case "number", "string", "template_string", "true", "false",
 		"ternary_expression", "unary_expression",
 		"array", "object", "new_expression", "regex":
 		return true
@@ -303,6 +328,8 @@ func (t *Transformer) transformFuncDecl(node *sitter.Node, exported bool) *ast.F
 		retType := t.getTypeAnnotation(returnTypeNode)
 		if retType != nil {
 			results = fieldList(field("", retType))
+			// Track the return type for ensureBool() to check
+			t.funcReturnTypes[name] = getTypeString(retType)
 		}
 	}
 
@@ -858,6 +885,8 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 					name := leftNode.Utf8Text(t.source)
 					goName := sanitizeIdent(name)
 					defaultVal := t.transformExpr(rightNode)
+					// Wrap default value in JSValue since destructured fields are JSValue
+					defaultVal = t.wrapInJSValue(rightNode, defaultVal)
 					stmts = append(stmts, &ast.AssignStmt{
 						Lhs: []ast.Expr{ident(goName)},
 						Tok: token.DEFINE,
