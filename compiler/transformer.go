@@ -191,6 +191,13 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		if fnNode != nil && fnNode.Kind() == "identifier" && t.isUntypedLocal(fnNode.Utf8Text(t.source)) {
 			return true
 		}
+		// Plain function call to imported function → returns *jsvalue.JSValue
+		if fnNode != nil && fnNode.Kind() == "identifier" {
+			fnText := fnNode.Utf8Text(t.source)
+			if _, isImported := t.importedNames[fnText]; isImported {
+				return true
+			}
+		}
 		// Call to jsvalue package functions (NewString, NewNumber, etc.) → returns *jsvalue.JSValue
 		if fnNode != nil && fnNode.Kind() == "member_expression" {
 			objNode := fnNode.ChildByFieldName("object")
