@@ -375,3 +375,31 @@ func TestFeatureName(t *testing.T) {
 ```
 
 Use `compileWithModule(t, ts, "myapp")` when testing relative import resolution. Helpers are in `compiler/helpers_test.go`.
+
+## Testing Transpilation with Real Projects
+
+### gun-test Project
+
+The `gun-test` project at `~/Work/gun-test/` is a test project with real npm dependencies (yargs, string-width, etc.) that can be used to verify transpilation works correctly with complex modules.
+
+**Transpile the project:**
+```bash
+go run . transpile ~/Work/gun-test/index.ts -o /tmp/gun-out/
+```
+
+**Verify transpilation:**
+```bash
+ls /tmp/gun-out/  # Should show transpiled modules: string_width, yargs_parser, etc.
+```
+
+**Compile the transpiled output:**
+```bash
+cd /tmp/gun-out && go build .
+```
+
+**Clean up before retranspiling:**
+```bash
+rm -rf /tmp/gun-out
+```
+
+This workflow is useful for testing compiler changes that affect how imported modules are transpiled, especially for verifying type coercion, import handling, and built-in transformations work correctly with real-world code.
