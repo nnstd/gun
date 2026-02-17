@@ -1,6 +1,10 @@
 package object
 
-import "github.com/nnstd/gun/runtime/jsvalue"
+import (
+	"fmt"
+
+	"github.com/nnstd/gun/runtime/jsvalue"
+)
 
 func Keys(obj *jsvalue.JSValue) *jsvalue.JSValue {
 	return jsvalue.Keys(obj)
@@ -59,15 +63,15 @@ func Create(proto *jsvalue.JSValue) *jsvalue.JSValue {
 	return jsvalue.NewObject()
 }
 
-func DefineProperty(obj *jsvalue.JSValue, prop string, desc *jsvalue.JSValue) *jsvalue.JSValue {
-	if obj == nil {
-		return obj
-	}
-	if desc != nil {
-		val := desc.Get("value")
+func DefineProperty(obj any, prop any, desc any) *jsvalue.JSValue {
+	o := toJSValue(obj)
+	d := toJSValue(desc)
+	p := fmt.Sprint(prop)
+	if d != nil {
+		val := d.Get("value")
 		if val != nil {
-			obj.Set(prop, val)
+			o.Set(p, val)
 		}
 	}
-	return obj
+	return o
 }

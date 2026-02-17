@@ -161,20 +161,12 @@ func sliceType(elt ast.Expr) *ast.ArrayType {
 	return &ast.ArrayType{Elt: elt}
 }
 
-func mapType(key, value ast.Expr) *ast.MapType {
-	return &ast.MapType{Key: key, Value: value}
-}
-
 func addrOf(x ast.Expr) *ast.UnaryExpr {
 	return &ast.UnaryExpr{Op: token.AND, X: x}
 }
 
 func compositeLit(typ ast.Expr, elts ...ast.Expr) *ast.CompositeLit {
 	return &ast.CompositeLit{Type: typ, Elts: elts}
-}
-
-func keyValue(key, value ast.Expr) *ast.KeyValueExpr {
-	return &ast.KeyValueExpr{Key: key, Value: value}
 }
 
 // inferReturnType walks a Go AST block looking for return statements and
@@ -511,6 +503,31 @@ func extractParamInfo(node *sitter.Node, source []byte) map[string]bool {
 	return info
 }
 
+// isBoolExpr reports whether a Go AST expression is known to produce a bool.
+func isBoolExpr(expr ast.Expr) bool {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return e.Name == "true" || e.Name == "false"
+	case *ast.UnaryExpr:
+		return e.Op == token.NOT
+	case *ast.BinaryExpr:
+		switch e.Op {
+		case token.EQL, token.NEQ, token.LSS, token.GTR, token.LEQ, token.GEQ, token.LAND, token.LOR:
+			return true
+		}
+	}
+	return false
+}
+
+// isGoTypeName reports whether s is a valid Go type name for ternary IIFE return types.
+func isGoTypeName(s string) bool {
+	switch s {
+	case "string", "bool", "int", "float64", "byte", "rune":
+		return true
+	}
+	return false
+}
+
 // isNilIdent returns true if the expression is the identifier "nil".
 func isNilIdent(expr ast.Expr) bool {
 	id, ok := expr.(*ast.Ident)
@@ -540,16 +557,6 @@ func sanitizeIdent(name string) string {
 		return name + "_"
 	}
 	return name
-}
-
-// isMapLiteral checks if an expression is a map composite literal.
-func isMapLiteral(expr ast.Expr) bool {
-	cl, ok := expr.(*ast.CompositeLit)
-	if !ok {
-		return false
-	}
-	_, ok = cl.Type.(*ast.MapType)
-	return ok
 }
 
 // capitalize returns the string with the first letter uppercased (Go export convention).

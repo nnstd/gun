@@ -45,26 +45,8 @@ func (t *Transformer) mapTypeNode(node *sitter.Node) ast.Expr {
 				return sliceType(t.mapTypeNode(argsNode.NamedChild(0)))
 			}
 			return sliceType(t.jsValueType())
-		case "Map":
-			if argsNode != nil && argsNode.NamedChildCount() >= 2 {
-				k := t.mapTypeNode(argsNode.NamedChild(0))
-				v := t.mapTypeNode(argsNode.NamedChild(1))
-				return mapType(k, v)
-			}
-			return mapType(ident("string"), t.jsValueType())
-		case "Set":
-			if argsNode != nil && argsNode.NamedChildCount() > 0 {
-				k := t.mapTypeNode(argsNode.NamedChild(0))
-				return mapType(k, &ast.StructType{Fields: &ast.FieldList{}})
-			}
-			return mapType(t.jsValueType(), &ast.StructType{Fields: &ast.FieldList{}})
-		case "Record":
-			if argsNode != nil && argsNode.NamedChildCount() >= 2 {
-				k := t.mapTypeNode(argsNode.NamedChild(0))
-				v := t.mapTypeNode(argsNode.NamedChild(1))
-				return mapType(k, v)
-			}
-			return mapType(ident("string"), t.jsValueType())
+		case "Map", "Set", "Record":
+			return t.jsValueType()
 		case "Promise":
 			if argsNode != nil && argsNode.NamedChildCount() > 0 {
 				return t.mapTypeNode(argsNode.NamedChild(0))
@@ -167,7 +149,7 @@ func (t *Transformer) mapPredefinedType(text string) ast.Expr {
 	case "symbol":
 		return ident("string")
 	case "object":
-		return mapType(ident("string"), t.jsValueType())
+		return t.jsValueType()
 	default:
 		return ident(text)
 	}
@@ -210,8 +192,7 @@ func (t *Transformer) mapObjectType(node *sitter.Node) ast.Expr {
 	for i := uint(0); i < count; i++ {
 		child := node.NamedChild(i)
 		if child.Kind() == "index_signature" {
-			// map[K]V
-			return mapType(ident("string"), t.jsValueType())
+			return t.jsValueType()
 		}
 	}
 

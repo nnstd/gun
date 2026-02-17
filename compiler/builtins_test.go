@@ -173,7 +173,7 @@ func TestPushOnMapLocalValue(t *testing.T) {
 }`
 	out := compile(t, ts)
 	// Should use jsvalue.Push wrapper
-	assertContains(t, out, `jsvalue.Push(flags["keys"]`)
+	assertContains(t, out, `jsvalue.Push(flags.Get("keys")`)
 	assertContains(t, out, "jsvalue.From")
 	assertNotContains(t, out, `append(flags["keys"].Array()`)
 }
@@ -196,7 +196,7 @@ func TestPopOnMapLocalValue(t *testing.T) {
 }`
 	out := compile(t, ts)
 	// Should use jsvalue.Pop wrapper
-	assertContains(t, out, `jsvalue.Pop(flags["keys"])`)
+	assertContains(t, out, `jsvalue.Pop(flags.Get("keys"))`)
 	assertNotContains(t, out, "_arr :=")
 }
 

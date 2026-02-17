@@ -4,6 +4,8 @@ import (
 	stdos "os"
 	"runtime"
 	"strings"
+
+	"github.com/nnstd/gun/runtime/jsvalue"
 )
 
 var Argv = stdos.Args
@@ -22,11 +24,11 @@ var Stderr = stdos.Stderr
 var Pid = stdos.Getpid()
 var Versions = map[string]string{}
 
-var Env = func() map[string]string {
-	env := make(map[string]string)
+var Env = func() map[string]*jsvalue.JSValue {
+	env := make(map[string]*jsvalue.JSValue)
 	for _, e := range stdos.Environ() {
 		if k, v, ok := strings.Cut(e, "="); ok {
-			env[k] = v
+			env[k] = jsvalue.NewString(v)
 		}
 	}
 	return env

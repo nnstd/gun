@@ -20,6 +20,8 @@ const (
 	TypeObject
 	TypeFunction
 	TypeRegex
+	TypeMap
+	TypeSet
 )
 
 // JSValue models a JavaScript value with typed storage and prototype chain.
@@ -37,6 +39,8 @@ type JSValue struct {
 	funcVal    func(...*JSValue) *JSValue
 	arrayVal   []*JSValue
 	regexVal   interface{} // stores *regexp.Regexp to avoid import cycle
+	mapVal     *jsMap
+	setVal     *jsSet
 }
 
 var symbolCounter uint64
@@ -150,6 +154,8 @@ func (v *JSValue) TypeString() string {
 		return "function"
 	case TypeRegex:
 		return "object" // In JavaScript, typeof /regex/ === "object"
+	case TypeMap, TypeSet:
+		return "object"
 	default:
 		return "undefined"
 	}
@@ -182,6 +188,10 @@ func (v *JSValue) String() string {
 		return "[object Object]"
 	case TypeFunction:
 		return "function"
+	case TypeMap:
+		return "[object Map]"
+	case TypeSet:
+		return "[object Set]"
 	default:
 		return "undefined"
 	}
@@ -249,6 +259,14 @@ func (v *JSValue) Len() int {
 	case TypeObject:
 		if v.arrayVal != nil {
 			return len(v.arrayVal)
+		}
+	case TypeMap:
+		if v.mapVal != nil {
+			return len(v.mapVal.entries)
+		}
+	case TypeSet:
+		if v.setVal != nil {
+			return len(v.setVal.items)
 		}
 	}
 	// Check for length property on objects
@@ -623,6 +641,55 @@ func EndsWith(val *JSValue, suffix string) *JSValue {
 // Repeat repeats a JSValue string count times.
 func Repeat(val *JSValue, count int) *JSValue {
 	return NewString(strings.Repeat(fmt.Sprint(val), count))
+}
+
+// LastIndexOf returns the last index of search in str, starting from position.
+func LastIndexOf(str *JSValue, search *JSValue, position ...int) *JSValue {
+	s := fmt.Sprint(str)
+	sub := fmt.Sprint(search)
+	if len(position) > 0 && position[0] < len(s) {
+		s = s[:position[0]+1]
+	}
+	return NewNumber(float64(strings.LastIndex(s, sub)))
+}
+
+// Substring returns the part of the string between start and end indices.
+func Substring(str *JSValue, start int, end ...int) *JSValue {
+	s := []rune(fmt.Sprint(str))
+	if start < 0 {
+		start = 0
+	}
+	if start > len(s) {
+		start = len(s)
+	}
+	e := len(s)
+	if len(end) > 0 {
+		e = end[0]
+	}
+	if e < 0 {
+		e = 0
+	}
+	if e > len(s) {
+		e = len(s)
+	}
+	if start > e {
+		start, e = e, start
+	}
+	return NewString(string(s[start:e]))
+}
+
+// ObjectFrom creates an object from alternating key (string) and value (*JSValue) pairs.
+func ObjectFrom(pairs ...any) *JSValue {
+	obj := NewObject()
+	for i := 0; i+1 < len(pairs); i += 2 {
+		key, _ := pairs[i].(string)
+		val, _ := pairs[i+1].(*JSValue)
+		if val == nil {
+			val = NewUndefined()
+		}
+		obj.Set(key, val)
+	}
+	return obj
 }
 
 // Keys returns the keys of an object as a JSValue array.

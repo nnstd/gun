@@ -171,6 +171,72 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 	return nil
 }
 
+func transformMapMethod(obj ast.Expr, prop string, args []ast.Expr, addImport func(string)) ast.Expr {
+	addImport("github.com/nnstd/gun/runtime/jsvalue")
+	switch prop {
+	case "get":
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("jsvalue"), "MapGet"), obj, args[0])
+		}
+	case "set":
+		if len(args) >= 2 {
+			return callExpr(selectorExpr(ident("jsvalue"), "MapSet"), obj, args[0], args[1])
+		}
+	case "has":
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("jsvalue"), "MapHas"), obj, args[0])
+		}
+	case "delete":
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("jsvalue"), "MapDelete"), obj, args[0])
+		}
+	case "clear":
+		return callExpr(selectorExpr(ident("jsvalue"), "MapClear"), obj)
+	case "keys":
+		return callExpr(selectorExpr(ident("jsvalue"), "MapKeys"), obj)
+	case "values":
+		return callExpr(selectorExpr(ident("jsvalue"), "MapValues"), obj)
+	case "entries":
+		return callExpr(selectorExpr(ident("jsvalue"), "MapEntries"), obj)
+	case "forEach":
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("jsvalue"), "MapForEach"), obj, args[0])
+		}
+	}
+	return nil
+}
+
+func transformSetMethod(obj ast.Expr, prop string, args []ast.Expr, addImport func(string)) ast.Expr {
+	addImport("github.com/nnstd/gun/runtime/jsvalue")
+	switch prop {
+	case "add":
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("jsvalue"), "SetAdd"), obj, args[0])
+		}
+	case "has":
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("jsvalue"), "SetHas"), obj, args[0])
+		}
+	case "delete":
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("jsvalue"), "SetDelete"), obj, args[0])
+		}
+	case "clear":
+		return callExpr(selectorExpr(ident("jsvalue"), "SetClear"), obj)
+	case "keys":
+		return callExpr(selectorExpr(ident("jsvalue"), "SetKeys"), obj)
+	case "values":
+		return callExpr(selectorExpr(ident("jsvalue"), "SetValues"), obj)
+	case "entries":
+		return callExpr(selectorExpr(ident("jsvalue"), "SetEntries"), obj)
+	case "forEach":
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("jsvalue"), "SetForEach"), obj, args[0])
+		}
+	}
+	return nil
+}
+
 func transformObjectCall(prop string, args []ast.Expr, addImport func(string)) ast.Expr {
 	addImport("github.com/nnstd/gun/runtime/object")
 	switch prop {

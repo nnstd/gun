@@ -10,7 +10,7 @@ func TestArrayLiteral(t *testing.T) {
 func TestObjectLiteral(t *testing.T) {
 	ts := `const obj = { name: "go", version: 1 };`
 	out := compile(t, ts)
-	assertContains(t, out, "map[string]*jsvalue.JSValue{")
+	assertContains(t, out, "jsvalue.ObjectFrom(")
 }
 
 func TestTemplateString(t *testing.T) {
@@ -107,7 +107,7 @@ console.log($0);`
 func TestNewExpressionWrapsArgsWithJSValue(t *testing.T) {
 	ts := `const p = new Parser({cwd: "/tmp"});`
 	out := compile(t, ts)
-	assertContains(t, out, "NewParser(jsvalue.From(")
+	assertContains(t, out, "NewParser(jsvalue.ObjectFrom(")
 }
 
 func TestAwaitStripped(t *testing.T) {

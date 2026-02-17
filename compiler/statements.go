@@ -51,39 +51,20 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 							}
 						}
 					}
-					// mapLocal[x][y] = value or mapLocal.x[y] = value → (...).Set(key, jsvalue.From(value))
-					// The first access on a map local returns *jsvalue.JSValue.
-					if leftNode.Kind() == "subscript_expression" {
-						subObj := leftNode.ChildByFieldName("object")
-						if subObj != nil && (subObj.Kind() == "subscript_expression" || subObj.Kind() == "member_expression") {
-							innerObj := subObj.ChildByFieldName("object")
-							if innerObj != nil && innerObj.Kind() == "identifier" && t.mapLocals[innerObj.Utf8Text(t.source)] {
-								inner := t.transformExpr(subObj)
-								outerIdx := leftNode.ChildByFieldName("index")
-								outerIdxExpr := t.transformExpr(outerIdx)
-								rhs := t.transformExpr(rightNode)
-								if inner != nil && outerIdxExpr != nil && rhs != nil {
-									if outerIdx.Kind() != "string" && outerIdx.Kind() != "string_literal" {
-										t.addImport("fmt")
-										outerIdxExpr = callExpr(selectorExpr(ident("fmt"), "Sprint"), outerIdxExpr)
-									}
-									rhs = t.wrapAsJSValue(rhs)
-									return exprStmt(callExpr(selectorExpr(inner, "Set"), outerIdxExpr, rhs))
-								}
-							}
-						}
-					}
 					// obj[key] = value on JSValue → obj.Set(key, wrappedValue)
+					// Handles both direct untyped locals and nested JSValue access (e.g. flags.arrays[key])
 					if leftNode.Kind() == "subscript_expression" {
 						subObj := leftNode.ChildByFieldName("object")
 						subIdx := leftNode.ChildByFieldName("index")
-						if subObj != nil && subIdx != nil &&
-							subObj.Kind() == "identifier" && t.isUntypedLocal(subObj.Utf8Text(t.source)) {
+						isJSValueObj := subObj != nil && subObj.Kind() == "identifier" && t.isUntypedLocal(subObj.Utf8Text(t.source))
+						if !isJSValueObj && subObj != nil && t.nodeReturnsJSValue(subObj) {
+							isJSValueObj = true
+						}
+						if isJSValueObj && subIdx != nil {
 							obj := t.transformExpr(subObj)
 							key := t.transformExpr(subIdx)
 							rhs := t.transformExpr(rightNode)
 							if obj != nil && key != nil && rhs != nil {
-								// Coerce non-string indices to string for .Set()
 								if subIdx.Kind() != "string" && subIdx.Kind() != "string_literal" {
 									t.addImport("fmt")
 									key = callExpr(selectorExpr(ident("fmt"), "Sprint"), key)
@@ -720,39 +701,47 @@ func (t *Transformer) transformTryCatch(node *sitter.Node) ast.Stmt {
 		return tryBody
 	}
 
-	// Build: defer func() { if r := recover(); r != nil { <catch body> } }()
-	catchBody := blockStmt()
-	catchBodyNode := handlerNode.ChildByFieldName("body")
-	if catchBodyNode != nil {
-		catchBody = t.transformBlock(catchBodyNode)
-	}
-
-	// Strip return statements from catch body — they can't return from the
-	// enclosing function when inside a defer func() closure.
-	stripReturns(catchBody)
-
-	// Get catch parameter name
+	// Get catch parameter name before transforming body so it's in scope.
 	catchParam := "r"
 	catchParamNode := handlerNode.ChildByFieldName("parameter")
 	if catchParamNode != nil {
-		// parameter might be a catch_clause parameter like (e) — extract the identifier
-		text := catchParamNode.Utf8Text(t.source)
-		text = strings.TrimSpace(text)
+		text := strings.TrimSpace(catchParamNode.Utf8Text(t.source))
 		if text != "" {
 			catchParam = text
 		}
 	}
 
-	recoverCall := callExpr(ident("recover"))
+	// Build: defer func() { if r := recover(); r != nil { <catch body> } }()
+	// Push catch param as untyped local so member access uses .Get().
+	t.pushScope([]string{catchParam})
+	catchBody := blockStmt()
+	catchBodyNode := handlerNode.ChildByFieldName("body")
+	if catchBodyNode != nil {
+		catchBody = t.transformBlock(catchBodyNode)
+	}
+	t.popScope()
+
+	// Strip return statements from catch body — they can't return from the
+	// enclosing function when inside a defer func() closure.
+	stripReturns(catchBody)
+
+	// Use a temporary for recover(), then wrap as JSValue for the catch param.
+	recoverTmp := "_r"
 	recoverAssign := assignDefine(
-		[]ast.Expr{ident(catchParam)},
-		[]ast.Expr{recoverCall},
+		[]ast.Expr{ident(recoverTmp)},
+		[]ast.Expr{callExpr(ident("recover"))},
 	)
+	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	wrapStmt := assignDefine(
+		[]ast.Expr{ident(catchParam)},
+		[]ast.Expr{callExpr(selectorExpr(ident("jsvalue"), "From"), ident(recoverTmp))},
+	)
+	catchBody.List = append([]ast.Stmt{wrapStmt}, catchBody.List...)
 
 	ifRecover := &ast.IfStmt{
 		Init: recoverAssign,
 		Cond: &ast.BinaryExpr{
-			X:  ident(catchParam),
+			X:  ident(recoverTmp),
 			Op: token.NEQ,
 			Y:  ident("nil"),
 		},

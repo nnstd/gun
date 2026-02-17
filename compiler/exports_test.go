@@ -76,5 +76,5 @@ func TestExportDefaultNonServerObject(t *testing.T) {
 	ts := `export default { name: "test" }`
 	out := compile(t, ts)
 	assertContains(t, out, "var Default")
-	assertContains(t, out, "map[string]*jsvalue.JSValue")
+	assertContains(t, out, "jsvalue.ObjectFrom(")
 }

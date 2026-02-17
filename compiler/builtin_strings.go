@@ -13,7 +13,8 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 	needsCoercion := wasJSValue && prop != "join" &&
 		prop != "toLowerCase" && prop != "toUpperCase" && prop != "trim" &&
 		prop != "split" && prop != "replace" && prop != "replaceAll" &&
-		prop != "charAt" && prop != "startsWith" && prop != "endsWith" && prop != "repeat"
+		prop != "charAt" && prop != "startsWith" && prop != "endsWith" && prop != "repeat" &&
+		prop != "lastIndexOf" && prop != "substring"
 
 	if needsCoercion {
 		addImport("fmt")
@@ -28,6 +29,24 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 		addImport("strings")
 		if len(args) > 0 {
 			return callExpr(selectorExpr(ident("strings"), "Index"), obj, args[0])
+		}
+	case "lastIndexOf":
+		if wasJSValue {
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			jsArgs := []ast.Expr{origObj}
+			jsArgs = append(jsArgs, args...)
+			return callExpr(selectorExpr(ident("jsvalue"), "LastIndexOf"), jsArgs...)
+		}
+		addImport("strings")
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("strings"), "LastIndex"), obj, args[0])
+		}
+	case "substring":
+		if wasJSValue {
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			jsArgs := []ast.Expr{origObj}
+			jsArgs = append(jsArgs, args...)
+			return callExpr(selectorExpr(ident("jsvalue"), "Substring"), jsArgs...)
 		}
 	case "split":
 		if len(args) > 0 {

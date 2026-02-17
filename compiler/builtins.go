@@ -103,9 +103,11 @@ func transformBuiltinNew(name string, args []ast.Expr, t *Transformer) ast.Expr 
 		}
 		return callExpr(selectorExpr(ident("errors"), "New"), stringLit("error"))
 	case "Map":
-		return callExpr(ident("make"), mapType(t.jsValueType(), t.jsValueType()))
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		return callExpr(selectorExpr(ident("jsvalue"), "NewMap"))
 	case "Set":
-		return callExpr(ident("make"), mapType(t.jsValueType(), &ast.StructType{Fields: &ast.FieldList{}}))
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		return callExpr(selectorExpr(ident("jsvalue"), "NewSet"))
 	case "Date":
 		t.addImport("time")
 		return callExpr(selectorExpr(ident("time"), "Now"))

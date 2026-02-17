@@ -139,7 +139,7 @@ func TestTranspiledImportArgsWrappedWithJSValue(t *testing.T) {
 const w = eastAsianWidth(42, {wide: true});`
 	out := compileWithModule(t, ts, "myapp")
 	assertContains(t, out, "jsvalue.From(42)")
-	assertContains(t, out, "jsvalue.From(map[string]")
+	assertContains(t, out, "jsvalue.ObjectFrom(")
 }
 
 func TestKnownModuleArgsNotWrapped(t *testing.T) {

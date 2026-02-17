@@ -469,21 +469,6 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 				return r
 			}
 
-			// When the receiver is a map local value (e.g. flags.keys, flags["keys"]),
-			// the result is *jsvalue.JSValue — route to collection method transformation
-			if (objNode.Kind() == "member_expression" || objNode.Kind() == "subscript_expression") && func() bool {
-				inner := objNode.ChildByFieldName("object")
-				return inner != nil && inner.Kind() == "identifier" && t.mapLocals[inner.Utf8Text(t.source)]
-			}() && t.builtins.IsArrayMethod(prop) {
-				obj := t.transformExpr(objNode)
-				for i, arg := range args {
-					args[i] = t.wrapAsJSValue(arg)
-				}
-				if r := transformCollectionMethod(obj, prop, args, t.addImport, true); r != nil {
-					return r
-				}
-			}
-
 			// Method transforms on arbitrary receivers (string/collection methods)
 			// Skip if the object is a namespace import (it's a package, not a value)
 			isUntypedLocal := objNode.Kind() == "identifier" && t.isUntypedLocal(objText)
@@ -495,6 +480,21 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 				if (isUntypedLocal || t.nodeReturnsJSValue(objNode)) && t.builtins.IsRegexMethod(prop) {
 					if r := transformRegexpMethod(obj, prop, args, t.addImport); r != nil {
 						return r
+					}
+				}
+
+				// Map/Set method dispatch for known Map/Set locals
+				if objNode.Kind() == "identifier" {
+					if msType, ok := t.mapSetLocals[objText]; ok {
+						if msType == "map" {
+							if r := transformMapMethod(obj, prop, args, t.addImport); r != nil {
+								return r
+							}
+						} else if msType == "set" {
+							if r := transformSetMethod(obj, prop, args, t.addImport); r != nil {
+								return r
+							}
+						}
 					}
 				}
 
@@ -736,9 +736,15 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 		return callExpr(ident("len"), obj)
 	}
 
-	// Map-typed locals (from object literals) use map indexing: obj["key"]
-	if objNode.Kind() == "identifier" && t.mapLocals[objNode.Utf8Text(t.source)] {
-		return &ast.IndexExpr{X: obj, Index: stringLit(prop)}
+	// Map/Set .size property
+	if prop == "size" && objNode.Kind() == "identifier" {
+		if msType, ok := t.mapSetLocals[objNode.Utf8Text(t.source)]; ok {
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			if msType == "map" {
+				return callExpr(selectorExpr(ident("jsvalue"), "MapSize"), obj)
+			}
+			return callExpr(selectorExpr(ident("jsvalue"), "SetSize"), obj)
+		}
 	}
 
 	// For local scope variables (function parameters typed as *jsvalue.JSValue),
@@ -770,31 +776,6 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 	}
 	if index == nil {
 		return obj
-	}
-	// Map-typed locals use normal Go map indexing — skip the JSValue path.
-	// If the index is a JSValue variable, coerce to string for the map key.
-	if objNode != nil && objNode.Kind() == "identifier" && t.mapLocals[objNode.Utf8Text(t.source)] {
-		indexNode := node.ChildByFieldName("index")
-		if indexNode != nil && indexNode.Kind() == "identifier" {
-			idxName := indexNode.Utf8Text(t.source)
-			if t.isUntypedLocal(idxName) || (func() bool { typed, ok := t.pkgVarTyped[idxName]; return ok && !typed }()) {
-				index = callExpr(selectorExpr(index, "String"))
-			}
-		}
-		return &ast.IndexExpr{X: obj, Index: index}
-	}
-	// Nested subscript on map local: mapLocal[x][y] or mapLocal.x[y] → (...).Get(y)
-	// The first access (subscript or member) returns *jsvalue.JSValue from the map.
-	if objNode != nil && (objNode.Kind() == "subscript_expression" || objNode.Kind() == "member_expression") {
-		innerObj := objNode.ChildByFieldName("object")
-		if innerObj != nil && innerObj.Kind() == "identifier" && t.mapLocals[innerObj.Utf8Text(t.source)] {
-			indexNode := node.ChildByFieldName("index")
-			if indexNode != nil && (indexNode.Kind() == "string" || indexNode.Kind() == "string_literal") {
-				return callExpr(selectorExpr(obj, "Get"), index)
-			}
-			t.addImport("fmt")
-			return callExpr(selectorExpr(obj, "Get"), callExpr(selectorExpr(ident("fmt"), "Sprint"), index))
-		}
 	}
 	// JSValue arrays can't be indexed directly; use .Index() for numeric
 	// keys and .Get() for string keys.
@@ -883,7 +864,7 @@ func (t *Transformer) transformArrayLiteral(node *sitter.Node) ast.Expr {
 }
 
 func (t *Transformer) transformObjectLiteral(node *sitter.Node) ast.Expr {
-	var elts []ast.Expr
+	var args []ast.Expr
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		switch child.Kind() {
@@ -893,15 +874,16 @@ func (t *Transformer) transformObjectLiteral(node *sitter.Node) ast.Expr {
 			if keyNode != nil && valNode != nil {
 				key := keyNode.Utf8Text(t.source)
 				if val := t.transformExpr(valNode); val != nil {
-					elts = append(elts, keyValue(stringLit(key), t.wrapAsJSValue(val)))
+					args = append(args, stringLit(key), t.wrapAsJSValue(val))
 				}
 			}
 		case "shorthand_property_identifier":
 			name := child.Utf8Text(t.source)
-			elts = append(elts, keyValue(stringLit(name), t.wrapAsJSValue(t.resolveIdentifier(name))))
+			args = append(args, stringLit(name), t.wrapAsJSValue(t.resolveIdentifier(name)))
 		}
 	}
-	return compositeLit(mapType(ident("string"), t.jsValueType()), elts...)
+	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	return callExpr(selectorExpr(ident("jsvalue"), "ObjectFrom"), args...)
 }
 
 // isJSValueGet returns true if the expression is a JSValue .Get() call.
@@ -974,7 +956,14 @@ func isStringLitNode(node *sitter.Node) bool {
 	if node == nil {
 		return false
 	}
-	return node.Kind() == "string" || node.Kind() == "template_string"
+	if node.Kind() == "string" || node.Kind() == "template_string" {
+		return true
+	}
+	// Chained string concat: ("a" + b) + c — binary_expression containing a string
+	if node.Kind() == "binary_expression" {
+		return isStringLitNode(node.ChildByFieldName("left")) || isStringLitNode(node.ChildByFieldName("right"))
+	}
+	return false
 }
 
 func isBoolReturningMethod(name string) bool {
@@ -1222,6 +1211,35 @@ func (t *Transformer) transformTernary(node *sitter.Node) ast.Expr {
 	// Try to infer a concrete return type so the IIFE doesn't return `any`.
 	resultType := t.inferTernaryResultType(consNode, altNode)
 
+	// Coerce branches whose type doesn't match the inferred result type.
+	if id, ok := resultType.(*ast.Ident); ok {
+		switch id.Name {
+		case "string":
+			if t.inferNodeResultType(consNode) == "" {
+				t.addImport("fmt")
+				cons = callExpr(selectorExpr(ident("fmt"), "Sprint"), cons)
+			}
+			if t.inferNodeResultType(altNode) == "" {
+				t.addImport("fmt")
+				alt = callExpr(selectorExpr(ident("fmt"), "Sprint"), alt)
+			}
+		case "float64":
+			if t.inferNodeResultType(consNode) == "" {
+				cons = callExpr(selectorExpr(cons, "Number"))
+			}
+			if t.inferNodeResultType(altNode) == "" {
+				alt = callExpr(selectorExpr(alt, "Number"))
+			}
+		case "int":
+			if t.inferNodeResultType(consNode) == "" {
+				cons = callExpr(ident("int"), callExpr(selectorExpr(cons, "Number")))
+			}
+			if t.inferNodeResultType(altNode) == "" {
+				alt = callExpr(ident("int"), callExpr(selectorExpr(alt, "Number")))
+			}
+		}
+	}
+
 	return &ast.CallExpr{
 		Fun: &ast.FuncLit{
 			Type: &ast.FuncType{
@@ -1248,6 +1266,16 @@ func (t *Transformer) inferTernaryResultType(cons, alt *sitter.Node) ast.Expr {
 	if a != "" && a == b {
 		return ident(a)
 	}
+	// int and float64 are compatible numeric types; prefer float64.
+	if (a == "int" && b == "float64") || (a == "float64" && b == "int") {
+		return ident("float64")
+	}
+	if a != "" && b == "" && isGoTypeName(a) {
+		return ident(a)
+	}
+	if b != "" && a == "" && isGoTypeName(b) {
+		return ident(b)
+	}
 	return ident("any")
 }
 
@@ -1258,10 +1286,21 @@ func (t *Transformer) inferNodeResultType(node *sitter.Node) string {
 	switch node.Kind() {
 	case "number":
 		return "int"
+	case "call_expression":
+		fn := node.ChildByFieldName("function")
+		if fn != nil && fn.Kind() == "identifier" && fn.Utf8Text(t.source) == "Number" {
+			return "float64"
+		}
 	case "string", "template_string":
 		return "string"
 	case "true", "false":
 		return "bool"
+	case "array":
+		return "array"
+	case "binary_expression":
+		if isStringLitNode(node) {
+			return "string"
+		}
 	case "member_expression":
 		prop := node.ChildByFieldName("property")
 		if prop != nil && prop.Utf8Text(t.source) == "length" {

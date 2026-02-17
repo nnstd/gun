@@ -164,8 +164,7 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 			if typ != nil {
 				t.typedLocalTypes[name] = getTypeString(typ)
 			} else if value != nil {
-				// Infer type from value for type tracking (without adding explicit annotation)
-				if id, ok := value.(*ast.Ident); ok && (id.Name == "true" || id.Name == "false") {
+				if isBoolExpr(value) {
 					t.typedLocalTypes[name] = "bool"
 				}
 			}
@@ -189,19 +188,23 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 			}
 		}
 
-		// Track locals initialized from object literals (map[string]*jsvalue.JSValue)
-		// so property access uses map indexing obj["key"] instead of obj.Get("key").
-		// Note: object.Assign() returns *jsvalue.JSValue, so those are NOT map locals.
-		if value != nil {
-			if isMapLiteral(value) {
-				t.mapLocals[name] = true
-			}
-		}
-
 		// Track locals that hold *jsvalue.JSValue (not slices or maps)
 		// so method calls on them are properly coerced.
 		if !typed && valueNode != nil && t.nodeReturnsJSValue(valueNode) {
 			t.jsvalueLocals[name] = true
+		}
+
+		// Track locals initialized from new Map() or new Set()
+		if valueNode != nil && valueNode.Kind() == "new_expression" {
+			ctorNode := valueNode.ChildByFieldName("constructor")
+			if ctorNode != nil {
+				switch ctorNode.Utf8Text(t.source) {
+				case "Map":
+					t.mapSetLocals[name] = "map"
+				case "Set":
+					t.mapSetLocals[name] = "set"
+				}
+			}
 		}
 
 		// If const with simple literal value, use Go const
@@ -225,16 +228,25 @@ func (t *Transformer) isNonJSValueInit(node *sitter.Node) bool {
 	switch node.Kind() {
 	case "number", "string", "template_string", "true", "false",
 		"ternary_expression", "unary_expression",
-		"array", "object", "new_expression", "regex":
+		"array", "regex":
+		return true
+	case "new_expression":
+		// new Map() and new Set() now produce *jsvalue.JSValue
+		ctorNode := node.ChildByFieldName("constructor")
+		if ctorNode != nil {
+			name := ctorNode.Utf8Text(t.source)
+			if name == "Map" || name == "Set" {
+				return false
+			}
+		}
 		return true
 	case "binary_expression":
-		// Logical || and && return one of their operands in JS, so the result
-		// may be *jsvalue.JSValue when operands are JSValue. Only treat as
-		// non-JSValue if both operands are themselves non-JSValue.
+		// Go && always returns bool, so it's always non-JSValue.
+		// || and ?? may return JSValue via the IIFE pattern, so check operands.
 		opNode := node.ChildByFieldName("operator")
 		if opNode != nil {
 			op := opNode.Utf8Text(t.source)
-			if op == "||" || op == "&&" || op == "??" {
+			if op == "||" || op == "??" {
 				left := node.ChildByFieldName("left")
 				right := node.ChildByFieldName("right")
 				return t.isNonJSValueInit(left) && t.isNonJSValueInit(right)
