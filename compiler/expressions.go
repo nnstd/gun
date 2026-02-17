@@ -590,6 +590,19 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 				}
 				return callExpr(selectorExpr(obj, capitalize(prop)), args...)
 			}
+
+			// Method call on a package-level untyped variable (JSValue):
+			// use .Get("method").Call(args...) for dynamic dispatch.
+			if objNode.Kind() == "identifier" {
+				if typed, ok := t.pkgVarTyped[objText]; ok && !typed {
+					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+					obj := t.transformExpr(objNode)
+					for i, arg := range args {
+						args[i] = t.wrapAsJSValue(arg)
+					}
+					return callExpr(selectorExpr(callExpr(selectorExpr(obj, "Get"), stringLit(prop)), "Call"), args...)
+				}
+			}
 		}
 	}
 

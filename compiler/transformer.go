@@ -56,6 +56,10 @@ func newTransformer(source []byte, pkgName, moduleName string, samePackageImport
 }
 
 func (t *Transformer) transform(root *sitter.Node) *ast.File {
+	// Pre-scan top-level function declarations to register param counts
+	// so that callers defined before the function can pad missing args.
+	t.prescanTopLevelFuncs(root)
+
 	for i := uint(0); i < root.NamedChildCount(); i++ {
 		child := root.NamedChild(i)
 		t.transformTopLevel(child)
@@ -339,6 +343,34 @@ func (t *Transformer) isUntypedLocal(name string) bool {
 func (t *Transformer) jsValueType() ast.Expr {
 	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 	return jsValuePtrType()
+}
+
+func (t *Transformer) prescanTopLevelFuncs(root *sitter.Node) {
+	for i := uint(0); i < root.NamedChildCount(); i++ {
+		child := root.NamedChild(i)
+		if child.Kind() == "function_declaration" {
+			nameNode := child.ChildByFieldName("name")
+			paramsNode := child.ChildByFieldName("parameters")
+			if nameNode == nil || paramsNode == nil {
+				continue
+			}
+			count := 0
+			hasTyped := false
+			for j := uint(0); j < paramsNode.NamedChildCount(); j++ {
+				p := paramsNode.NamedChild(j)
+				if p.Kind() == "comment" {
+					continue
+				}
+				count++
+				if p.ChildByFieldName("type") != nil {
+					hasTyped = true
+				}
+			}
+			if !hasTyped && count > 0 {
+				t.funcParamCounts[nameNode.Utf8Text(t.source)] = count
+			}
+		}
+	}
 }
 
 func (t *Transformer) transformTopLevel(node *sitter.Node) {

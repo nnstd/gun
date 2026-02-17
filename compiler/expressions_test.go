@@ -381,3 +381,22 @@ func TestMatchResultNotTreatedAsJSValue(t *testing.T) {
 	assertNotContains(t, out, "m.String()")
 	assertNotContains(t, out, "m.Index(")
 }
+
+func TestTopLevelFuncNilPadding(t *testing.T) {
+	ts := `
+function main() { increment(); }
+function increment(orig) { return orig; }
+`
+	out := compile(t, ts)
+	assertContains(t, out, "increment(nil)")
+}
+
+func TestPkgVarMethodCallUsesGetCall(t *testing.T) {
+	ts := `
+let mixin;
+function f(val) { return mixin.normalize(val); }
+`
+	out := compile(t, ts)
+	assertContains(t, out, `.Get("normalize").Call(`)
+	assertNotContains(t, out, `.Get("normalize")(`)
+}

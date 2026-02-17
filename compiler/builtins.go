@@ -45,6 +45,11 @@ func transformGlobalCall(name string, args []ast.Expr, addImport func(string)) a
 			}
 		}
 		return ident("true")
+	case "Number":
+		if len(args) > 0 {
+			return callExpr(selectorExpr(args[0], "Number"))
+		}
+		return basicLit(token.FLOAT, "0")
 	case "Error", "TypeError", "RangeError", "ReferenceError":
 		addImport("fmt")
 		if len(args) > 0 {

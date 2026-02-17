@@ -243,3 +243,10 @@ func TestJoinOnMapResult(t *testing.T) {
 	assertNotContains(t, out, "_arr :=")
 	assertNotContains(t, out, "strings.Join")
 }
+
+func TestNumberGlobalCall(t *testing.T) {
+	ts := `function f(x) { return Number(x); }`
+	out := compile(t, ts)
+	assertContains(t, out, "x.Number()")
+	assertNotContains(t, out, "float64(x)")
+}
