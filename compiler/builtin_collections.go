@@ -172,23 +172,33 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 }
 
 func transformObjectCall(prop string, args []ast.Expr, addImport func(string)) ast.Expr {
+	addImport("github.com/nnstd/gun/runtime/object")
 	switch prop {
 	case "keys":
-		// Object.keys(obj) → jsvalue.Keys(obj)
 		if len(args) > 0 {
-			addImport("github.com/nnstd/gun/runtime/jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "Keys"), args[0])
+			return callExpr(selectorExpr(ident("object"), "Keys"), args[0])
 		}
-	case "values", "entries", "assign":
+	case "values":
 		if len(args) > 0 {
-			return args[0]
+			return callExpr(selectorExpr(ident("object"), "Values"), args[0])
+		}
+	case "entries":
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("object"), "Entries"), args[0])
+		}
+	case "assign":
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("object"), "Assign"), args...)
 		}
 	case "create":
-		// Object.create(null) → jsvalue.NewObject()
-		addImport("github.com/nnstd/gun/runtime/jsvalue")
-		return callExpr(selectorExpr(ident("jsvalue"), "NewObject"))
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("object"), "Create"), args[0])
+		}
+		return callExpr(selectorExpr(ident("object"), "Create"), ident("nil"))
 	case "defineProperty":
-		// Object.defineProperty() → skip (Go doesn't support property descriptors)
+		if len(args) >= 3 {
+			return callExpr(selectorExpr(ident("object"), "DefineProperty"), args[0], args[1], args[2])
+		}
 		return ident("nil")
 	}
 	return nil

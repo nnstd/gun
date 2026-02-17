@@ -150,11 +150,11 @@ const data = readFileSync("hello.txt");`
 	assertNotContains(t, out, "jsvalue.From")
 }
 
-func TestConsoleErrorStillUsesStdlibOS(t *testing.T) {
+func TestConsoleErrorUsesRuntimePackage(t *testing.T) {
 	ts := `console.error("fail");`
 	out := compile(t, ts)
-	assertContains(t, out, `"os"`)
-	assertContains(t, out, "os.Stderr")
-	assertNotContains(t, out, "nodeos")
+	assertContains(t, out, `runtime/console`)
+	assertContains(t, out, `console.Error("fail")`)
+	assertNotContains(t, out, "os.Stderr")
 }
 

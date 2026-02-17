@@ -4,14 +4,14 @@ import "testing"
 
 func TestConsoleLog(t *testing.T) {
 	out := compile(t, `console.log("hello");`)
-	assertContains(t, out, `fmt.Println("hello")`)
-	assertContains(t, out, `"fmt"`)
+	assertContains(t, out, `console.Log("hello")`)
+	assertContains(t, out, `runtime/console`)
 }
 
 func TestConsoleError(t *testing.T) {
 	out := compile(t, `console.error("fail");`)
-	assertContains(t, out, "fmt.Fprintln(os.Stderr")
-	assertContains(t, out, `"os"`)
+	assertContains(t, out, `console.Error("fail")`)
+	assertContains(t, out, `runtime/console`)
 }
 
 func TestMathFloor(t *testing.T) {
@@ -31,16 +31,15 @@ func TestMathRandom(t *testing.T) {
 func TestJSONStringify(t *testing.T) {
 	ts := `function ser(x: any): any { return JSON.stringify(x); }`
 	out := compile(t, ts)
-	assertContains(t, out, "json.Marshal(x)")
-	assertContains(t, out, `"encoding/json"`)
+	assertContains(t, out, "json.Stringify(x)")
+	assertContains(t, out, `runtime/json`)
 }
 
 func TestJSONParse(t *testing.T) {
 	ts := `function deser(s: string): any { return JSON.parse(s); }`
 	out := compile(t, ts)
-	assertContains(t, out, "json.Unmarshal")
-	assertContains(t, out, "jsvalue.From(v)")
-	assertContains(t, out, "*jsvalue.JSValue")
+	assertContains(t, out, "json.Parse(s)")
+	assertContains(t, out, `runtime/json`)
 }
 
 func TestStringMethods(t *testing.T) {
@@ -95,33 +94,33 @@ func TestNumberIsSafeInteger(t *testing.T) {
 func TestProcessArgv(t *testing.T) {
 	ts := `const args = process.argv;`
 	out := compile(t, ts)
-	assertContains(t, out, "os.Args")
-	assertContains(t, out, `"os"`)
+	assertContains(t, out, "process.Argv")
+	assertContains(t, out, `runtime/process`)
 }
 
 func TestProcessEnvAccess(t *testing.T) {
 	ts := `const home = process.env.HOME;`
 	out := compile(t, ts)
-	assertContains(t, out, `os.Getenv("HOME")`)
+	assertContains(t, out, `process.Env["HOME"]`)
 }
 
 func TestProcessExit(t *testing.T) {
 	ts := `process.exit(1);`
 	out := compile(t, ts)
-	assertContains(t, out, "os.Exit(1)")
+	assertContains(t, out, "process.Exit(1)")
 }
 
 func TestObjectCreateNull(t *testing.T) {
 	ts := `const obj = Object.create(null);`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.NewObject()")
+	assertContains(t, out, "object.Create(nil)")
 	assertNotContains(t, out, "Object.Create")
 }
 
 func TestObjectKeysTransform(t *testing.T) {
 	ts := `function f(obj: any): any { return Object.keys(obj); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.Keys(obj)")
+	assertContains(t, out, "object.Keys(obj)")
 	assertNotContains(t, out, "Object")
 }
 

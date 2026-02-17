@@ -542,6 +542,26 @@ func sanitizeIdent(name string) string {
 	return name
 }
 
+// isMapLiteral checks if an expression is a map composite literal.
+func isMapLiteral(expr ast.Expr) bool {
+	cl, ok := expr.(*ast.CompositeLit)
+	if !ok {
+		return false
+	}
+	_, ok = cl.Type.(*ast.MapType)
+	return ok
+}
+
+// isObjectAssignCall checks if a call expression is object.Assign(...).
+func isObjectAssignCall(ce *ast.CallExpr) bool {
+	sel, ok := ce.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	id, ok := sel.X.(*ast.Ident)
+	return ok && id.Name == "object" && sel.Sel.Name == "Assign"
+}
+
 // capitalize returns the string with the first letter uppercased (Go export convention).
 func capitalize(s string) string {
 	if s == "" {

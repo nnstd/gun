@@ -701,15 +701,15 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 		}
 	}
 
-	// process.env.X → os.Getenv("X")
+	// process.env.X → process.Env["X"]
 	if objNode.Kind() == "member_expression" {
 		innerObj := objNode.ChildByFieldName("object")
 		innerProp := objNode.ChildByFieldName("property")
 		if innerObj != nil && innerProp != nil &&
 			innerObj.Utf8Text(t.source) == "process" &&
 			innerProp.Utf8Text(t.source) == "env" {
-			t.addImport("os")
-			return callExpr(selectorExpr(ident("os"), "Getenv"), stringLit(prop))
+			t.addImport("github.com/nnstd/gun/runtime/process")
+			return &ast.IndexExpr{X: selectorExpr(ident("process"), "Env"), Index: stringLit(prop)}
 		}
 	}
 

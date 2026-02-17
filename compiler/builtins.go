@@ -192,51 +192,39 @@ func transformArrayCall(prop string, args []ast.Expr, addImport func(string)) as
 
 // transformProcessCall handles process.X() calls.
 func transformProcessCall(prop string, args []ast.Expr, addImport func(string)) ast.Expr {
+	addImport("github.com/nnstd/gun/runtime/process")
 	switch prop {
 	case "exit":
-		addImport("os")
 		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("os"), "Exit"), args[0])
+			return callExpr(selectorExpr(ident("process"), "Exit"), args[0])
 		}
-		return callExpr(selectorExpr(ident("os"), "Exit"), intLit("0"))
+		return callExpr(selectorExpr(ident("process"), "Exit"), intLit("0"))
 	case "cwd":
-		addImport("os")
-		// os.Getwd() returns (string, error); wrap in helper
-		return callExpr(ident("func() string { d, _ := os.Getwd(); return d }"))
+		return callExpr(selectorExpr(ident("process"), "Cwd"))
 	}
 	return nil
 }
 
 // transformProcessMember handles process.X member access (not calls).
 func transformProcessMember(prop string, addImport func(string)) ast.Expr {
+	addImport("github.com/nnstd/gun/runtime/process")
 	switch prop {
 	case "env":
-		// process.env → os.Environ() is not right; it's used as a map.
-		// Return a placeholder that works for subscript access.
-		addImport("os")
-		return ident("os") // process.env.X will become os.Getenv via further transforms
+		return selectorExpr(ident("process"), "Env")
 	case "argv":
-		addImport("os")
-		return selectorExpr(ident("os"), "Args")
+		return selectorExpr(ident("process"), "Argv")
 	case "platform":
-		addImport("runtime")
-		return selectorExpr(ident("runtime"), "GOOS")
+		return selectorExpr(ident("process"), "Platform")
 	case "stdout":
-		addImport("os")
-		return selectorExpr(ident("os"), "Stdout")
+		return selectorExpr(ident("process"), "Stdout")
 	case "stderr":
-		addImport("os")
-		return selectorExpr(ident("os"), "Stderr")
-	case "cwd":
-		addImport("os")
-		// Return a function value that matches process.cwd()
-		return selectorExpr(ident("os"), "Getwd")
+		return selectorExpr(ident("process"), "Stderr")
 	case "versions":
-		// process.versions is rarely useful in Go; return empty map
-		return compositeLit(mapType(ident("string"), ident("string")))
+		return selectorExpr(ident("process"), "Versions")
 	case "pid":
-		addImport("os")
-		return callExpr(selectorExpr(ident("os"), "Getpid"))
+		return selectorExpr(ident("process"), "Pid")
+	case "cwd":
+		return selectorExpr(ident("process"), "Cwd")
 	}
 	return nil
 }
@@ -247,12 +235,13 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 	case "undefined", "null":
 		return ident("nil")
 	case "console":
-		return ident("fmt")
+		addImport("github.com/nnstd/gun/runtime/console")
+		return ident("console")
 	case "Math":
 		addImport("math")
 		return ident("math")
 	case "JSON":
-		addImport("encoding/json")
+		addImport("github.com/nnstd/gun/runtime/json")
 		return ident("json")
 	case "Error":
 		addImport("errors")
