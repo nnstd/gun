@@ -191,11 +191,9 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 
 		// Track locals initialized from object literals (map[string]*jsvalue.JSValue)
 		// so property access uses map indexing obj["key"] instead of obj.Get("key").
-		// Also detect object.Assign(mapLit, ...) which merges into a map.
+		// Note: object.Assign() returns *jsvalue.JSValue, so those are NOT map locals.
 		if value != nil {
 			if isMapLiteral(value) {
-				t.mapLocals[name] = true
-			} else if ce, ok := value.(*ast.CallExpr); ok && isObjectAssignCall(ce) && len(ce.Args) > 0 && isMapLiteral(ce.Args[0]) {
 				t.mapLocals[name] = true
 			}
 		}

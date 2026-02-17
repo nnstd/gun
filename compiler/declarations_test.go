@@ -321,14 +321,14 @@ func TestClassMethodLocalsUseGet(t *testing.T) {
 	assertNotContains(t, out, "opts.Verbose")
 }
 
-func TestMapLocalFromObjectAssign(t *testing.T) {
+func TestObjectAssignResultUsesGet(t *testing.T) {
 	ts := `function f(options) {
 	const config = Object.assign({key: true}, options);
 	return config.key;
 }`
 	out := compile(t, ts)
-	assertContains(t, out, `config["key"]`)
-	assertNotContains(t, out, `config.Get("key")`)
+	assertContains(t, out, `config.Get("key")`)
+	assertNotContains(t, out, `config["key"]`)
 }
 
 func TestRestPatternParam(t *testing.T) {
@@ -338,24 +338,24 @@ func TestRestPatternParam(t *testing.T) {
 	assertNotContains(t, out, "...args")
 }
 
-func TestMapLocalSubscriptAccess(t *testing.T) {
+func TestObjectAssignSubscriptUsesGet(t *testing.T) {
 	ts := `function f(options) {
 	const config = Object.assign({key: true}, options);
 	return config['key'];
 }`
 	out := compile(t, ts)
-	assertContains(t, out, `config["key"]`)
-	assertNotContains(t, out, `config.Get("key")`)
+	assertContains(t, out, `config.Get("key")`)
+	assertNotContains(t, out, `config["key"]`)
 }
 
-func TestNestedSubscriptOnMapLocal(t *testing.T) {
+func TestNestedSubscriptOnObjectAssign(t *testing.T) {
 	ts := `function f(assignment, key) {
 	const flags = Object.assign({}, {});
 	flags[assignment][key] = true;
 	const v = flags[assignment][key];
 }`
 	out := compile(t, ts)
-	assertContains(t, out, `.Set(fmt.Sprint(key)`)
+	assertContains(t, out, `.Get(fmt.Sprint(assignment))`)
 	assertContains(t, out, `.Get(fmt.Sprint(key))`)
 	assertNotContains(t, out, `[int(key)]`)
 }
@@ -431,13 +431,13 @@ func TestTypedLocalAssignedFromUntypedCall(t *testing.T) {
 	assertContains(t, out, ".Number())")
 }
 
-func TestMapLocalInBoolContext(t *testing.T) {
+func TestObjectAssignInBoolContext(t *testing.T) {
 	ts := `function f(options) {
 	const config = Object.assign({}, options);
 	if (config["verbose"]) { return true; }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, `config["verbose"] != nil`)
+	assertContains(t, out, `config.Get("verbose").Bool()`)
 }
 
 func TestSubscriptOnJSValueCallResult(t *testing.T) {

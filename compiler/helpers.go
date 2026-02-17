@@ -552,16 +552,6 @@ func isMapLiteral(expr ast.Expr) bool {
 	return ok
 }
 
-// isObjectAssignCall checks if a call expression is object.Assign(...).
-func isObjectAssignCall(ce *ast.CallExpr) bool {
-	sel, ok := ce.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return false
-	}
-	id, ok := sel.X.(*ast.Ident)
-	return ok && id.Name == "object" && sel.Sel.Name == "Assign"
-}
-
 // capitalize returns the string with the first letter uppercased (Go export convention).
 func capitalize(s string) string {
 	if s == "" {
