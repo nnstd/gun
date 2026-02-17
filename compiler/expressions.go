@@ -1069,6 +1069,10 @@ func (t *Transformer) ensureBool(expr ast.Expr) ast.Expr {
 			if isBoolReturningMethod(sel.Sel.Name) {
 				return expr
 			}
+			// .Len() returns int, convert to > 0
+			if sel.Sel.Name == "Len" {
+				return &ast.BinaryExpr{X: expr, Op: token.GTR, Y: intLit("0")}
+			}
 			return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
 		}
 		// Plain function calls: if the function is a local that returns

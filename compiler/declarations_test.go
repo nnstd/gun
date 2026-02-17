@@ -473,6 +473,15 @@ func TestLenInBoolContext(t *testing.T) {
 	assertContains(t, out, "> 0")
 }
 
+func TestJSValueLenInBoolContext(t *testing.T) {
+	ts := `function f(arr) {
+	if (arr.length) { return true; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, ".Len() > 0")
+	assertNotContains(t, out, ".Len() != nil")
+}
+
 func TestJSValueSliceMethodCallWrapped(t *testing.T) {
 	ts := `function f() {
 	const items = [];
