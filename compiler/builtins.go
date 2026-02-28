@@ -5,6 +5,15 @@ import (
 	"go/token"
 )
 
+// isErrorType returns true if the name is a JavaScript Error constructor.
+func isErrorType(name string) bool {
+	switch name {
+	case "Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError":
+		return true
+	}
+	return false
+}
+
 // transformBuiltinCall dispatches calls on known global objects (console, Math, JSON, Object).
 // Returns nil if the call is not a known builtin.
 func transformBuiltinCall(obj, prop string, args []ast.Expr, addImport func(string)) ast.Expr {
@@ -24,20 +33,23 @@ func transformBuiltinCall(obj, prop string, args []ast.Expr, addImport func(stri
 	case "Array":
 		return transformArrayCall(prop, args, addImport)
 	}
+	if isErrorType(obj) {
+		return transformErrorCall(obj, prop, args, addImport)
+	}
 	return nil
 }
 
 // transformGlobalCall handles bare global function calls like isNaN(), Error(), parseInt().
-func transformGlobalCall(name string, args []ast.Expr, addImport func(string)) ast.Expr {
+func transformGlobalCall(name string, args []ast.Expr, t *Transformer) ast.Expr {
 	switch name {
 	case "isNaN":
-		addImport("math")
+		t.addImport("math")
 		if len(args) > 0 {
 			return callExpr(selectorExpr(ident("math"), "IsNaN"), callExpr(selectorExpr(args[0], "Number")))
 		}
 		return ident("false")
 	case "isFinite":
-		addImport("math")
+		t.addImport("math")
 		if len(args) > 0 {
 			return &ast.UnaryExpr{
 				Op: token.NOT,
@@ -50,12 +62,15 @@ func transformGlobalCall(name string, args []ast.Expr, addImport func(string)) a
 			return callExpr(selectorExpr(args[0], "Number"))
 		}
 		return basicLit(token.FLOAT, "0")
-	case "Error", "TypeError", "RangeError", "ReferenceError":
-		addImport("fmt")
-		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("jsvalue"), "NewString"), callExpr(selectorExpr(ident("fmt"), "Sprint"), args[0]))
+	}
+	if isErrorType(name) {
+		// Error("msg") → jserror.Error.Call(msg) — JS spec: Error() without new also creates Error
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jserror", "jserror")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		for i, arg := range args {
+			args[i] = jsvalueWrapLit(arg)
 		}
-		return callExpr(selectorExpr(ident("jsvalue"), "NewString"), stringLit("error"))
+		return callExpr(selectorExpr(selectorExpr(ident("jserror"), name), "Call"), args...)
 	}
 	return nil
 }
@@ -96,12 +111,13 @@ func transformBuiltinMethod(obj ast.Expr, prop string, args []ast.Expr, addImpor
 // Returns nil if the type is not a known builtin.
 func transformBuiltinNew(name string, args []ast.Expr, t *Transformer) ast.Expr {
 	switch name {
-	case "Error", "TypeError", "RangeError", "ReferenceError":
-		t.addImport("errors")
-		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("errors"), "New"), args[0])
+	case "Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError":
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jserror", "jserror")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		for i, arg := range args {
+			args[i] = jsvalueWrapLit(arg)
 		}
-		return callExpr(selectorExpr(ident("errors"), "New"), stringLit("error"))
+		return callExpr(selectorExpr(selectorExpr(ident("jserror"), name), "Call"), args...)
 	case "Map":
 		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewMap"))
@@ -258,10 +274,9 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 	case "JSON":
 		addImport("github.com/nnstd/gun/runtime/json")
 		return ident("json")
-	case "Error":
-		// Error() calls are handled by transformGlobalCall.
-		// Don't import "errors" — just return the identifier.
-		return ident("Error")
+	case "Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError":
+		addImport("github.com/nnstd/gun/runtime/jserror")
+		return selectorExpr(ident("jserror"), name)
 	case "Object":
 		addImport("github.com/nnstd/gun/runtime/object")
 		return ident("object")
@@ -279,4 +294,21 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 	default:
 		return ident(sanitizeIdent(name))
 	}
+}
+
+// transformErrorCall handles Error.X() static method calls (e.g. Error.captureStackTrace).
+func transformErrorCall(errType, prop string, args []ast.Expr, addImport func(string)) ast.Expr {
+	addImport("github.com/nnstd/gun/runtime/jserror")
+	// Error.captureStackTrace(obj) → jserror.Error.Get("captureStackTrace").Call(obj)
+	// Other static methods: dispatch via .Get(prop).Call(args...)
+	for i, arg := range args {
+		args[i] = jsvalueWrapLit(arg)
+	}
+	return callExpr(
+		selectorExpr(
+			callExpr(selectorExpr(selectorExpr(ident("jserror"), errType), "Get"), stringLit(prop)),
+			"Call",
+		),
+		args...,
+	)
 }

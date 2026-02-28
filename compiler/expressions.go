@@ -593,7 +593,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 	if fnNode.Kind() == "identifier" {
 		name := fnNode.Utf8Text(t.source)
 		args := t.transformArgs(argsNode)
-		if r := transformGlobalCall(name, args, t.addImport); r != nil {
+		if r := transformGlobalCall(name, args, t); r != nil {
 			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 			return r
 		}
@@ -684,7 +684,8 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 func isKnownGlobalObject(name string) bool {
 	switch name {
 	case "console", "Math", "JSON", "Object", "Array", "Number", "Boolean",
-		"Error", "TypeError", "RangeError", "Date", "RegExp", "Symbol",
+		"Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError",
+		"Date", "RegExp", "Symbol",
 		"process", "module", "require", "globalThis",
 		"undefined", "null", "NaN", "Infinity":
 		return true
@@ -722,7 +723,7 @@ func isObjectPrototypeHasOwnProperty(node *sitter.Node, source []byte) bool {
 // isRuntimePackage returns true if the name is a known Gun runtime package alias.
 func isRuntimePackage(name string) bool {
 	switch name {
-	case "fs", "nodepath", "json", "process", "module":
+	case "fs", "nodepath", "json", "process", "module", "jserror":
 		return true
 	}
 	return false
@@ -776,6 +777,13 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 		if r := transformProcessMember(prop, t.addImport); r != nil {
 			return r
 		}
+	}
+
+	// Error.X → jserror.Error.Get("X") for static properties
+	if objNode.Kind() == "identifier" && isErrorType(objNode.Utf8Text(t.source)) {
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jserror", "jserror")
+		errName := objNode.Utf8Text(t.source)
+		return callExpr(selectorExpr(selectorExpr(ident("jserror"), errName), "Get"), stringLit(prop))
 	}
 
 	// process.env.X → process.Env["X"]

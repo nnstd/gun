@@ -83,7 +83,6 @@ func init() {
 		"strict": "", // namespace import for assert/strict
 	})
 	registerModule("module", "github.com/nnstd/gun/runtime/module", "module", nil)
-	registerModule("get-caller-file", "github.com/nnstd/gun/runtime/get_caller_file", "get_caller_file", nil)
 	registerModule("cliui", "github.com/nnstd/gun/runtime/cliui", "cliui", nil)
 
 	registerModule("escalade/sync", "github.com/nnstd/gun/runtime/escalade_sync", "escalade_sync", nil)

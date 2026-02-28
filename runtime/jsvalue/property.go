@@ -33,8 +33,26 @@ func (v *JSValue) Get(name string) *JSValue {
 	return NewUndefined()
 }
 
-// Set sets an own property with a data descriptor (writable, enumerable, configurable).
+// Set sets an own property. If an accessor (getter/setter) descriptor already exists
+// on this object or its prototype chain, the setter is invoked instead of overwriting.
 func (v *JSValue) Set(name string, value *JSValue) {
+	// Check own properties first for an accessor descriptor
+	if v.properties != nil {
+		if desc, ok := v.properties[name]; ok && desc.Set != nil {
+			desc.Set(value)
+			return
+		}
+	}
+	// Walk prototype chain for inherited accessor descriptors
+	for proto := v.prototype; proto != nil; proto = proto.prototype {
+		if proto.properties != nil {
+			if desc, ok := proto.properties[name]; ok && desc.Set != nil {
+				desc.Set(value)
+				return
+			}
+		}
+	}
+	// No accessor found — create a data descriptor
 	if v.properties == nil {
 		v.properties = make(map[string]*PropertyDescriptor)
 	}

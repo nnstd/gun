@@ -83,7 +83,8 @@ func TestArrayPush(t *testing.T) {
 func TestNewTypeError(t *testing.T) {
 	ts := `function fail(): void { throw new TypeError("bad input"); }`
 	out := compile(t, ts)
-	assertContains(t, out, `errors.New("bad input")`)
+	assertContains(t, out, `jserror.TypeError.Call(`)
+	assertNotContains(t, out, `errors.New`)
 }
 
 func TestNumberIsSafeInteger(t *testing.T) {
@@ -351,6 +352,7 @@ func TestErrorCallNoUnusedImport(t *testing.T) {
 	ts := `function f(msg) { return Error(msg); }`
 	out := compile(t, ts)
 	assertNotContains(t, out, `"errors"`)
+	assertContains(t, out, `jserror.Error.Call(`)
 }
 
 func TestPushOnSliceLocalWrapsLiteralArgs(t *testing.T) {
@@ -399,4 +401,54 @@ func TestJSValueFunctionFromGetChainUsesCall(t *testing.T) {
 	ts := `function f(obj) { return obj.method(42); }`
 	out := compile(t, ts)
 	assertContains(t, out, "obj.Method(")
+}
+
+func TestNewErrorUsesJserror(t *testing.T) {
+	ts := `function fail() { throw new Error("bad"); }`
+	out := compile(t, ts)
+	assertContains(t, out, `jserror.Error.Call(`)
+	assertContains(t, out, `runtime/jserror`)
+	assertNotContains(t, out, `errors.New`)
+}
+
+func TestErrorCallUsesJserror(t *testing.T) {
+	ts := `function f(msg) { return Error(msg); }`
+	out := compile(t, ts)
+	assertContains(t, out, `jserror.Error.Call(`)
+}
+
+func TestErrorMessageAccess(t *testing.T) {
+	ts := `function f() {
+		const err = new Error("test");
+		return err.message;
+	}`
+	out := compile(t, ts)
+	assertContains(t, out, `.Get("message")`)
+}
+
+func TestErrorStackTraceLimit(t *testing.T) {
+	ts := `Error.stackTraceLimit = 0;`
+	out := compile(t, ts)
+	assertContains(t, out, `jserror.Error`)
+	assertContains(t, out, `Set("stackTraceLimit"`)
+}
+
+func TestErrorPrepareStackTrace(t *testing.T) {
+	ts := `Error.prepareStackTrace = (err, stack) => stack;`
+	out := compile(t, ts)
+	assertContains(t, out, `jserror.Error`)
+	assertContains(t, out, `Set("prepareStackTrace"`)
+}
+
+func TestErrorCaptureStackTrace(t *testing.T) {
+	ts := `const obj = {}; Error.captureStackTrace(obj);`
+	out := compile(t, ts)
+	assertContains(t, out, `jserror.Error`)
+	assertContains(t, out, `captureStackTrace`)
+}
+
+func TestErrorMemberAccess(t *testing.T) {
+	ts := `const limit = Error.stackTraceLimit;`
+	out := compile(t, ts)
+	assertContains(t, out, `jserror.Error.Get("stackTraceLimit")`)
 }

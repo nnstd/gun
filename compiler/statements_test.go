@@ -112,7 +112,8 @@ func TestForLoopInitUsesShortVarDecl(t *testing.T) {
 func TestThrowStatement(t *testing.T) {
 	ts := `function fail(): void { throw new Error("boom"); }`
 	out := compile(t, ts)
-	assertContains(t, out, `panic(errors.New("boom"))`)
+	assertContains(t, out, `panic(jserror.Error.Call(`)
+	assertNotContains(t, out, `errors.New`)
 }
 
 func TestTryCatch(t *testing.T) {

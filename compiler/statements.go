@@ -79,7 +79,7 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 						memObj := leftNode.ChildByFieldName("object")
 						memProp := leftNode.ChildByFieldName("property")
 						if memObj != nil && memProp != nil {
-							isJSV := memObj.Kind() == "this" || (memObj.Kind() == "identifier" && t.isUntypedLocal(memObj.Utf8Text(t.source))) || t.nodeReturnsJSValue(memObj)
+							isJSV := memObj.Kind() == "this" || (memObj.Kind() == "identifier" && t.isUntypedLocal(memObj.Utf8Text(t.source))) || t.nodeReturnsJSValue(memObj) || (memObj.Kind() == "identifier" && isErrorType(memObj.Utf8Text(t.source)))
 							if memObj.Kind() == "this" || (memObj.Kind() == "identifier" && memObj.Utf8Text(t.source) == "this") {
 								isJSV = true
 							}
