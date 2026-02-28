@@ -788,20 +788,11 @@ func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName
 				fmt.Fprintf(os.Stderr, "transpiling node_module %s → %s\n", pkgName, sanitized)
 			}
 
-			// Transpile the entry file
-			outFile := filepath.Join(outDir, strings.TrimSuffix(filepath.Base(entryPath), filepath.Ext(entryPath))+".go")
-			if err := transpileFile(entryPath, outFile, sanitized, moduleName, verbose, true); err != nil {
+			// Discover all files in this package and compile together
+			allPkgFiles, err := transpileNodeModuleAsPackage(entryPath, outDir, moduleName, sanitized, verbose)
+			if err != nil {
 				return fmt.Errorf("transpile node_module %s: %w", pkgName, err)
 			}
-
-			// Transpile relative imports within the package
-			pkgSourceFiles, err := transpileNodeModuleRelativeImports(entryPath, outDir, moduleName, sanitized, verbose)
-			if err != nil {
-				return fmt.Errorf("transpile node_module %s relative imports: %w", pkgName, err)
-			}
-
-			// Collect all files from this package for recursive node_module scanning
-			allPkgFiles := append([]string{entryPath}, pkgSourceFiles...)
 			newSourceFiles = append(newSourceFiles, allPkgFiles...)
 		}
 	}
@@ -811,6 +802,80 @@ func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName
 		return processNodeModuleImports(newSourceFiles, inputDir, tmpDir, moduleName, verbose, visited)
 	}
 	return nil
+}
+
+// transpileNodeModuleAsPackage discovers all files in an npm package and compiles
+// them together using CompilePackage, so cross-file exports are shared.
+func transpileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string, verbose bool) ([]string, error) {
+	// Phase 1: Discover all files in the package
+	files := map[string][]byte{}
+	allPaths := []string{}
+
+	absEntry, _ := filepath.Abs(entryPath)
+	source, err := os.ReadFile(entryPath)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", entryPath, err)
+	}
+	files[absEntry] = source
+	allPaths = append(allPaths, absEntry)
+
+	visited := map[string]bool{absEntry: true}
+	var discover func(string) error
+	discover = func(tsFile string) error {
+		src, err := os.ReadFile(tsFile)
+		if err != nil {
+			return err
+		}
+		for _, imp := range findRelativeImports(src) {
+			resolved, err := resolveImportFile(imp, filepath.Dir(tsFile))
+			if err != nil {
+				return err
+			}
+			absResolved, _ := filepath.Abs(resolved)
+			if visited[absResolved] {
+				continue
+			}
+			visited[absResolved] = true
+			data, err := os.ReadFile(resolved)
+			if err != nil {
+				return err
+			}
+			files[absResolved] = data
+			allPaths = append(allPaths, absResolved)
+			if err := discover(resolved); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := discover(entryPath); err != nil {
+		return nil, err
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "  package %s: %d files\n", pkgName, len(files))
+	}
+
+	// Phase 2: Compile all files together
+	results, err := compiler.CompilePackage(files, pkgName, moduleName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Phase 3: Write results
+	for absPath, output := range results {
+		base := filepath.Base(absPath)
+		goName := strings.TrimSuffix(base, filepath.Ext(base)) + ".go"
+		outFile := filepath.Join(outDir, goName)
+		if verbose {
+			fmt.Fprintf(os.Stderr, "  writing %s\n", outFile)
+		}
+		if err := os.WriteFile(outFile, output, 0644); err != nil {
+			return nil, err
+		}
+	}
+
+	return allPaths, nil
 }
 
 // transpileNodeModuleRelativeImports transpiles relative imports within a node_module package.
