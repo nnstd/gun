@@ -232,6 +232,8 @@ func transformProcessMember(prop string, addImport func(string)) ast.Expr {
 		return selectorExpr(ident("process"), "Stderr")
 	case "versions":
 		return selectorExpr(ident("process"), "Versions")
+	case "version":
+		return selectorExpr(ident("process"), "Version")
 	case "pid":
 		return selectorExpr(ident("process"), "Pid")
 	case "cwd":
@@ -258,10 +260,10 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 		addImport("errors")
 		return ident("errors")
 	case "process":
-		// process as standalone value — return a non-nil *jsvalue.JSValue so it's
-		// truthy in boolean contexts and comparable to nil in optional chaining.
-		addImport("github.com/nnstd/gun/runtime/jsvalue")
-		return callExpr(selectorExpr(ident("jsvalue"), "NewBool"), ident("true"))
+		// process as standalone value — return a JSValue object with process properties
+		// so process?.version, process?.versions etc. work through .Get()
+		addImport("github.com/nnstd/gun/runtime/process")
+		return callExpr(selectorExpr(ident("process"), "AsJSValue"))
 	case "Number":
 		// Number as standalone (used as Number(x) call) — identity for numeric values
 		return ident("float64")

@@ -617,9 +617,13 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			}
 			return callExpr(fun, args...)
 		}
-		// Untyped locals that are NOT hoisted functions hold *jsvalue.JSValue
+		// Untyped locals/pkg vars that are NOT hoisted functions hold *jsvalue.JSValue
 		// which may be a function reference — use .Call() to invoke.
-		if t.isUntypedLocal(fnName) {
+		isPkgUntyped := false
+		if typed, ok := t.pkgVarTyped[fnName]; ok && !typed {
+			isPkgUntyped = true
+		}
+		if t.isUntypedLocal(fnName) || isPkgUntyped {
 			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 			fun := t.transformExpr(fnNode)
 			args := t.transformArgs(argsNode)

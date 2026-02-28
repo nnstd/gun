@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/nnstd/gun/runtime/jsvalue"
 )
 
 // BuiltinModules is the list of known built-in module names.
@@ -27,42 +29,44 @@ func IsBuiltin(name string) bool {
 
 // Meta holds import.meta properties.
 type Meta struct {
-	Url string
+	Url *jsvalue.JSValue
 }
 
 // ImportMeta returns the import.meta object for the current process.
 var ImportMeta = &Meta{
-	Url: func() string {
+	Url: jsvalue.NewString(func() string {
 		exe, err := os.Executable()
 		if err != nil {
 			return ""
 		}
 		return "file://" + exe
-	}(),
+	}()),
 }
 
-// RequireFunc is the type returned by CreateRequire. It loads a module by path
-// and returns its contents. JSON files are parsed into map[string]any;
-// other modules return nil.
-type RequireFunc func(id string) any
-
-// CreateRequire returns a require function anchored at the given filename.
+// CreateRequire returns a require function (as *JSValue) anchored at the given filename.
 // The returned function supports loading JSON files relative to the anchor.
-func CreateRequire(filename string) RequireFunc {
+func CreateRequire(filename *jsvalue.JSValue) *jsvalue.JSValue {
+	fn := ""
+	if filename != nil {
+		fn = filename.String()
+	}
 	// Strip file:// URL scheme if present.
-	filename = strings.TrimPrefix(filename, "file://")
-	base := filepath.Dir(filename)
+	fn = strings.TrimPrefix(fn, "file://")
+	base := filepath.Dir(fn)
 
-	return func(id string) any {
+	return jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		id := ""
+		if len(args) > 0 && args[0] != nil {
+			id = args[0].String()
+		}
+
 		var target string
 		if strings.HasPrefix(id, ".") || strings.HasPrefix(id, "/") {
 			target = filepath.Join(base, id)
 		} else {
-			// Bare specifier — look in node_modules (best-effort).
 			target = filepath.Join(base, "node_modules", id)
 		}
 
-		// Try .json extension if not already present.
 		candidates := []string{target}
 		if filepath.Ext(target) == "" {
 			candidates = append(candidates, target+".json", filepath.Join(target, "index.json"))
@@ -76,12 +80,11 @@ func CreateRequire(filename string) RequireFunc {
 			if strings.HasSuffix(c, ".json") {
 				var v any
 				if json.Unmarshal(data, &v) == nil {
-					return v
+					return jsvalue.From(v)
 				}
 			}
-			// Non-JSON file found — return contents as string.
-			return string(data)
+			return jsvalue.NewString(string(data))
 		}
-		return nil
-	}
+		return jsvalue.NewUndefined()
+	})
 }

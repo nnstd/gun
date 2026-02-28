@@ -47,3 +47,33 @@ func Cwd() *jsvalue.JSValue {
 	dir, _ := stdos.Getwd()
 	return jsvalue.NewString(dir)
 }
+
+// AsJSValue returns a JSValue object representing the process global.
+// Used when `process` is referenced as a standalone value (e.g. `process?.version`).
+func AsJSValue() *jsvalue.JSValue {
+	obj := jsvalue.NewObject()
+	obj.Set("version", Version)
+	obj.Set("versions", Versions)
+	obj.Set("platform", Platform)
+	obj.Set("pid", Pid)
+	obj.Set("argv", Argv)
+	obj.Set("env", jsvalue.ObjectFrom(func() []any {
+		var pairs []any
+		for k, v := range Env {
+			pairs = append(pairs, k, v)
+		}
+		return pairs
+	}()...))
+	obj.Set("cwd", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		return Cwd()
+	}))
+	obj.Set("exit", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		code := jsvalue.NewNumber(0)
+		if len(args) > 0 {
+			code = args[0]
+		}
+		Exit(code)
+		return jsvalue.NewUndefined()
+	}))
+	return obj
+}

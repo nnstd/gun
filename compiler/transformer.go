@@ -170,7 +170,14 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 	switch node.Kind() {
 	case "identifier":
 		name := node.Utf8Text(t.source)
-		return t.isUntypedLocal(name) || t.jsvalueLocals[name]
+		if t.isUntypedLocal(name) || t.jsvalueLocals[name] {
+			return true
+		}
+		// Package-level untyped variables are also JSValue
+		if typed, ok := t.pkgVarTyped[name]; ok && !typed {
+			return true
+		}
+		return false
 	case "subscript_expression":
 		objNode := node.ChildByFieldName("object")
 		if objNode == nil {
