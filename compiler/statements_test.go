@@ -314,3 +314,36 @@ func TestMemberAssignmentOnJSValueUsesSet(t *testing.T) {
 	out := compile(t, ts)
 	assertContains(t, out, `obj.Set("name",`)
 }
+
+func TestModuleExportsParamReassignWrapsLiteral(t *testing.T) {
+	// Function params in module.exports functions are JSValue locals,
+	// so reassigning a literal must wrap it.
+	ts := `module.exports = function f(position) {
+		if (position === undefined) { position = 2; }
+		return position;
+	}`
+	out := compile(t, ts)
+	assertContains(t, out, "func Default(")
+	assertNotContains(t, out, "position = 2")
+	assertContains(t, out, "jsvalue")
+}
+
+func TestModuleExportsFunctionTrailingReturn(t *testing.T) {
+	// module.exports functions with conditional returns need a trailing
+	// return to avoid Go "missing return" errors.
+	ts := `module.exports = function f(x) {
+		if (x) { return x; }
+	}`
+	out := compile(t, ts)
+	assertContains(t, out, "func Default(")
+	assertContains(t, out, "return nil")
+}
+
+func TestModuleExportsFunctionParamIsLocal(t *testing.T) {
+	// Parameters should be tracked as locals so member access uses .Get().
+	ts := `module.exports = function f(opts) {
+		return opts.name;
+	}`
+	out := compile(t, ts)
+	assertContains(t, out, `.Get("name")`)
+}

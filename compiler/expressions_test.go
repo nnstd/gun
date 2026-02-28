@@ -497,3 +497,45 @@ func TestUntypedLocalCallUsesJSValueCall(t *testing.T) {
 	out := compile(t, ts)
 	assertContains(t, out, ".Call(")
 }
+
+func TestChainedStringConcatAllUsesJSValueAdd(t *testing.T) {
+	// Chained + with JSValue operands should all become jsvalue.Add, not native +.
+	ts := `function f(x) { return "a" + x + "b"; }`
+	out := compile(t, ts)
+	assertNotContains(t, out, `+ "b"`)
+	assertContains(t, out, "jsvalue.Add(jsvalue.Add(")
+}
+
+func TestChainedConcatWithMemberAccessUsesJSValueAdd(t *testing.T) {
+	// String concat involving member access on globals should use jsvalue.Add.
+	ts := `function f(pos) {
+		return "was: " + pos + " limit: " + Error.stackTraceLimit;
+	}`
+	out := compile(t, ts)
+	assertNotContains(t, out, `+ "`)
+	assertContains(t, out, "jsvalue.Add(")
+}
+
+func TestNewExpressionPropertyUsesGet(t *testing.T) {
+	// Property access on new expression results should use .Get() not Go field access.
+	ts := `function f() { return new Error("x").message; }`
+	out := compile(t, ts)
+	assertContains(t, out, `.Get("message")`)
+	assertNotContains(t, out, ".Message")
+}
+
+func TestNewExpressionPropertyStackUsesGet(t *testing.T) {
+	// new Error().stack → .Get("stack") not .Stack
+	ts := `function f() { const s = new Error().stack; return s; }`
+	out := compile(t, ts)
+	assertContains(t, out, `.Get("stack")`)
+	assertNotContains(t, out, ".Stack")
+}
+
+func TestNewExpressionChainedPropertyAccess(t *testing.T) {
+	// Chained property access on new expression should use .Get()
+	ts := `function f() { return new Error("x").name; }`
+	out := compile(t, ts)
+	assertContains(t, out, `.Get("name")`)
+	assertNotContains(t, out, ".Name")
+}
