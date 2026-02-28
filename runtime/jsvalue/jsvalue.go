@@ -1258,8 +1258,16 @@ func GtE(a, b *JSValue) *JSValue {
 // ---------------------------------------------------------------------------
 
 // Not implements JavaScript ! operator (returns *JSValue boolean).
-func Not(a *JSValue) *JSValue {
-	return NewBool(!Truthy(a))
+// Accepts *JSValue or native bool.
+func Not(a any) *JSValue {
+	switch v := a.(type) {
+	case *JSValue:
+		return NewBool(!Truthy(v))
+	case bool:
+		return NewBool(!v)
+	default:
+		return NewBool(true) // falsy for unknown types
+	}
 }
 
 // And implements JavaScript && operator (short-circuit: returns a if falsy, else b).

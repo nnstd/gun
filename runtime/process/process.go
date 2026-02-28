@@ -75,5 +75,18 @@ func AsJSValue() *jsvalue.JSValue {
 		Exit(code)
 		return jsvalue.NewUndefined()
 	}))
+	obj.Set("nextTick", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		// In Go, nextTick is executed synchronously (no event loop)
+		if len(args) > 0 && args[0] != nil {
+			args[0].Call(args[1:]...)
+		}
+		return jsvalue.NewUndefined()
+	}))
+	obj.Set("emitWarning", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		// No-op for now
+		return jsvalue.NewUndefined()
+	}))
+	exe, _ := stdos.Executable()
+	obj.Set("execPath", jsvalue.NewString(exe))
 	return obj
 }

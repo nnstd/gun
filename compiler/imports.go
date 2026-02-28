@@ -65,11 +65,10 @@ func init() {
 
 	registerModule("http", "net/http", "http", nil)
 	registerModule("https", "net/http", "http", nil)
-	registerModule("url", "net/url", "url", map[string]string{
-		"format": "String",
-	})
+	registerModule("url", "github.com/nnstd/gun/runtime/url", "url", nil)
 	registerModule("util", "fmt", "fmt", map[string]string{
-		"format": "Sprintf",
+		"format":  "Sprintf",
+		"inspect": "Sprint",
 	})
 	registerModule("events", "sync", "sync", nil)
 	registerModule("stream", "io", "io", nil)
@@ -80,7 +79,9 @@ func init() {
 		"execSync": "Command",
 		"spawn":    "Command",
 	})
-	registerModule("assert", "testing", "testing", nil)
+	registerModule("assert", "github.com/nnstd/gun/runtime/assert", "assert", map[string]string{
+		"strict": "", // namespace import for assert/strict
+	})
 	registerModule("module", "github.com/nnstd/gun/runtime/module", "module", nil)
 	registerModule("get-caller-file", "github.com/nnstd/gun/runtime/get_caller_file", "get_caller_file", nil)
 	registerModule("cliui", "github.com/nnstd/gun/runtime/cliui", "cliui", nil)
