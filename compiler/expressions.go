@@ -411,6 +411,26 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 
 			args := t.transformArgs(argsNode)
 
+			// Handle .call() — fn.call(thisArg, arg1, arg2) → fn.Call(thisArg, arg1, arg2)
+			// Special case: Object.prototype.hasOwnProperty.call(obj, prop)
+			// → jsvalue.NewBool(obj.HasOwnProperty(prop.String()))
+			if prop == "call" {
+				if isObjectPrototypeHasOwnProperty(objNode, t.source) && len(args) >= 2 {
+					t.addImport("fmt")
+					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+					return callExpr(selectorExpr(ident("jsvalue"), "NewBool"),
+						callExpr(selectorExpr(args[0], "HasOwnProperty"), callExpr(selectorExpr(ident("fmt"), "Sprint"), args[1])))
+				}
+				// Generic .call(): fn.call(thisArg, ...args) → fn.Call(thisArg, ...args)
+				obj := t.transformExpr(objNode)
+				for i, a := range args {
+					args[i] = jsvalueWrapLit(a)
+				}
+				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+				return callExpr(selectorExpr(obj, "Call"), args...)
+			}
+
+
 			// For Math calls, pre-coerce JSValue args to .Number() so that
 			// math.Min/Max/Floor/etc. receive float64 values.
 			if objText == "Math" && argsNode != nil {
@@ -647,6 +667,16 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 		}
 	}
 
+	// If the function expression is a JSValue (from .Get() chain, etc.),
+	// use .Call() to invoke it instead of Go function call syntax.
+	if isAlreadyJSValue(fun) {
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		for i, a := range args {
+			args[i] = jsvalueWrapLit(a)
+		}
+		return callExpr(selectorExpr(fun, "Call"), args...)
+	}
+
 	return callExpr(fun, args...)
 }
 
@@ -661,6 +691,33 @@ func isKnownGlobalObject(name string) bool {
 		return true
 	}
 	return false
+}
+
+// isObjectPrototypeHasOwnProperty checks if a tree-sitter node represents
+// the pattern Object.prototype.hasOwnProperty (a 3-level member chain).
+func isObjectPrototypeHasOwnProperty(node *sitter.Node, source []byte) bool {
+	if node == nil || node.Kind() != "member_expression" {
+		return false
+	}
+	// node = Object.prototype.hasOwnProperty
+	prop := node.ChildByFieldName("property")
+	if prop == nil || prop.Utf8Text(source) != "hasOwnProperty" {
+		return false
+	}
+	// inner = Object.prototype
+	inner := node.ChildByFieldName("object")
+	if inner == nil || inner.Kind() != "member_expression" {
+		return false
+	}
+	innerProp := inner.ChildByFieldName("property")
+	if innerProp == nil || innerProp.Utf8Text(source) != "prototype" {
+		return false
+	}
+	innerObj := inner.ChildByFieldName("object")
+	if innerObj == nil {
+		return false
+	}
+	return innerObj.Utf8Text(source) == "Object"
 }
 
 // isRuntimePackage returns true if the name is a known Gun runtime package alias.

@@ -238,8 +238,10 @@ func transformProcessMember(prop string, addImport func(string)) ast.Expr {
 		return selectorExpr(ident("process"), "Pid")
 	case "cwd":
 		return selectorExpr(ident("process"), "Cwd")
+	default:
+		// Unknown process properties → process.AsJSValue().Get("prop")
+		return callExpr(selectorExpr(callExpr(selectorExpr(ident("process"), "AsJSValue")), "Get"), stringLit(prop))
 	}
-	return nil
 }
 
 // mapIdentifier maps known TS global identifiers to their Go equivalents.
