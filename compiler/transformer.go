@@ -355,6 +355,32 @@ func (t *Transformer) isUntypedLocal(name string) bool {
 	return false
 }
 
+// isInCurrentScopeAsNonSlice returns true if the name is declared in a DEEPER
+// scope than where it was registered as a jsvalueSliceLocal. This prevents
+// wrapping when an inner function's regular *jsvalue.JSValue parameter
+// shadows an outer function's rest param with the same name.
+func (t *Transformer) isInCurrentScopeAsNonSlice(name string) bool {
+	if len(t.localScopes) < 2 {
+		return false
+	}
+	// If the variable appears in a newer/inner scope than the one where
+	// it was first registered, it's a shadowing parameter.
+	// Find the outermost scope where this name appears.
+	for i := 0; i < len(t.localScopes)-1; i++ {
+		if _, ok := t.localScopes[i][name]; ok {
+			// Found in an outer scope. Check if it also appears in an inner scope.
+			for j := i + 1; j < len(t.localScopes); j++ {
+				if _, ok2 := t.localScopes[j][name]; ok2 {
+					// Name is redeclared in a deeper scope — it's shadowed
+					return true
+				}
+			}
+			return false
+		}
+	}
+	return false
+}
+
 // jsValueType returns *jsvalue.JSValue and registers the import.
 func (t *Transformer) jsValueType() ast.Expr {
 	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")

@@ -484,13 +484,14 @@ func TestJSValueLenInBoolContext(t *testing.T) {
 }
 
 func TestJSValueSliceMethodCallWrapped(t *testing.T) {
+	// Collection methods on []*jsvalue.JSValue slices work directly
+	// because runtime functions accept any (handles []*JSValue internally).
 	ts := `function f() {
 	const items = [];
 	items.forEach((x) => { return x; });
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.NewArray(items...)")
-	assertContains(t, out, ".ForEach(")
+	assertContains(t, out, "jsvalue.ForEach(")
 }
 
 func TestTypedLocalIndexOnJSValueUsesGet(t *testing.T) {

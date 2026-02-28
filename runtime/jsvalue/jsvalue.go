@@ -394,9 +394,22 @@ func Truthy(v *JSValue) bool {
 	}
 }
 
+// asArray converts any to *JSValue, handling []*JSValue from Go rest params.
+func asArray(v any) *JSValue {
+	switch val := v.(type) {
+	case *JSValue:
+		return val
+	case []*JSValue:
+		return NewArray(val...)
+	default:
+		return nil
+	}
+}
+
 // Map applies fn to each element and returns a new array.
 // fn can be func(*JSValue) *JSValue or func(*JSValue, *JSValue) *JSValue (value, index).
-func Map(arr *JSValue, fn any) *JSValue {
+func Map(arrAny any, fn any) *JSValue {
+	arr := asArray(arrAny)
 	if arr == nil || arr.arrayVal == nil {
 		return NewArray()
 	}
@@ -416,7 +429,8 @@ func Map(arr *JSValue, fn any) *JSValue {
 
 // Filter returns a new array containing elements for which fn returns truthy.
 // fn can be func(*JSValue) bool or func(*JSValue) *JSValue.
-func Filter(arr *JSValue, fn any) *JSValue {
+func Filter(arrAny any, fn any) *JSValue {
+	arr := asArray(arrAny)
 	if arr == nil || arr.arrayVal == nil {
 		return NewArray()
 	}
@@ -446,7 +460,8 @@ func Filter(arr *JSValue, fn any) *JSValue {
 
 // ForEach calls fn for each element in the array.
 // fn can be func(*JSValue), func(*JSValue) *JSValue, or 2-param variants.
-func ForEach(arr *JSValue, fn any) {
+func ForEach(arrAny any, fn any) {
+	arr := asArray(arrAny)
 	if arr == nil || arr.arrayVal == nil {
 		return
 	}
@@ -477,7 +492,8 @@ func ForEach(arr *JSValue, fn any) {
 }
 
 // Find returns the first element for which fn returns truthy, or undefined.
-func Find(arr *JSValue, fn any) *JSValue {
+func Find(arrAny any, fn any) *JSValue {
+	arr := asArray(arrAny)
 	if arr == nil || arr.arrayVal == nil {
 		return NewUndefined()
 	}
@@ -513,7 +529,8 @@ func Find(arr *JSValue, fn any) *JSValue {
 }
 
 // Some returns true if at least one element satisfies the predicate.
-func Some(arr *JSValue, fn any) *JSValue {
+func Some(arrAny any, fn any) *JSValue {
+	arr := asArray(arrAny)
 	if arr == nil || arr.arrayVal == nil {
 		return NewBool(false)
 	}
@@ -549,7 +566,8 @@ func Some(arr *JSValue, fn any) *JSValue {
 }
 
 // Every returns true if all elements satisfy the predicate.
-func Every(arr *JSValue, fn any) *JSValue {
+func Every(arrAny any, fn any) *JSValue {
+	arr := asArray(arrAny)
 	if arr == nil || arr.arrayVal == nil {
 		return NewBool(true)
 	}
@@ -577,7 +595,8 @@ func Every(arr *JSValue, fn any) *JSValue {
 }
 
 // Reduce applies fn against an accumulator and each element. Returns the final accumulated value.
-func Reduce(arr *JSValue, fn any, initial ...*JSValue) *JSValue {
+func Reduce(arrAny any, fn any, initial ...*JSValue) *JSValue {
+	arr := asArray(arrAny)
 	if arr == nil || arr.arrayVal == nil {
 		if len(initial) > 0 {
 			return initial[0]
@@ -788,7 +807,9 @@ func Concat(arr *JSValue, items ...*JSValue) *JSValue {
 }
 
 // Push appends items to array (returns new array in Go).
-func Push(arr *JSValue, items ...*JSValue) *JSValue {
+// arr accepts *JSValue or []*JSValue (from rest params).
+func Push(arrAny any, items ...*JSValue) *JSValue {
+	arr := asArray(arrAny)
 	if arr == nil || arr.arrayVal == nil {
 		return NewArray(items...)
 	}

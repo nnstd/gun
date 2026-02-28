@@ -506,7 +506,8 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 
 					// Handle map/filter/forEach with package-level functions
-					if prop == "map" || prop == "filter" || prop == "forEach" {
+					if prop == "map" || prop == "filter" || prop == "forEach" ||
+						prop == "find" || prop == "some" || prop == "every" || prop == "reduce" {
 						funcName := capitalize(prop)
 						return callExpr(selectorExpr(ident("jsvalue"), funcName), append([]ast.Expr{obj}, args...)...)
 					}
@@ -528,17 +529,12 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 						}
 					}
 					coercedArgs := t.coerceJSValueArgs(args, argsNode)
-					// push() on a []*jsvalue.JSValue slice needs args wrapped
-					if prop == "push" && objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objText] {
+					// []*jsvalue.JSValue slice locals dispatch through package-level functions.
+					// Runtime accepts any for array param, handling []*JSValue internally.
+					if objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objText] && t.builtins.IsArrayMethod(prop) {
 						t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-						for i, a := range coercedArgs {
-							coercedArgs[i] = callExpr(selectorExpr(ident("jsvalue"), "From"), a)
-						}
-					}
-					// Collection methods on JSValue slice locals need the receiver wrapped
-					if t.builtins.IsArrayMethod(prop) && objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objText] {
-						t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-						obj = callExpr(selectorExpr(ident("jsvalue"), "NewArray"), &ast.Ident{Name: objText + "..."})
+						funcName := capitalize(prop)
+						return callExpr(selectorExpr(ident("jsvalue"), funcName), append([]ast.Expr{obj}, coercedArgs...)...)
 					}
 					if r := transformBuiltinMethod(obj, prop, coercedArgs, t.addImport); r != nil {
 						return r
@@ -552,10 +548,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 				obj := t.transformExpr(objNode)
 				// JSValue slice locals ([]*jsvalue.JSValue) don't have JSValue methods;
 				// wrap with jsvalue.NewArray() to convert to *jsvalue.JSValue first.
-				if t.jsvalueSliceLocals[objText] {
-					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-					obj = callExpr(selectorExpr(ident("jsvalue"), "NewArray"), &ast.Ident{Name: objText + "..."})
-				}
+
 				return callExpr(selectorExpr(obj, capitalize(prop)), args...)
 			}
 
