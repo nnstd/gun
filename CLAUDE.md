@@ -36,12 +36,13 @@ The transformer is split across multiple files by concern:
 - `declarations.go` — functions, variables, interfaces, enums, type aliases, destructuring
 - `statements.go` — control flow, loops, try/catch→defer/recover, assignments
 - `expressions.go` — literals, operators, calls, arrow functions, template strings, object literals
-- `types.go` — TS→Go type mapping (e.g. `number`→`float64`, `T | null`→`*T`)
+- `types.go` — TS→Go type mapping (currently used only for interfaces/structs; function params/returns all use `*jsvalue.JSValue`)
 - `imports.go` — module resolution with `knownModules`/`knownSymbols` tables, relative import handling via `resolveModulePath`
 - `classes.go` — class→struct with constructor function and receiver methods
 - `builtin_*.go` — per-API transformers for console, Math, JSON, strings, collections
 - `modules.go` — extensible `ModuleCallTransformer` registry for module-specific method call handling (e.g. Hono routes)
-- `helpers.go` — Go AST builder helpers (`ident()`, `funcDecl()`, `varDecl()`, `capitalize()`, etc.)
+- `helpers.go` — Go AST builder helpers (`ident()`, `funcDecl()`, `varDecl()`, `capitalize()`, `jsvalueWrapLit()`, etc.)
+- `operators.go` — binary/unary operator mapping and `jsvalueOpName()` for JSValue operation helpers
 
 Key design patterns:
 - Exported TS names get capitalized for Go visibility (`capitalize()` in helpers.go)
@@ -51,315 +52,110 @@ Key design patterns:
 
 ### Runtime
 
-`runtime/` provides Go packages that implement Node.js-compatible APIs:
+`runtime/` provides Go packages that implement Node.js-compatible APIs. **All runtime functions accept and return `*jsvalue.JSValue`:**
 - `runtime/fs` — `ReadFileSync`, `WriteFileSync`, `ExistsSync`, etc. wrapping `os` package
 - `runtime/path` — `Join`, `Basename`, etc. wrapping `path/filepath`
 - `runtime/os` — `Homedir`, `Platform`, etc.
+- `runtime/json` — `Parse`, `Stringify` for JSON handling
+- `runtime/process` — `Argv`, `Env`, `Cwd`, `Exit`, `AsJSValue` for the process global
+- `runtime/module` — `CreateRequire`, `ImportMeta` for module system
 - `runtime/hono` — minimal Hono web framework with routing, `Context`, and `http.Handler` implementation
-- `runtime/jsvalue` — `JSValue` runtime type modeling JavaScript value semantics: typed factories, prototype chain, property descriptors
+- `runtime/jsvalue` — `JSValue` runtime type modeling JavaScript value semantics
 
-## Transpiler Practices and Conventions
+## All-JSValue Architecture
 
-### Wrapper Function Approach
+The transpiler uses an **all-JSValue** architecture where all variables, function parameters, and return values are `*jsvalue.JSValue`. TypeScript type annotations are ignored for code generation — they all become `*jsvalue.JSValue`.
 
-When implementing transformations for JavaScript/TypeScript methods, prefer **runtime wrapper functions** over inline code generation:
+### Core Principles
 
-**❌ Avoid:** Generating verbose inline IIFEs or complex expressions in the compiler
-```go
-// Bad: 30+ lines of IIFE generation in compiler
-return &ast.CallExpr{
-    Fun: &ast.FuncLit{
-        Type: &ast.FuncType{...},
-        Body: &ast.BlockStmt{
-            List: []ast.Stmt{arrDecl, ifStmt, returnUndef},
-        },
-    },
-}
-```
+1. **All variables are `*jsvalue.JSValue`** — no native Go types for transpiled variables
+2. **All function parameters are `*jsvalue.JSValue`** — TS type annotations are ignored
+3. **All function return values are `*jsvalue.JSValue`** — when the function has return statements
+4. **Operations unwrap temporarily** — e.g. `jsvalue.Add(a, b)` internally does `a.Number() + b.Number()`
+5. **Results are re-wrapped** — operations return `*jsvalue.JSValue`
+6. **Runtime functions accept `*jsvalue.JSValue`** — `fs.ReadFileSync(path *jsvalue.JSValue)`
 
-**✅ Prefer:** Simple wrapper function calls
-```go
-// Good: 1 line in compiler, complexity in runtime
-return callExpr(selectorExpr(ident("jsvalue"), "Pop"), obj)
-```
+### JSValue Operation Helpers
 
-### Wrapper Function Design Rules
-
-When adding wrapper functions to `runtime/jsvalue/`:
-
-1. **Return Type Consistency:** Always return `*jsvalue.JSValue`, never primitive types
-   ```go
-   // ✅ Correct
-   func Includes(arr *JSValue, val *JSValue) *JSValue {
-       return NewBool(result)
-   }
-
-   // ❌ Wrong - causes type mismatches in transpiled code
-   func Includes(arr *JSValue, val *JSValue) bool {
-       return result
-   }
-   ```
-
-2. **Nil Safety:** All wrapper functions must handle nil inputs gracefully
-   ```go
-   func Pop(arr *JSValue) *JSValue {
-       if arr == nil || arr.arrayVal == nil {
-           return NewUndefined()
-       }
-       // ... implementation
-   }
-   ```
-
-3. **JavaScript Semantics:** Maintain JS behavior (undefined for empty arrays, negative indices, truthiness, etc.)
-   ```go
-   func Slice(arr *JSValue, args ...int) *JSValue {
-       // Handle negative indices like JavaScript
-       if idx < 0 {
-           idx = length + idx
-       }
-       // ...
-   }
-   ```
-
-4. **Package-Level Functions:** Implement as package-level functions, not methods on `*JSValue`
-   ```go
-   // ✅ Correct
-   func Pop(arr *JSValue) *JSValue
-
-   // ❌ Wrong - harder to call from compiler
-   func (v *JSValue) Pop() *JSValue
-   ```
-
-### Compiler Transformation Rules
-
-When updating compiler transformations to use wrapper functions:
-
-1. **Wrap Arguments:** Always wrap literal arguments with `jsvalue.From()` when calling wrapper functions
-   ```go
-   // ✅ Correct
-   wrappedArg := callExpr(selectorExpr(ident("jsvalue"), "From"), args[0])
-   return callExpr(selectorExpr(ident("jsvalue"), "Includes"), obj, wrappedArg)
-
-   // ❌ Wrong - causes "cannot use 42 as *jsvalue.JSValue" errors
-   return callExpr(selectorExpr(ident("jsvalue"), "Includes"), obj, args[0])
-   ```
-
-2. **Import Management:** Add the jsvalue import when using wrapper functions
-   ```go
-   addImport("github.com/nnstd/gun/runtime/jsvalue")
-   ```
-
-3. **Fallback for Typed Arrays:** Keep native Go transformations for typed arrays
-   ```go
-   if isJSValueReceiver || isJSValueMethodCall(obj) {
-       // Use jsvalue wrapper
-       return callExpr(selectorExpr(ident("jsvalue"), "Pop"), obj)
-   }
-   // For typed arrays: arr[len(arr)-1]
-   return &ast.IndexExpr{X: obj, Index: lastIndex}
-   ```
-
-### When to Add Wrapper Functions
-
-Add wrapper functions when:
-- The transformation generates 10+ lines of code
-- The transformation uses IIFEs for control flow
-- The same logic is needed in multiple places
-- The operation has complex JavaScript semantics (negative indices, truthiness, etc.)
-
-Keep inline transformations when:
-- The transformation is 1-2 lines
-- It's a direct mapping to Go stdlib (e.g., `Math.floor` → `math.Floor`)
-- No special JavaScript semantics are needed
-
-### Testing Wrapper Functions
-
-1. **Runtime tests** in `runtime/jsvalue/jsvalue_test.go`:
-   - Test nil safety
-   - Test edge cases (empty arrays, negative indices, etc.)
-   - Test JavaScript semantics
-
-2. **Compiler tests** in `compiler/builtins_test.go`:
-   - Verify wrapper function calls are generated
-   - Check that arguments are properly wrapped
-   - Ensure no IIFEs are generated
-
-## JSValue Usage Patterns
-
-The `runtime/jsvalue` package provides the `JSValue` type that models JavaScript value semantics in Go. Understanding when and how to use JSValue is critical for correct transpilation.
-
-### When to Use JSValue vs Native Go Types
-
-**Use JSValue (`*jsvalue.JSValue`) for:**
-- Untyped function parameters (no TypeScript type annotation)
-- Destructured variables from objects/arrays
-- Variables that may hold different types at runtime
-- Return values from functions without explicit return type annotations
-- Default values in destructuring patterns
-
-**Use native Go types for:**
-- Variables with explicit TypeScript type annotations (`: number`, `: string`, `: boolean`)
-- Function parameters with type annotations
-- Function return types with explicit annotations
-- Literals in regular variable declarations
-
-### Boolean Literal Handling
-
-Boolean literals have context-dependent behavior:
-
-**Regular variable declarations** → Plain Go booleans:
-```typescript
-const flag = false;
-if (!flag) { return true; }
-```
-```go
-var flag = false
-if !flag {
-    return true
-}
-```
-
-**Destructuring with defaults** → JSValue:
-```typescript
-const { enabled = true } = options;
-if (!enabled) { return "disabled"; }
-```
-```go
-enabled := jsvalue.NewBool(true)
-if !enabled.Bool() {
-    return "disabled"
-}
-```
-
-**Key principle:** Destructured fields are always JSValue because they come from objects that may have undefined properties.
-
-### Type Coercion Patterns
-
-**Augmented assignment with numeric types:**
-```typescript
-let width: number = 0;
-width += someJSValue;
-```
-```go
-var width float64 = 0
-width += someJSValue.Number()
-```
-
-**Augmented assignment with string types:**
-```typescript
-let result = "";
-result += someJSValue;
-```
-```go
-var result = ""
-result += fmt.Sprint(someJSValue)
-```
-
-**Negation operator on JSValue:**
-```typescript
-if (!jsValue) { ... }
-```
-```go
-if !jsValue.Bool() { ... }
-```
-
-**Comparison operators:**
-```typescript
-if (jsValue === false) { ... }
-```
-```go
-if jsValue.Bool() == false { ... }
-```
-
-### Destructuring and JSValue
-
-All destructured variables are tracked as JSValue, regardless of their default values:
-
-```typescript
-function f(options) {
-    const { name, age = 0, enabled = false } = options;
-    // name, age, and enabled are all JSValue
-}
-```
+Binary and unary operations on JSValue use package-level helper functions instead of inline type coercion:
 
 ```go
-func f(options *jsvalue.JSValue) *jsvalue.JSValue {
-    var name = options.Name
-    var age = jsvalue.NewNumber(0)
-    var enabled = jsvalue.NewBool(false)
-    // All three are *jsvalue.JSValue
-}
+// Arithmetic: x + y → jsvalue.Add(x, y)
+// Comparison: x === y → jsvalue.Eq(x, y)
+// Logical:    x || y → jsvalue.Or(x, y)
+// Unary:      !x → jsvalue.Not(x)
+// Typeof:     typeof x → jsvalue.TypeOf(x)
 ```
 
-**Why?** Because `options` might not have these properties, so the variables must be able to hold the default value OR the property value, both as JSValue.
+Available operation helpers in `runtime/jsvalue/`:
+- **Arithmetic:** `Add`, `Sub`, `Mul`, `Div`, `Mod`, `Neg`, `Inc`, `Dec`
+- **Bitwise:** `BitNot`, `BitAnd`, `BitOr`, `BitXor`, `Shl`, `Shr`, `UShr`
+- **Comparison:** `Eq`, `NEq`, `Lt`, `Gt`, `LtE`, `GtE`
+- **Logical:** `And`, `Or`, `Not`, `Nullish`
+- **Type:** `TypeOf`, `IsArrayValue`
 
-### Function Return Types
+### JSValue String/Array Methods
 
-**Explicit return type annotation** → Use the annotated type:
-```typescript
-function isOk(x: number): boolean { return x > 0; }
-```
+All string and array wrapper functions accept `*jsvalue.JSValue` for ALL parameters:
+
 ```go
-func isOk(x float64) bool {
-    return x > 0
-}
+// All args are *JSValue:
+func Replace(val, pattern, replacement *JSValue) *JSValue
+func Split(val, sep *JSValue) *JSValue
+func Join(arr, sep *JSValue) *JSValue
+func Slice(arr *JSValue, args ...*JSValue) *JSValue
+func CharAt(val, index *JSValue) *JSValue
+func Substring(str, start *JSValue, end ...*JSValue) *JSValue
+
+// Collection methods:
+func Map(arr *JSValue, fn any) *JSValue
+func Filter(arr *JSValue, fn any) *JSValue
+func ForEach(arr *JSValue, fn any)
+func Find(arr *JSValue, fn any) *JSValue
+func Some(arr *JSValue, fn any) *JSValue
+func Every(arr *JSValue, fn any) *JSValue
+func Reduce(arr *JSValue, fn any, initial ...*JSValue) *JSValue
 ```
 
-**No return type annotation** → Default to JSValue:
-```typescript
-function process(x) { return x; }
-```
+### Boolean Contexts
+
+In Go `if`/`for` conditions, JSValue expressions use `.Bool()` for truthiness:
+
 ```go
-func process(x *jsvalue.JSValue) *jsvalue.JSValue {
-    return x
-}
+// JSValue in boolean context → .Bool()
+if jsvalue.Not(flag).Bool() { ... }
+if jsvalue.Lt(a, b).Bool() { ... }
+if jsvalue.And(x, y).Bool() { ... }
 ```
 
-The compiler tracks function return types in `funcReturnTypes map[string]string` so that `ensureBool()` can avoid adding `!= nil` checks to functions that return `bool`.
+The `ensureBool()` function in the compiler handles this conversion. It calls `.Bool()` for JSValue expressions and passes through native Go booleans unchanged.
 
-### Truthiness Semantics
+### Wrapping Literal Arguments
 
-JavaScript truthiness is implemented via the `.Bool()` method on JSValue:
+When calling jsvalue functions or runtime package functions, literal arguments are wrapped using `jsvalueWrapLit()`:
 
-**Falsy values in JavaScript:**
-- `false`, `0`, `""`, `null`, `undefined`, `NaN`
-
-**Truthy values:**
-- Everything else, including `[]`, `{}`, `"0"`, `"false"`
-
-**Implementation:**
 ```go
-if !jsValue.Bool() {
-    // Handles all falsy cases correctly
-}
+// String literal → jsvalue.NewString("...")
+// Int literal → jsvalue.NewNumber(float64(...))
+// Bool literal → jsvalue.NewBool(...)
+// Negative literal → jsvalue.NewNumber(float64(-N))
+// Unknown expression → jsvalue.From(expr)
 ```
 
-**Never use nil checks for truthiness:**
-```go
-// ❌ Wrong - only checks if pointer is nil
-if jsValue == nil { ... }
+### Property Access on JSValue
 
-// ✅ Correct - checks JavaScript truthiness
-if !jsValue.Bool() { ... }
-```
+- **Local JSValue variables:** `obj.foo` → `obj.Get("foo")`
+- **Package-level untyped vars:** `obj.foo` → `obj.Get("foo")`
+- **Cross-file package vars:** `Enum.VALUE` → `Enum.Get("VALUE")`
+- **Typed struct locals:** `parser.parse(x)` → `parser.Parse(x)` (capitalized)
 
-### Common Pitfalls
+### Key Tracking Maps in Transformer
 
-1. **Comparing JSValue to nil for truthiness**
-   - `jsValue == nil` only checks if the pointer is nil
-   - Use `!jsValue.Bool()` for JavaScript truthiness
-
-2. **Forgetting to wrap default values in destructuring**
-   - Default values must be wrapped: `jsvalue.NewBool(false)`, not `false`
-   - The `wrapInJSValue()` helper handles this automatically
-
-3. **Adding `!= nil` to boolean function calls**
-   - Functions with `: boolean` return type return `bool`, not `*jsvalue.JSValue`
-   - Check `funcReturnTypes` before adding nil checks
-
-4. **Using wrong coercion for augmented assignment**
-   - Numeric types need `.Number()`, not `fmt.Sprint()`
-   - String types need `fmt.Sprint()`, not `.String()` (which may not exist)
+- `jsvalueLocals` — local variables holding `*jsvalue.JSValue`
+- `jsvalueSliceLocals` — typed locals holding `[]*jsvalue.JSValue` (rest params, array literals)
+- `pkgVarTyped` — package-level variables: `true` = typed struct, `false` = JSValue
+- `localScopes` — scope stack tracking whether variables are typed or JSValue
+- `funcParamCounts` — hoisted function parameter counts for nil-padding
 
 ## Test conventions
 
@@ -373,6 +169,8 @@ func TestFeatureName(t *testing.T) {
     assertNotContains(t, out, "unwanted")
 }
 ```
+
+Regression tests for the all-JSValue refactoring are in `compiler/regression_test.go`.
 
 Use `compileWithModule(t, ts, "myapp")` when testing relative import resolution. Helpers are in `compiler/helpers_test.go`.
 
