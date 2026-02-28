@@ -698,3 +698,56 @@ func TestTypedParamsAreJSValue(t *testing.T) {
 	assertNotContains(t, out, "float64")
 	assertNotContains(t, out, ") bool")
 }
+
+func TestClassAsJSValueNewClass(t *testing.T) {
+	ts := `class Foo {
+	constructor(x) { this.x = x; }
+	getX() { return this.x; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewClass(")
+	assertContains(t, out, `this.Set("x",`)
+	assertContains(t, out, `Foo.Get("prototype").Set("getX"`)
+}
+
+func TestClassExtendsParent(t *testing.T) {
+	ts := `class Animal {}
+class Dog extends Animal {
+	bark() { return "woof"; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewClass(")
+	assertContains(t, out, "Animal)")
+	assertContains(t, out, `Dog.Get("prototype").Set("bark"`)
+}
+
+func TestNewExpressionUsesCall(t *testing.T) {
+	ts := `function f() { return new Foo(1, 2); }`
+	out := compile(t, ts)
+	assertContains(t, out, "Foo.Call(")
+}
+
+func TestDestructuringUsesGet(t *testing.T) {
+	ts := `function f(obj) { const { name, age } = obj; return name; }`
+	out := compile(t, ts)
+	assertContains(t, out, `obj.Get("name")`)
+	assertContains(t, out, `obj.Get("age")`)
+}
+
+func TestDestructuringPairUsesGet(t *testing.T) {
+	ts := `function f(obj) { const { key: value } = obj; return value; }`
+	out := compile(t, ts)
+	assertContains(t, out, `obj.Get("key")`)
+}
+
+func TestForOfDestructuringPreRegistersNames(t *testing.T) {
+	// Destructured names from for-of should be recognized as JSValue in the loop body.
+	ts := `function f(items) {
+	for (const {segment: character} of items) {
+		character.codePointAt(0);
+	}
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "fmt.Sprint(character)")
+	assertContains(t, out, `_item.Get("segment")`)
+}

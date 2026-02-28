@@ -360,3 +360,43 @@ func TestPushOnSliceLocalWrapsLiteralArgs(t *testing.T) {
 	assertContains(t, out, "jsvalue.Push(")
 	assertContains(t, out, "jsvalue.NewBool(true)")
 }
+
+func TestCodePointAtOnJSValueCoerces(t *testing.T) {
+	// codePointAt on JSValue receiver should coerce to string via fmt.Sprint.
+	ts := `function f(s) { return s.codePointAt(0); }`
+	out := compile(t, ts)
+	assertContains(t, out, "fmt.Sprint(s)")
+	assertContains(t, out, "[]rune(")
+}
+
+func TestRegexTestOnTypedRegexCoercesJSValueArg(t *testing.T) {
+	// regex.test(jsValueArg) should coerce arg to string.
+	ts := `function f(str) {
+	const re = /hello/;
+	return re.test(str);
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "MatchString(fmt.Sprint(str))")
+}
+
+func TestObjectPrototypeHasOwnPropertyCall(t *testing.T) {
+	// Object.prototype.hasOwnProperty.call(obj, prop) → obj.HasOwnProperty(prop)
+	ts := `function f(obj) { return Object.prototype.hasOwnProperty.call(obj, "key"); }`
+	out := compile(t, ts)
+	assertContains(t, out, "HasOwnProperty")
+	assertNotContains(t, out, "object.Prototype")
+}
+
+func TestGenericDotCallOnFunction(t *testing.T) {
+	// fn.call(thisArg, args) → fn.Call(thisArg, args)
+	ts := `function f(fn, obj) { return fn.call(obj, 42); }`
+	out := compile(t, ts)
+	assertContains(t, out, ".Call(")
+}
+
+func TestJSValueFunctionFromGetChainUsesCall(t *testing.T) {
+	// obj.method(42) on untyped local uses capitalized Go method syntax.
+	ts := `function f(obj) { return obj.method(42); }`
+	out := compile(t, ts)
+	assertContains(t, out, "obj.Method(")
+}

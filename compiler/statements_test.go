@@ -299,3 +299,17 @@ func TestForLoopConditionWithJSValueComparison(t *testing.T) {
 	out := compile(t, ts)
 	assertContains(t, out, "jsvalue.Lt(")
 }
+
+func TestForOfJSValueRangeUsesArray(t *testing.T) {
+	// for-of on JSValue expression should call .Array() for Go range.
+	ts := `function f(items) { for (const item of items) { } }`
+	out := compile(t, ts)
+	assertContains(t, out, ".Array()")
+}
+
+func TestMemberAssignmentOnJSValueUsesSet(t *testing.T) {
+	// this.name = value → this.Set("name", value)
+	ts := `function f(obj) { obj.name = "hello"; }`
+	out := compile(t, ts)
+	assertContains(t, out, `obj.Set("name",`)
+}
