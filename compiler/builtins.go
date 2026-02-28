@@ -116,6 +116,10 @@ func transformBuiltinNew(name string, args []ast.Expr, t *Transformer) ast.Expr 
 		pattern := ast.Expr(stringLit(""))
 		if len(args) > 0 {
 			pattern = args[0]
+			// If pattern is a JSValue expression, unwrap to string for regexp.MustCompile
+			if isAlreadyJSValue(pattern) {
+				pattern = callExpr(selectorExpr(pattern, "String"))
+			}
 		}
 		compiled := callExpr(selectorExpr(ident("regexp"), "MustCompile"), pattern)
 		// When flags argument is present, wrap in IIFE to preserve the reference

@@ -1171,7 +1171,12 @@ func (t *Transformer) transformTernary(node *sitter.Node) ast.Expr {
 	resultType := t.inferTernaryResultType(consNode, altNode)
 
 	// Coerce branches whose type doesn't match the inferred result type.
-	if id, ok := resultType.(*ast.Ident); ok {
+	if isJSValuePtrType(resultType) {
+		// JSValue result: wrap both branches with jsvalueWrapLit
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		cons = jsvalueWrapLit(cons)
+		alt = jsvalueWrapLit(alt)
+	} else if id, ok := resultType.(*ast.Ident); ok {
 		switch id.Name {
 		case "string":
 			if t.inferNodeResultType(consNode) == "" {
