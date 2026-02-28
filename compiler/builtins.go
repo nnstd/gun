@@ -188,10 +188,10 @@ func transformNumberCall(prop string, args []ast.Expr) ast.Expr {
 func transformArrayCall(prop string, args []ast.Expr, addImport func(string)) ast.Expr {
 	switch prop {
 	case "isArray":
-		// Array.isArray(x) → x.IsArray()
+		// Array.isArray(x) → jsvalue.IsArrayValue(x)
 		if len(args) > 0 {
 			addImport("github.com/nnstd/gun/runtime/jsvalue")
-			return callExpr(selectorExpr(args[0], "IsArray"))
+			return callExpr(selectorExpr(ident("jsvalue"), "IsArrayValue"), args[0])
 		}
 	}
 	return nil

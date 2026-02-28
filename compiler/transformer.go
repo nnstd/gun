@@ -216,6 +216,10 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 				if objText == "Object" && (propText == "keys" || propText == "entries" || propText == "values") {
 					return true
 				}
+				// Array.isArray() returns *jsvalue.JSValue
+				if objText == "Array" && propText == "isArray" {
+					return true
+				}
 				// Check if this is a call to an imported package function
 				// By default, imported functions return *jsvalue.JSValue
 				if objNode.Kind() == "identifier" {
@@ -278,17 +282,24 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		}
 		return false
 	case "binary_expression":
-		// Logical OR (||) expressions are transformed to IIFEs that return JSValue
-		// when either operand is JSValue or when used in JSValue context
-		opNode := node.ChildByFieldName("operator")
-		if opNode != nil && opNode.Utf8Text(t.source) == "||" {
-			leftNode := node.ChildByFieldName("left")
-			rightNode := node.ChildByFieldName("right")
-			// If either operand returns JSValue, the || expression returns JSValue
-			if (leftNode != nil && t.nodeReturnsJSValue(leftNode)) ||
-				(rightNode != nil && t.nodeReturnsJSValue(rightNode)) {
-				return true
-			}
+		// All binary operations where either operand is JSValue now produce
+		// JSValue results (via jsvalue.Add, jsvalue.Eq, jsvalue.Or, etc.)
+		leftNode := node.ChildByFieldName("left")
+		rightNode := node.ChildByFieldName("right")
+		if (leftNode != nil && t.nodeReturnsJSValue(leftNode)) ||
+			(rightNode != nil && t.nodeReturnsJSValue(rightNode)) {
+			return true
+		}
+		// Also check for package-level vars
+		if leftNode != nil && t.isPkgLevelVar(leftNode) {
+			return true
+		}
+		return false
+	case "unary_expression":
+		// Unary operations on JSValue (!, -, ~, typeof) now return JSValue
+		argNode := node.ChildByFieldName("argument")
+		if argNode != nil && t.nodeReturnsJSValue(argNode) {
+			return true
 		}
 		return false
 	case "member_expression":

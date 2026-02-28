@@ -2,6 +2,7 @@ package jsvalue
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"sync/atomic"
 )
@@ -394,38 +395,84 @@ func Truthy(v *JSValue) bool {
 }
 
 // Map applies fn to each element and returns a new array.
-func Map(arr *JSValue, fn func(*JSValue) *JSValue) *JSValue {
+// fn can be func(*JSValue) *JSValue or func(*JSValue, *JSValue) *JSValue (value, index).
+func Map(arr *JSValue, fn any) *JSValue {
 	if arr == nil || arr.arrayVal == nil {
 		return NewArray()
 	}
 	results := make([]*JSValue, len(arr.arrayVal))
-	for i, elem := range arr.arrayVal {
-		results[i] = fn(elem)
+	switch f := fn.(type) {
+	case func(*JSValue) *JSValue:
+		for i, elem := range arr.arrayVal {
+			results[i] = f(elem)
+		}
+	case func(*JSValue, *JSValue) *JSValue:
+		for i, elem := range arr.arrayVal {
+			results[i] = f(elem, NewNumber(float64(i)))
+		}
 	}
 	return NewArray(results...)
 }
 
-// Filter returns a new array containing elements for which fn returns true.
-func Filter(arr *JSValue, fn func(*JSValue) bool) *JSValue {
+// Filter returns a new array containing elements for which fn returns truthy.
+// fn can be func(*JSValue) bool or func(*JSValue) *JSValue.
+func Filter(arr *JSValue, fn any) *JSValue {
 	if arr == nil || arr.arrayVal == nil {
 		return NewArray()
 	}
 	var results []*JSValue
-	for _, elem := range arr.arrayVal {
-		if fn(elem) {
-			results = append(results, elem)
+	switch f := fn.(type) {
+	case func(*JSValue) bool:
+		for _, elem := range arr.arrayVal {
+			if f(elem) {
+				results = append(results, elem)
+			}
+		}
+	case func(*JSValue) *JSValue:
+		for _, elem := range arr.arrayVal {
+			if f(elem).Bool() {
+				results = append(results, elem)
+			}
+		}
+	case func(*JSValue, *JSValue) *JSValue:
+		for i, elem := range arr.arrayVal {
+			if f(elem, NewNumber(float64(i))).Bool() {
+				results = append(results, elem)
+			}
 		}
 	}
 	return NewArray(results...)
 }
 
 // ForEach calls fn for each element in the array.
-func ForEach(arr *JSValue, fn func(*JSValue)) {
+// fn can be func(*JSValue), func(*JSValue) *JSValue, or 2-param variants.
+func ForEach(arr *JSValue, fn any) {
 	if arr == nil || arr.arrayVal == nil {
 		return
 	}
-	for _, elem := range arr.arrayVal {
-		fn(elem)
+	switch f := fn.(type) {
+	case func(*JSValue):
+		for _, elem := range arr.arrayVal {
+			f(elem)
+		}
+	case func(*JSValue) *JSValue:
+		for _, elem := range arr.arrayVal {
+			f(elem)
+		}
+	case func(*JSValue, *JSValue):
+		for i, elem := range arr.arrayVal {
+			f(elem, NewNumber(float64(i)))
+		}
+	case func(*JSValue, *JSValue) *JSValue:
+		for i, elem := range arr.arrayVal {
+			f(elem, NewNumber(float64(i)))
+		}
+	case *JSValue:
+		if f != nil && f.funcVal != nil {
+			for _, elem := range arr.arrayVal {
+				f.funcVal(elem)
+			}
+		}
 	}
 }
 
@@ -484,15 +531,19 @@ func Pop(arr *JSValue) *JSValue {
 }
 
 // Join joins array elements into a string with separator.
-func Join(arr *JSValue, sep string) *JSValue {
+func Join(arr *JSValue, sep *JSValue) *JSValue {
 	if arr == nil || arr.arrayVal == nil {
 		return NewString("")
+	}
+	s := ","
+	if sep != nil {
+		s = sep.String()
 	}
 	strs := make([]string, len(arr.arrayVal))
 	for i, elem := range arr.arrayVal {
 		strs[i] = fmt.Sprint(elem)
 	}
-	return NewString(strings.Join(strs, sep))
+	return NewString(strings.Join(strs, s))
 }
 
 // Includes checks if array contains a value.
@@ -516,9 +567,44 @@ func OrDefault(val *JSValue, fallback *JSValue) *JSValue {
 	return val
 }
 
-// Slice slices array with support for negative indices.
-func Slice(arr *JSValue, args ...int) *JSValue {
-	if arr == nil || arr.arrayVal == nil {
+// Slice slices array (or string) with support for negative indices.
+func Slice(arr *JSValue, args ...*JSValue) *JSValue {
+	if arr == nil {
+		return NewArray()
+	}
+
+	// String slicing
+	if arr.typ == TypeString {
+		runes := []rune(arr.strVal)
+		length := len(runes)
+		start := 0
+		end := length
+		if len(args) >= 1 && args[0] != nil {
+			start = normalizeIndex(int(args[0].Number()), length)
+		}
+		if len(args) >= 2 && args[1] != nil {
+			end = normalizeIndex(int(args[1].Number()), length)
+		}
+		if start < 0 {
+			start = 0
+		}
+		if start > length {
+			start = length
+		}
+		if end < 0 {
+			end = 0
+		}
+		if end > length {
+			end = length
+		}
+		if end < start {
+			end = start
+		}
+		return NewString(string(runes[start:end]))
+	}
+
+	// Array slicing
+	if arr.arrayVal == nil {
 		return NewArray()
 	}
 
@@ -526,11 +612,11 @@ func Slice(arr *JSValue, args ...int) *JSValue {
 	start := 0
 	end := length
 
-	if len(args) >= 1 {
-		start = normalizeIndex(args[0], length)
+	if len(args) >= 1 && args[0] != nil {
+		start = normalizeIndex(int(args[0].Number()), length)
 	}
-	if len(args) >= 2 {
-		end = normalizeIndex(args[1], length)
+	if len(args) >= 2 && args[1] != nil {
+		end = normalizeIndex(int(args[1].Number()), length)
 	}
 
 	// Clamp to valid range
@@ -608,63 +694,107 @@ func Trim(val *JSValue) *JSValue {
 }
 
 // Split splits a JSValue string by separator.
-func Split(val *JSValue, sep string) *JSValue {
-	parts := strings.Split(fmt.Sprint(val), sep)
+func Split(val *JSValue, sep *JSValue) *JSValue {
+	s := ","
+	if sep != nil {
+		s = sep.String()
+	}
+	parts := strings.Split(fmt.Sprint(val), s)
 	return FromStrings(parts)
 }
 
-// Replace replaces all occurrences of old with new in a JSValue string.
-func Replace(val *JSValue, old, new string) *JSValue {
-	return NewString(strings.Replace(fmt.Sprint(val), old, new, -1))
+// Replace replaces occurrences of pattern with replacement in a JSValue string.
+// pattern can be a string JSValue or a regex JSValue.
+func Replace(val *JSValue, pattern, replacement *JSValue) *JSValue {
+	s := fmt.Sprint(val)
+	repl := ""
+	if replacement != nil {
+		repl = replacement.String()
+	}
+	if pattern != nil && pattern.typ == TypeRegex && pattern.regexVal != nil {
+		if re, ok := pattern.regexVal.(interface {
+			ReplaceAllString(string, string) string
+		}); ok {
+			return NewString(re.ReplaceAllString(s, repl))
+		}
+	}
+	old := ""
+	if pattern != nil {
+		old = pattern.String()
+	}
+	return NewString(strings.Replace(s, old, repl, -1))
 }
 
 // CharAt returns the character at the given index.
-func CharAt(val *JSValue, index int) *JSValue {
+func CharAt(val *JSValue, index *JSValue) *JSValue {
 	s := fmt.Sprint(val)
 	runes := []rune(s)
-	if index < 0 || index >= len(runes) {
+	idx := 0
+	if index != nil {
+		idx = int(index.Number())
+	}
+	if idx < 0 || idx >= len(runes) {
 		return NewString("")
 	}
-	return NewString(string(runes[index]))
+	return NewString(string(runes[idx]))
 }
 
 // StartsWith checks if a JSValue string starts with prefix.
-func StartsWith(val *JSValue, prefix string) *JSValue {
-	return NewBool(strings.HasPrefix(fmt.Sprint(val), prefix))
+func StartsWith(val *JSValue, prefix *JSValue) *JSValue {
+	p := ""
+	if prefix != nil {
+		p = prefix.String()
+	}
+	return NewBool(strings.HasPrefix(fmt.Sprint(val), p))
 }
 
 // EndsWith checks if a JSValue string ends with suffix.
-func EndsWith(val *JSValue, suffix string) *JSValue {
-	return NewBool(strings.HasSuffix(fmt.Sprint(val), suffix))
+func EndsWith(val *JSValue, suffix *JSValue) *JSValue {
+	s := ""
+	if suffix != nil {
+		s = suffix.String()
+	}
+	return NewBool(strings.HasSuffix(fmt.Sprint(val), s))
 }
 
 // Repeat repeats a JSValue string count times.
-func Repeat(val *JSValue, count int) *JSValue {
-	return NewString(strings.Repeat(fmt.Sprint(val), count))
+func Repeat(val *JSValue, count *JSValue) *JSValue {
+	n := 0
+	if count != nil {
+		n = int(count.Number())
+	}
+	return NewString(strings.Repeat(fmt.Sprint(val), n))
 }
 
 // LastIndexOf returns the last index of search in str, starting from position.
-func LastIndexOf(str *JSValue, search *JSValue, position ...int) *JSValue {
+func LastIndexOf(str *JSValue, search *JSValue, position ...*JSValue) *JSValue {
 	s := fmt.Sprint(str)
 	sub := fmt.Sprint(search)
-	if len(position) > 0 && position[0] < len(s) {
-		s = s[:position[0]+1]
+	if len(position) > 0 && position[0] != nil {
+		pos := int(position[0].Number())
+		if pos < len(s) {
+			s = s[:pos+1]
+		}
 	}
 	return NewNumber(float64(strings.LastIndex(s, sub)))
 }
 
 // Substring returns the part of the string between start and end indices.
-func Substring(str *JSValue, start int, end ...int) *JSValue {
+func Substring(str *JSValue, start *JSValue, end ...*JSValue) *JSValue {
 	s := []rune(fmt.Sprint(str))
-	if start < 0 {
-		start = 0
+	st := 0
+	if start != nil {
+		st = int(start.Number())
 	}
-	if start > len(s) {
-		start = len(s)
+	if st < 0 {
+		st = 0
+	}
+	if st > len(s) {
+		st = len(s)
 	}
 	e := len(s)
-	if len(end) > 0 {
-		e = end[0]
+	if len(end) > 0 && end[0] != nil {
+		e = int(end[0].Number())
 	}
 	if e < 0 {
 		e = 0
@@ -672,10 +802,10 @@ func Substring(str *JSValue, start int, end ...int) *JSValue {
 	if e > len(s) {
 		e = len(s)
 	}
-	if start > e {
-		start, e = e, start
+	if st > e {
+		st, e = e, st
 	}
-	return NewString(string(s[start:e]))
+	return NewString(string(s[st:e]))
 }
 
 // ObjectFrom creates an object from alternating key (string) and value (*JSValue) pairs.
@@ -704,4 +834,289 @@ func Keys(obj *JSValue) *JSValue {
 		result[i] = NewString(key)
 	}
 	return NewArray(result...)
+}
+
+// ---------------------------------------------------------------------------
+// Arithmetic operations
+// ---------------------------------------------------------------------------
+
+// Add implements the JavaScript + operator.
+// If either operand is a string, concatenates; otherwise numeric addition.
+func Add(a, b *JSValue) *JSValue {
+	if a == nil {
+		a = NewUndefined()
+	}
+	if b == nil {
+		b = NewUndefined()
+	}
+	if a.typ == TypeString || b.typ == TypeString {
+		return NewString(a.String() + b.String())
+	}
+	return NewNumber(a.Number() + b.Number())
+}
+
+// Sub implements the JavaScript - operator.
+func Sub(a, b *JSValue) *JSValue {
+	if a == nil {
+		a = NewUndefined()
+	}
+	if b == nil {
+		b = NewUndefined()
+	}
+	return NewNumber(a.Number() - b.Number())
+}
+
+// Mul implements the JavaScript * operator.
+func Mul(a, b *JSValue) *JSValue {
+	if a == nil {
+		a = NewUndefined()
+	}
+	if b == nil {
+		b = NewUndefined()
+	}
+	return NewNumber(a.Number() * b.Number())
+}
+
+// Div implements the JavaScript / operator.
+func Div(a, b *JSValue) *JSValue {
+	if a == nil {
+		a = NewUndefined()
+	}
+	if b == nil {
+		b = NewUndefined()
+	}
+	bv := b.Number()
+	if bv == 0 {
+		av := a.Number()
+		if av > 0 {
+			return NewNumber(math.Inf(1))
+		} else if av < 0 {
+			return NewNumber(math.Inf(-1))
+		}
+		return NewNumber(math.NaN())
+	}
+	return NewNumber(a.Number() / bv)
+}
+
+// Mod implements the JavaScript % operator.
+func Mod(a, b *JSValue) *JSValue {
+	if a == nil {
+		a = NewUndefined()
+	}
+	if b == nil {
+		b = NewUndefined()
+	}
+	return NewNumber(math.Mod(a.Number(), b.Number()))
+}
+
+// Neg implements the JavaScript unary - operator.
+func Neg(a *JSValue) *JSValue {
+	if a == nil {
+		return NewNumber(math.NaN())
+	}
+	return NewNumber(-a.Number())
+}
+
+// BitNot implements the JavaScript ~ operator.
+func BitNot(a *JSValue) *JSValue {
+	if a == nil {
+		return NewInt(-1)
+	}
+	return NewInt(^int(a.Number()))
+}
+
+// BitAnd implements the JavaScript & operator.
+func BitAnd(a, b *JSValue) *JSValue {
+	return NewInt(int(a.Number()) & int(b.Number()))
+}
+
+// BitOr implements the JavaScript | operator.
+func BitOr(a, b *JSValue) *JSValue {
+	return NewInt(int(a.Number()) | int(b.Number()))
+}
+
+// BitXor implements the JavaScript ^ operator.
+func BitXor(a, b *JSValue) *JSValue {
+	return NewInt(int(a.Number()) ^ int(b.Number()))
+}
+
+// Shl implements the JavaScript << operator.
+func Shl(a, b *JSValue) *JSValue {
+	return NewInt(int(a.Number()) << uint(b.Number()))
+}
+
+// Shr implements the JavaScript >> operator.
+func Shr(a, b *JSValue) *JSValue {
+	return NewInt(int(a.Number()) >> uint(b.Number()))
+}
+
+// UShr implements the JavaScript >>> operator (unsigned right shift).
+func UShr(a, b *JSValue) *JSValue {
+	return NewInt(int(uint32(a.Number()) >> uint(b.Number())))
+}
+
+// ---------------------------------------------------------------------------
+// Comparison operations (all return *JSValue boolean)
+// ---------------------------------------------------------------------------
+
+// Eq implements JavaScript === (strict equality).
+func Eq(a, b *JSValue) *JSValue {
+	if a == nil && b == nil {
+		return NewBool(true)
+	}
+	if a == nil || b == nil {
+		return NewBool(false)
+	}
+	if a.typ != b.typ {
+		return NewBool(false)
+	}
+	switch a.typ {
+	case TypeUndefined, TypeNull:
+		return NewBool(true)
+	case TypeBoolean:
+		return NewBool(a.boolVal == b.boolVal)
+	case TypeNumber:
+		return NewBool(a.numVal == b.numVal)
+	case TypeString:
+		return NewBool(a.strVal == b.strVal)
+	case TypeSymbol:
+		return NewBool(a.symbolID == b.symbolID)
+	default:
+		return NewBool(a == b) // reference equality for objects
+	}
+}
+
+// NEq implements JavaScript !== (strict inequality).
+func NEq(a, b *JSValue) *JSValue {
+	return NewBool(!Eq(a, b).boolVal)
+}
+
+// Lt implements JavaScript < operator.
+func Lt(a, b *JSValue) *JSValue {
+	if a == nil {
+		a = NewUndefined()
+	}
+	if b == nil {
+		b = NewUndefined()
+	}
+	if a.typ == TypeString && b.typ == TypeString {
+		return NewBool(a.strVal < b.strVal)
+	}
+	return NewBool(a.Number() < b.Number())
+}
+
+// Gt implements JavaScript > operator.
+func Gt(a, b *JSValue) *JSValue {
+	if a == nil {
+		a = NewUndefined()
+	}
+	if b == nil {
+		b = NewUndefined()
+	}
+	if a.typ == TypeString && b.typ == TypeString {
+		return NewBool(a.strVal > b.strVal)
+	}
+	return NewBool(a.Number() > b.Number())
+}
+
+// LtE implements JavaScript <= operator.
+func LtE(a, b *JSValue) *JSValue {
+	if a == nil {
+		a = NewUndefined()
+	}
+	if b == nil {
+		b = NewUndefined()
+	}
+	if a.typ == TypeString && b.typ == TypeString {
+		return NewBool(a.strVal <= b.strVal)
+	}
+	return NewBool(a.Number() <= b.Number())
+}
+
+// GtE implements JavaScript >= operator.
+func GtE(a, b *JSValue) *JSValue {
+	if a == nil {
+		a = NewUndefined()
+	}
+	if b == nil {
+		b = NewUndefined()
+	}
+	if a.typ == TypeString && b.typ == TypeString {
+		return NewBool(a.strVal >= b.strVal)
+	}
+	return NewBool(a.Number() >= b.Number())
+}
+
+// ---------------------------------------------------------------------------
+// Logical operations
+// ---------------------------------------------------------------------------
+
+// Not implements JavaScript ! operator (returns *JSValue boolean).
+func Not(a *JSValue) *JSValue {
+	return NewBool(!Truthy(a))
+}
+
+// And implements JavaScript && operator (short-circuit: returns a if falsy, else b).
+func And(a, b *JSValue) *JSValue {
+	if !Truthy(a) {
+		return a
+	}
+	return b
+}
+
+// Or implements JavaScript || operator (short-circuit: returns a if truthy, else b).
+func Or(a, b *JSValue) *JSValue {
+	if Truthy(a) {
+		return a
+	}
+	return b
+}
+
+// Nullish implements JavaScript ?? operator (returns a if not null/undefined, else b).
+func Nullish(a, b *JSValue) *JSValue {
+	if a == nil || a.typ == TypeUndefined || a.typ == TypeNull {
+		return b
+	}
+	return a
+}
+
+// ---------------------------------------------------------------------------
+// Increment/Decrement
+// ---------------------------------------------------------------------------
+
+// Inc implements JavaScript ++ (prefix/postfix increment).
+func Inc(a *JSValue) *JSValue {
+	if a == nil {
+		return NewNumber(1)
+	}
+	return NewNumber(a.Number() + 1)
+}
+
+// Dec implements JavaScript -- (prefix/postfix decrement).
+func Dec(a *JSValue) *JSValue {
+	if a == nil {
+		return NewNumber(-1)
+	}
+	return NewNumber(a.Number() - 1)
+}
+
+// ---------------------------------------------------------------------------
+// Typeof
+// ---------------------------------------------------------------------------
+
+// TypeOf implements JavaScript typeof operator. Returns *JSValue string.
+func TypeOf(a *JSValue) *JSValue {
+	if a == nil {
+		return NewString("undefined")
+	}
+	return NewString(a.TypeString())
+}
+
+// IsArrayValue returns a *JSValue boolean indicating whether v is an array.
+// This is the JSValue-returning wrapper for Array.isArray().
+func IsArrayValue(v *JSValue) *JSValue {
+	if v == nil {
+		return NewBool(false)
+	}
+	return NewBool(v.IsArray())
 }

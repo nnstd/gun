@@ -178,109 +178,53 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 		opText = opNode.Utf8Text(t.source)
 	}
 
+	op := mapBinaryOp(opText)
+
+	// Check if either operand is a JSValue expression.
+	leftIsJSValue := t.nodeReturnsJSValue(leftNode)
+	rightIsJSValue := t.nodeReturnsJSValue(rightNode)
+	eitherJSValue := leftIsJSValue || rightIsJSValue || t.isPkgLevelVar(leftNode) || t.isPkgLevelVar(rightNode)
+
+	// ?? (nullish coalescing) → jsvalue.Nullish(left, right)
 	if opText == "??" {
+		if eitherJSValue {
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "Nullish"),
+				jsvalueWrapLit(left), jsvalueWrapLit(right))
+		}
 		return left
 	}
+
+	// instanceof → != nil
 	if opText == "instanceof" {
 		return &ast.BinaryExpr{X: left, Op: token.NEQ, Y: ident("nil")}
 	}
 
-	op := mapBinaryOp(opText)
-
-	// JS `||` used as default-value pattern (x || "fallback").
-	// When the left operand is a JSValue, emit an IIFE that checks truthiness
-	// and returns the first truthy value wrapped as JSValue.
-	// Also handle package-level vars (not in local scope, not imported) which
-	// default to *jsvalue.JSValue.
-	if op == token.LOR && (t.nodeReturnsJSValue(leftNode) || t.isPkgLevelVar(leftNode)) {
+	// When either operand is JSValue, use jsvalue operation helpers.
+	// This eliminates complex type coercion — the helpers handle type semantics internally.
+	if eitherJSValue {
 		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-		wrappedRight := t.wrapAsJSValue(right)
-		return &ast.CallExpr{
-			Fun: &ast.FuncLit{
-				Type: &ast.FuncType{
-					Params:  fieldList(),
-					Results: fieldList(field("", jsValuePtrType())),
-				},
-				Body: blockStmt(
-					&ast.IfStmt{
-						Cond: &ast.BinaryExpr{
-							X:  callExpr(selectorExpr(left, "String")),
-							Op: token.NEQ,
-							Y:  stringLit(""),
-						},
-						Body: blockStmt(returnStmt(left)),
-					},
-					returnStmt(wrappedRight),
-				),
-			},
+		wrappedLeft := jsvalueWrapLit(left)
+		wrappedRight := jsvalueWrapLit(right)
+
+		// Logical || → jsvalue.Or(left, right) — short-circuit, returns first truthy
+		if op == token.LOR {
+			return callExpr(selectorExpr(ident("jsvalue"), "Or"), wrappedLeft, wrappedRight)
+		}
+		// Logical && → jsvalue.And(left, right) — short-circuit, returns first falsy
+		if op == token.LAND {
+			return callExpr(selectorExpr(ident("jsvalue"), "And"), wrappedLeft, wrappedRight)
+		}
+
+		// Arithmetic and comparison → jsvalue.Add/Sub/Eq/Lt etc.
+		if fnName := jsvalueOpName(op); fnName != "" {
+			return callExpr(selectorExpr(ident("jsvalue"), fnName), wrappedLeft, wrappedRight)
 		}
 	}
 
-	// When a JSValue expression (untyped local, subscript on JSValue slice, etc.)
-	// is compared or used in arithmetic, coerce to match the other operand's type.
-	if isComparisonOp(op) || isArithmeticOp(op) {
-		leftIsJSValue := t.nodeReturnsJSValue(leftNode)
-		rightIsJSValue := t.nodeReturnsJSValue(rightNode)
-		if leftIsJSValue && isNumericExpr(right) {
-			left = callExpr(ident("int"), callExpr(selectorExpr(left, "Number")))
-		} else if rightIsJSValue && isNumericExpr(left) {
-			right = callExpr(ident("int"), callExpr(selectorExpr(right, "Number")))
-		} else if leftIsJSValue && isBoolLit(right) {
-			left = callExpr(selectorExpr(left, "Bool"))
-		} else if rightIsJSValue && isBoolLit(left) {
-			right = callExpr(selectorExpr(right, "Bool"))
-		} else if leftIsJSValue && !rightIsJSValue && isComparisonOp(op) && !isNilNode(rightNode) {
-			if isOrderingOp(op) {
-				left = callExpr(selectorExpr(left, "Number"))
-				right = callExpr(ident("float64"), right)
-			} else {
-				left = callExpr(selectorExpr(left, "String"))
-			}
-		} else if rightIsJSValue && !leftIsJSValue && isComparisonOp(op) && !isNilNode(leftNode) {
-			if isOrderingOp(op) {
-				right = callExpr(selectorExpr(right, "Number"))
-				left = callExpr(ident("float64"), left)
-			} else {
-				right = callExpr(selectorExpr(right, "String"))
-			}
-		} else if leftIsJSValue && !rightIsJSValue && isArithmeticOp(op) && !isNilNode(rightNode) {
-			// JSValue + typed local → numeric arithmetic (but not string concat)
-			if op == token.ADD && isStringLitNode(rightNode) {
-				t.addImport("fmt")
-				left = callExpr(selectorExpr(ident("fmt"), "Sprint"), left)
-			} else {
-				left = callExpr(selectorExpr(left, "Number"))
-			}
-		} else if rightIsJSValue && !leftIsJSValue && isArithmeticOp(op) && !isNilNode(leftNode) {
-			if op == token.ADD && isStringLitNode(leftNode) {
-				t.addImport("fmt")
-				right = callExpr(selectorExpr(ident("fmt"), "Sprint"), right)
-			} else {
-				right = callExpr(selectorExpr(right, "Number"))
-			}
-		} else if leftIsJSValue && rightIsJSValue && isComparisonOp(op) {
-			// Both sides are JSValue: coerce both to native types for value comparison
-			if isOrderingOp(op) {
-				left = callExpr(selectorExpr(left, "Number"))
-				right = callExpr(selectorExpr(right, "Number"))
-			} else {
-				left = callExpr(selectorExpr(left, "String"))
-				right = callExpr(selectorExpr(right, "String"))
-			}
-		} else if leftIsJSValue && op == token.ADD {
-			t.addImport("fmt")
-			left = callExpr(selectorExpr(ident("fmt"), "Sprint"), left)
-			if rightIsJSValue {
-				right = callExpr(selectorExpr(ident("fmt"), "Sprint"), right)
-			}
-		} else if rightIsJSValue && op == token.ADD {
-			t.addImport("fmt")
-			right = callExpr(selectorExpr(ident("fmt"), "Sprint"), right)
-		}
-	}
+	// Non-JSValue paths: pure native Go operations (typed variables, Go stdlib, etc.)
 
 	// Logical AND/OR require both operands to be bool in Go.
-	// (The JSValue || default-value IIFE is handled above and returns early.)
 	if op == token.LAND || op == token.LOR {
 		left = t.ensureBool(left)
 		right = t.ensureBool(right)
@@ -319,18 +263,34 @@ func (t *Transformer) transformUnaryExpr(node *sitter.Node) ast.Expr {
 				}
 			}
 		}
-		// !jsValue → !jsValue.Bool() (logical NOT with truthiness conversion)
+		// !jsValue → jsvalue.Not(jsValue) — returns *JSValue boolean
 		if argNode != nil && t.nodeReturnsJSValue(argNode) {
-			return &ast.UnaryExpr{Op: token.NOT, X: callExpr(selectorExpr(arg, "Bool"))}
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "Not"), arg)
 		}
 		return &ast.UnaryExpr{Op: token.NOT, X: arg}
 	case "-":
+		// -jsValue → jsvalue.Neg(jsValue)
+		if argNode != nil && t.nodeReturnsJSValue(argNode) {
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "Neg"), arg)
+		}
 		return &ast.UnaryExpr{Op: token.SUB, X: arg}
 	case "+":
 		return arg
 	case "~":
+		// ~jsValue → jsvalue.BitNot(jsValue)
+		if argNode != nil && t.nodeReturnsJSValue(argNode) {
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "BitNot"), arg)
+		}
 		return &ast.UnaryExpr{Op: token.XOR, X: arg}
 	case "typeof":
+		// typeof jsValue → jsvalue.TypeOf(jsValue)
+		if argNode != nil && t.nodeReturnsJSValue(argNode) {
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "TypeOf"), arg)
+		}
 		t.addImport("fmt")
 		return callExpr(selectorExpr(ident("fmt"), "Sprintf"), stringLit("%T"), arg)
 	case "void":
@@ -495,6 +455,14 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 								return r
 							}
 						}
+					}
+				}
+
+				// For JSValue receivers, try JSValue string wrapper methods first (before fmt.Sprint coercion).
+				// Only for methods that have dedicated jsvalue.* wrappers.
+				if (isUntypedLocal || t.nodeReturnsJSValue(objNode)) && hasJSValueStringWrapper(prop) {
+					if r := transformStringMethod(obj, prop, args, t.addImport, true); r != nil {
+						return r
 					}
 				}
 
@@ -952,6 +920,17 @@ func isNilNode(node *sitter.Node) bool {
 	return node.Kind() == "null" || node.Kind() == "undefined"
 }
 
+// hasJSValueStringWrapper reports whether a string method has a dedicated jsvalue.* wrapper.
+func hasJSValueStringWrapper(prop string) bool {
+	switch prop {
+	case "substring", "lastIndexOf", "split", "trim", "repeat",
+		"toLowerCase", "toUpperCase", "startsWith", "endsWith",
+		"charAt", "replace", "replaceAll":
+		return true
+	}
+	return false
+}
+
 func isStringLitNode(node *sitter.Node) bool {
 	if node == nil {
 		return false
@@ -969,7 +948,7 @@ func isStringLitNode(node *sitter.Node) bool {
 func isBoolReturningMethod(name string) bool {
 	switch name {
 	case "MatchString", "HasPrefix", "HasSuffix", "Contains", "ContainsAny",
-		"EqualFold", "IsNaN", "IsInf", "IsArray":
+		"EqualFold", "IsNaN", "IsInf":
 		return true
 	}
 	return false
@@ -1022,14 +1001,14 @@ func isJSValueMethodCall(expr ast.Expr) bool {
 	return false
 }
 
-// ensureBool wraps a non-boolean expression so it can be used in an if condition.
-// JSValue Get() calls are wrapped with .Bool(); other pointer/interface types
-// get a != nil check.
+// ensureBool wraps a non-boolean expression so it can be used in an if/for condition.
+// JSValue expressions are wrapped with .Bool() for truthiness.
+// Native Go bool expressions pass through unchanged.
 func (t *Transformer) ensureBool(expr ast.Expr) ast.Expr {
 	if expr == nil {
 		return ident("false")
 	}
-	// Already a boolean expression
+	// Already a native boolean expression — pass through
 	switch e := expr.(type) {
 	case *ast.BinaryExpr:
 		switch e.Op {
@@ -1040,76 +1019,74 @@ func (t *Transformer) ensureBool(expr ast.Expr) ast.Expr {
 		if e.Op == token.NOT {
 			return expr
 		}
+		if e.Op == token.XOR {
+			return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: intLit("0")}
+		}
 	case *ast.Ident:
 		if e.Name == "true" || e.Name == "false" {
 			return expr
 		}
-		// Check if it's a typed local with a boolean type
 		if t.isTypedLocal(e.Name) {
 			if typeName, ok := t.typedLocalTypes[e.Name]; ok && typeName == "bool" {
 				return expr
 			}
 		}
 	}
-	// JSValue Get() call → .Bool()
-	if isJSValueGet(expr) {
-		return callExpr(selectorExpr(expr, "Bool"))
-	}
-	// len(x) returns int; convert to len(x) > 0 for boolean context.
+
+	// len(x) returns int; convert to len(x) > 0.
 	if call, ok := expr.(*ast.CallExpr); ok {
 		if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "len" {
 			return &ast.BinaryExpr{X: expr, Op: token.GTR, Y: intLit("0")}
 		}
 	}
-	// Non-boolean identifiers and selectors: treat as truthiness check → != nil
-	switch e := expr.(type) {
-	case *ast.Ident, *ast.SelectorExpr, *ast.IndexExpr:
-		return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
-	case *ast.CallExpr:
-		// Method calls (obj.Method()) may return *jsvalue.JSValue → need != nil.
-		if sel, ok := e.Fun.(*ast.SelectorExpr); ok {
+
+	// JSValue expressions → .Bool() for truthiness
+	if isJSValueExpr(expr) {
+		return callExpr(selectorExpr(expr, "Bool"))
+	}
+
+	// .Len() returns int, convert to > 0
+	if call, ok := expr.(*ast.CallExpr); ok {
+		if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Len" {
+			return &ast.BinaryExpr{X: expr, Op: token.GTR, Y: intLit("0")}
+		}
+	}
+
+	// Native Go bool-returning methods
+	if call, ok := expr.(*ast.CallExpr); ok {
+		if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
 			if isBoolReturningMethod(sel.Sel.Name) {
 				return expr
 			}
-			// .Len() returns int, convert to > 0
-			if sel.Sel.Name == "Len" {
-				return &ast.BinaryExpr{X: expr, Op: token.GTR, Y: intLit("0")}
-			}
-			return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
 		}
-		// Plain function calls: if the function is a local that returns
-		// *jsvalue.JSValue (untyped), wrap with != nil.
-		if id, ok := e.Fun.(*ast.Ident); ok {
-			if t.isUntypedLocal(id.Name) {
-				return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
-			}
-			// Imported functions from transpiled modules return *jsvalue.JSValue
-			if _, isImported := t.importedNames[id.Name]; isImported {
-				return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
-			}
-			// Check if this function has a known return type
-			if retType, ok := t.funcReturnTypes[id.Name]; ok {
-				// If it returns bool, don't add != nil
-				if retType == "bool" {
-					return expr
-				}
-			}
-			// All other plain function calls (including local functions in the same package)
-			// return *jsvalue.JSValue by default, unless they're known Go built-ins.
-			if !isGoBuiltin(id.Name) {
-				return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
-			}
-		}
-		// IIFE returning *jsvalue.JSValue (from || default-value pattern) → != nil
-		if fl, ok := e.Fun.(*ast.FuncLit); ok {
-			if fl.Type.Results != nil && len(fl.Type.Results.List) > 0 {
-				if isJSValuePtrType(fl.Type.Results.List[0].Type) {
-					return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
-				}
+		if id, ok := call.Fun.(*ast.Ident); ok {
+			if retType, ok := t.funcReturnTypes[id.Name]; ok && retType == "bool" {
+				return expr
 			}
 		}
 	}
+
+	// Pointers/interfaces that could be nil → != nil
+	switch expr.(type) {
+	case *ast.Ident, *ast.SelectorExpr, *ast.IndexExpr:
+		return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
+	case *ast.CallExpr:
+		return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
+	}
+
 	return expr
+}
+
+// isJSValueExpr returns true if the Go AST expression is known to produce *jsvalue.JSValue.
+func isJSValueExpr(expr ast.Expr) bool {
+	if isJSValueMethodCall(expr) {
+		return true
+	}
+	if isJSValueGet(expr) {
+		return true
+	}
+	// Identifiers that look like JSValue (checked by caller context)
+	return false
 }
 
 
@@ -1140,24 +1117,6 @@ func (t *Transformer) wrapAsJSValue(expr ast.Expr) ast.Expr {
 	}
 	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 	return callExpr(selectorExpr(ident("jsvalue"), "From"), expr)
-}
-
-// isJSValueExpr returns true if the expression is already a *jsvalue.JSValue
-// (e.g. a call to jsvalue.NewString, jsvalue.NewNumber, jsvalue.From, etc.)
-func isJSValueExpr(expr ast.Expr) bool {
-	call, ok := expr.(*ast.CallExpr)
-	if !ok {
-		return false
-	}
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return false
-	}
-	id, ok := sel.X.(*ast.Ident)
-	if !ok {
-		return false
-	}
-	return id.Name == "jsvalue"
 }
 
 func (t *Transformer) transformTemplateString(node *sitter.Node) ast.Expr {

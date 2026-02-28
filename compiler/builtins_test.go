@@ -215,8 +215,9 @@ func TestNegativeSliceIndexOnJSValue(t *testing.T) {
 	return arr.slice(1, -2);
 }`
 	out := compile(t, ts)
-	// Should use jsvalue.Slice wrapper which handles negative indices internally
-	assertContains(t, out, "jsvalue.Slice(arr, 1, -2)")
+	// Should use jsvalue.Slice wrapper with JSValue-wrapped args
+	assertContains(t, out, "jsvalue.Slice(arr,")
+	assertContains(t, out, "jsvalue.NewNumber")
 	assertNotContains(t, out, "len(arr.Array())")
 }
 
@@ -225,8 +226,8 @@ func TestJoinOnJSValueArray(t *testing.T) {
 	return arr.join(",");
 }`
 	out := compile(t, ts)
-	// Should use jsvalue.Join wrapper
-	assertContains(t, out, `jsvalue.Join(arr, ",")`)
+	// Should use jsvalue.Join wrapper with JSValue-wrapped separator
+	assertContains(t, out, `jsvalue.Join(arr, jsvalue.NewString(","))`)
 	assertNotContains(t, out, "_arr := arr.Array()")
 	assertNotContains(t, out, "make([]string")
 }

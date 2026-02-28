@@ -2,9 +2,9 @@ package compiler
 
 import "go/ast"
 
-func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport func(string)) ast.Expr {
-	// Check if the receiver is a JSValue method call
-	wasJSValue := isJSValueMethodCall(obj)
+func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport func(string), isJSValueReceiver ...bool) ast.Expr {
+	// Check if the receiver is a JSValue method call or explicitly marked as JSValue
+	wasJSValue := isJSValueMethodCall(obj) || (len(isJSValueReceiver) > 0 && isJSValueReceiver[0])
 
 	// Store original obj for JSValue wrapper calls
 	origObj := obj
@@ -34,7 +34,9 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 		if wasJSValue {
 			addImport("github.com/nnstd/gun/runtime/jsvalue")
 			jsArgs := []ast.Expr{origObj}
-			jsArgs = append(jsArgs, args...)
+			for _, a := range args {
+				jsArgs = append(jsArgs, jsvalueWrapLit(a))
+			}
 			return callExpr(selectorExpr(ident("jsvalue"), "LastIndexOf"), jsArgs...)
 		}
 		addImport("strings")
@@ -45,24 +47,30 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 		if wasJSValue {
 			addImport("github.com/nnstd/gun/runtime/jsvalue")
 			jsArgs := []ast.Expr{origObj}
-			jsArgs = append(jsArgs, args...)
+			for _, a := range args {
+				jsArgs = append(jsArgs, jsvalueWrapLit(a))
+			}
 			return callExpr(selectorExpr(ident("jsvalue"), "Substring"), jsArgs...)
 		}
 	case "split":
 		if len(args) > 0 {
 			if wasJSValue {
 				addImport("github.com/nnstd/gun/runtime/jsvalue")
-				return callExpr(selectorExpr(ident("jsvalue"), "Split"), origObj, args[0])
+				return callExpr(selectorExpr(ident("jsvalue"), "Split"), origObj, jsvalueWrapLit(args[0]))
 			}
 			addImport("strings")
 			return callExpr(selectorExpr(ident("strings"), "Split"), obj, args[0])
 		}
 	case "join":
-		if len(args) > 0 {
-			// When receiver is a JSValue array (e.g. from .Map()), use .Join() method.
-			if wasJSValue {
-				return callExpr(selectorExpr(obj, "Join"), args[0])
+		if wasJSValue {
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			var sep ast.Expr = callExpr(selectorExpr(ident("jsvalue"), "NewString"), stringLit(","))
+			if len(args) >= 1 {
+				sep = jsvalueWrapLit(args[0])
 			}
+			return callExpr(selectorExpr(ident("jsvalue"), "Join"), origObj, sep)
+		}
+		if len(args) > 0 {
 			addImport("strings")
 			return callExpr(selectorExpr(ident("strings"), "Join"), obj, args[0])
 		}
@@ -83,7 +91,7 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 		if len(args) > 0 {
 			if wasJSValue {
 				addImport("github.com/nnstd/gun/runtime/jsvalue")
-				return callExpr(selectorExpr(ident("jsvalue"), "Repeat"), origObj, args[0])
+				return callExpr(selectorExpr(ident("jsvalue"), "Repeat"), origObj, jsvalueWrapLit(args[0]))
 			}
 			addImport("strings")
 			return callExpr(selectorExpr(ident("strings"), "Repeat"), obj, args[0])
@@ -106,7 +114,7 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 		if len(args) > 0 {
 			if wasJSValue {
 				addImport("github.com/nnstd/gun/runtime/jsvalue")
-				return callExpr(selectorExpr(ident("jsvalue"), "StartsWith"), origObj, args[0])
+				return callExpr(selectorExpr(ident("jsvalue"), "StartsWith"), origObj, jsvalueWrapLit(args[0]))
 			}
 			addImport("strings")
 			return callExpr(selectorExpr(ident("strings"), "HasPrefix"), obj, args[0])
@@ -115,7 +123,7 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 		if len(args) > 0 {
 			if wasJSValue {
 				addImport("github.com/nnstd/gun/runtime/jsvalue")
-				return callExpr(selectorExpr(ident("jsvalue"), "EndsWith"), origObj, args[0])
+				return callExpr(selectorExpr(ident("jsvalue"), "EndsWith"), origObj, jsvalueWrapLit(args[0]))
 			}
 			addImport("strings")
 			return callExpr(selectorExpr(ident("strings"), "HasSuffix"), obj, args[0])
@@ -129,7 +137,7 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 		if len(args) >= 2 {
 			if wasJSValue {
 				addImport("github.com/nnstd/gun/runtime/jsvalue")
-				return callExpr(selectorExpr(ident("jsvalue"), "Replace"), origObj, args[0], args[1])
+				return callExpr(selectorExpr(ident("jsvalue"), "Replace"), origObj, jsvalueWrapLit(args[0]), jsvalueWrapLit(args[1]))
 			}
 			addImport("strings")
 			return callExpr(selectorExpr(ident("strings"), "Replace"), obj, args[0], args[1], intLit("1"))
@@ -138,7 +146,7 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 		if len(args) >= 2 {
 			if wasJSValue {
 				addImport("github.com/nnstd/gun/runtime/jsvalue")
-				return callExpr(selectorExpr(ident("jsvalue"), "Replace"), origObj, args[0], args[1])
+				return callExpr(selectorExpr(ident("jsvalue"), "Replace"), origObj, jsvalueWrapLit(args[0]), jsvalueWrapLit(args[1]))
 			}
 			addImport("strings")
 			return callExpr(selectorExpr(ident("strings"), "ReplaceAll"), obj, args[0], args[1])
@@ -156,9 +164,9 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 	case "charAt":
 		if wasJSValue {
 			addImport("github.com/nnstd/gun/runtime/jsvalue")
-			var idx ast.Expr = intLit("0")
+			var idx ast.Expr = callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), floatLit("0"))
 			if len(args) > 0 {
-				idx = args[0]
+				idx = jsvalueWrapLit(args[0])
 			}
 			return callExpr(selectorExpr(ident("jsvalue"), "CharAt"), origObj, idx)
 		}

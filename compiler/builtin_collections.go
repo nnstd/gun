@@ -133,10 +133,10 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 		// JSValue receiver: use jsvalue.Slice wrapper
 		if isJSValueReceiver || isJSValueMethodCall(obj) {
 			addImport("github.com/nnstd/gun/runtime/jsvalue")
-			// Build args: convert each slice argument to int
+			// Build args: wrap each slice argument as JSValue
 			sliceArgs := []ast.Expr{obj}
 			for _, arg := range args {
-				sliceArgs = append(sliceArgs, arg)
+				sliceArgs = append(sliceArgs, jsvalueWrapLit(arg))
 			}
 			return callExpr(selectorExpr(ident("jsvalue"), "Slice"), sliceArgs...)
 		}
@@ -150,10 +150,10 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 		// JSValue receiver: use jsvalue.Join wrapper
 		if isJSValueReceiver || isJSValueMethodCall(obj) {
 			addImport("github.com/nnstd/gun/runtime/jsvalue")
-			// Determine separator (default to ",")
-			var sep ast.Expr = &ast.BasicLit{Kind: token.STRING, Value: `","`}
+			// Determine separator (default to ",") — wrap as JSValue
+			var sep ast.Expr = callExpr(selectorExpr(ident("jsvalue"), "NewString"), stringLit(","))
 			if len(args) >= 1 {
-				sep = args[0]
+				sep = jsvalueWrapLit(args[0])
 			}
 			return callExpr(selectorExpr(ident("jsvalue"), "Join"), obj, sep)
 		}

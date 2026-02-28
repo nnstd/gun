@@ -107,7 +107,7 @@ console.log($0);`
 func TestNewExpressionWrapsArgsWithJSValue(t *testing.T) {
 	ts := `const p = new Parser({cwd: "/tmp"});`
 	out := compile(t, ts)
-	assertContains(t, out, "NewParser(jsvalue.ObjectFrom(")
+	assertContains(t, out, "NewParser(jsvalue.From(jsvalue.ObjectFrom(")
 }
 
 func TestAwaitStripped(t *testing.T) {
@@ -193,16 +193,15 @@ func TestJSOrDefaultPattern(t *testing.T) {
 	// a truthiness-checking IIFE, not Go's boolean ||.
 	ts := `function f(x) { return x || "default"; }`
 	out := compile(t, ts)
-	assertContains(t, out, `x.String() != ""`)
-	assertContains(t, out, "return x")
+	assertContains(t, out, "jsvalue.Or(jsvalue.From(x), jsvalue.NewString(")
 	assertNotContains(t, out, `x || "default"`)
 }
 
 func TestCharAtOnJSValueUsesRuntime(t *testing.T) {
-	// charAt on a JSValue param should coerce to string and use rune indexing.
+	// charAt on a JSValue param should use jsvalue.CharAt wrapper.
 	ts := `function f(s) { return s.charAt(0); }`
 	out := compile(t, ts)
-	assertContains(t, out, "string([]rune(fmt.Sprint(s))[0])")
+	assertContains(t, out, "jsvalue.CharAt(s,")
 }
 
 func TestCharAtOnStringUsesBuiltin(t *testing.T) {
@@ -236,8 +235,7 @@ func TestCharAtTypedVsJSValue(t *testing.T) {
 	return chrLower !== chrString;
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "chrLower.String()")
-	assertContains(t, out, "chrString.String()")
+	assertContains(t, out, "jsvalue.NEq(jsvalue.From(chrLower), jsvalue.From(chrString))")
 }
 
 func TestNullComparisonNoStringCoercion(t *testing.T) {
@@ -245,7 +243,7 @@ func TestNullComparisonNoStringCoercion(t *testing.T) {
 	// not x.String() == nil.
 	ts := `function f(x) { if (x === null) { return true; } return false; }`
 	out := compile(t, ts)
-	assertContains(t, out, "x == nil")
+	assertContains(t, out, "jsvalue.Eq(jsvalue.From(x), jsvalue.NewNull()).Bool()")
 	assertNotContains(t, out, "x.String() == nil")
 }
 
@@ -264,22 +262,22 @@ func TestNegationOnJSValueUsesNilCheck(t *testing.T) {
 	// !jsValue should compile to !jsValue.Bool() for proper JavaScript truthiness semantics.
 	ts := `function f(x) { if (!x) { return true; } return false; }`
 	out := compile(t, ts)
-	assertContains(t, out, "!x.Bool()")
+	assertContains(t, out, "jsvalue.Not(x).Bool()")
 }
 
 func TestJSValuePlusStringCoercion(t *testing.T) {
 	// JSValue + "" should coerce the JSValue to string via fmt.Sprint.
 	ts := `function f(e) { return e + ""; }`
 	out := compile(t, ts)
-	assertContains(t, out, "fmt.Sprint(e)")
+	assertContains(t, out, "jsvalue.Add(jsvalue.From(e), jsvalue.NewString(\"\"))")
 	assertNotContains(t, out, "e + \"\"")
 }
 
 func TestArrayIsArray(t *testing.T) {
-	// Array.isArray(x) should compile to x.IsArray().
+	// Array.isArray(x) should compile to jsvalue.IsArrayValue(x) returning *JSValue.
 	ts := `function f(x) { if (Array.isArray(x)) { return x; } }`
 	out := compile(t, ts)
-	assertContains(t, out, "x.IsArray()")
+	assertContains(t, out, "jsvalue.IsArrayValue(x)")
 	assertNotContains(t, out, "Array.")
 }
 
@@ -296,7 +294,7 @@ func TestNegationOnSubscriptUsesNilCheck(t *testing.T) {
 	// !arr[i] where arr is []*jsvalue.JSValue should use .Bool() for truthiness.
 	ts := `function f(x) { const args = [x]; if (!args[0]) { return x; } }`
 	out := compile(t, ts)
-	assertContains(t, out, "!args[0].Bool()")
+	assertContains(t, out, "jsvalue.Not(args[0]).Bool()")
 }
 
 func TestSliceIndexWrapsFloat64WithInt(t *testing.T) {
@@ -317,17 +315,15 @@ func TestJSValueSliceElementPlusString(t *testing.T) {
 	// JSValue slice element + "" should coerce the element to string.
 	ts := `function f(x) { const args = [x]; return args[0] + ""; }`
 	out := compile(t, ts)
-	assertContains(t, out, "fmt.Sprint(")
+	assertContains(t, out, "jsvalue.Add(jsvalue.From(args[0]), jsvalue.NewString(\"\"))")
 	assertNotContains(t, out, `args[int(0)] + ""`)
 }
 
 func TestJSValueComparedWithOwnStringMethod(t *testing.T) {
-	// str !== str.toLowerCase() should coerce str to .String() on the left,
-	// not treat both sides as JSValue.
+	// str !== str.toLowerCase() where str is JSValue should use jsvalue wrappers.
 	ts := `function f(str) { return str !== str.toLowerCase(); }`
 	out := compile(t, ts)
-	assertContains(t, out, ".String()")
-	assertContains(t, out, "strings.ToLower")
+	assertContains(t, out, "jsvalue.NEq(jsvalue.From(str), jsvalue.ToLowerCase(str))")
 }
 
 func TestLocalVarPropertyAccessUsesGet(t *testing.T) {

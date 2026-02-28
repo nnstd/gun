@@ -415,7 +415,8 @@ func TestJSValueComparedWithBoolLit(t *testing.T) {
 	if (check(key, obj) !== false) { return true; }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, ".Bool() != false")
+	assertContains(t, out, "jsvalue.NEq(")
+	assertContains(t, out, "jsvalue.NewBool(false)).Bool()")
 	assertNotContains(t, out, ".String() != false")
 }
 
@@ -461,7 +462,7 @@ func TestJSValueSliceLocalAssignedFromSlice(t *testing.T) {
 func TestSplitOnJSValueReturnsJSValue(t *testing.T) {
 	ts := `function f(key) { return key.split("."); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.FromStrings(strings.Split(")
+	assertContains(t, out, "jsvalue.Split(key,")
 }
 
 func TestLenInBoolContext(t *testing.T) {
@@ -578,8 +579,10 @@ func TestOrderingComparisonCoercesFloat64(t *testing.T) {
 	if (available < toEat) { return true; }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "float64(")
-	assertContains(t, out, ".Number()")
+	assertContains(t, out, "jsvalue.Lt(")
+	assertContains(t, out, "jsvalue.From(available)")
+	assertContains(t, out, "jsvalue.From(toEat)")
+	assertContains(t, out, ".Bool()")
 }
 
 func TestDestructuringWithBooleanDefaults(t *testing.T) {
@@ -591,7 +594,7 @@ func TestDestructuringWithBooleanDefaults(t *testing.T) {
 }`
 	out := compile(t, ts)
 	assertContains(t, out, "jsvalue.NewBool(false)")
-	assertContains(t, out, "!flag.Bool()")
+	assertContains(t, out, "jsvalue.Not(flag).Bool()")
 	assertNotContains(t, out, "!flag)")
 }
 
@@ -604,8 +607,9 @@ func TestDestructuringWithMultipleBooleanDefaults(t *testing.T) {
 	out := compile(t, ts)
 	assertContains(t, out, "jsvalue.NewBool(true)")
 	assertContains(t, out, "jsvalue.NewBool(false)")
-	assertContains(t, out, "!enabled.Bool()")
-	assertContains(t, out, "!disabled.Bool()")
+	assertContains(t, out, "jsvalue.Not(enabled)")
+	assertContains(t, out, "jsvalue.Not(disabled)")
+	assertContains(t, out, "jsvalue.Or(")
 }
 
 func TestDestructuringShorthandPattern(t *testing.T) {
@@ -616,7 +620,7 @@ func TestDestructuringShorthandPattern(t *testing.T) {
 }`
 	out := compile(t, ts)
 	assertContains(t, out, "var name = obj.Name")
-	assertContains(t, out, "!name.Bool()")
+	assertContains(t, out, "jsvalue.Not(name).Bool()")
 }
 
 func TestDestructuringPairPattern(t *testing.T) {
@@ -627,7 +631,7 @@ func TestDestructuringPairPattern(t *testing.T) {
 }`
 	out := compile(t, ts)
 	assertContains(t, out, "var value = obj.Key")
-	assertContains(t, out, "!value.Bool()")
+	assertContains(t, out, "jsvalue.Not(value).Bool()")
 }
 
 func TestBooleanLiteralWithNotOperator(t *testing.T) {
@@ -666,8 +670,9 @@ func TestArrayDestructuringWithBooleans(t *testing.T) {
 	// When arr is JSValue param, uses .Index() instead of []
 	assertContains(t, out, "var first = arr.Index(0)")
 	assertContains(t, out, "var second = arr.Index(1)")
-	assertContains(t, out, "!first.Bool()")
-	assertContains(t, out, "!second.Bool()")
+	assertContains(t, out, "jsvalue.Not(first)")
+	assertContains(t, out, "jsvalue.Not(second)")
+	assertContains(t, out, "jsvalue.Or(")
 }
 
 func TestArrayDestructuringWithRestPattern(t *testing.T) {
@@ -679,5 +684,5 @@ func TestArrayDestructuringWithRestPattern(t *testing.T) {
 	out := compile(t, ts)
 	// When arr is JSValue param, uses .Index() instead of []
 	assertContains(t, out, "var first = arr.Index(0)")
-	assertContains(t, out, "!first.Bool()")
+	assertContains(t, out, "jsvalue.Not(first).Bool()")
 }

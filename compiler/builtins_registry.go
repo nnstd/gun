@@ -167,7 +167,18 @@ func (r *BuiltinRegistry) registerJSValuePackageFunctions() {
 		"Split", "Replace", "CharAt",
 		"StartsWith", "EndsWith", "Repeat",
 		// Logical operators
-		"OrDefault",
+		"OrDefault", "And", "Or", "Not", "Nullish",
+		// Arithmetic operators
+		"Add", "Sub", "Mul", "Div", "Mod",
+		"Neg", "Inc", "Dec",
+		// Bitwise operators
+		"BitNot", "BitAnd", "BitOr", "BitXor", "Shl", "Shr", "UShr",
+		// Comparison operators
+		"Eq", "NEq", "Lt", "Gt", "LtE", "GtE",
+		// Type checking
+		"IsArrayValue", "TypeOf",
+		// Substring/LastIndexOf
+		"Substring", "LastIndexOf",
 	}
 	for _, name := range funcs {
 		r.jsvaluePackageFuncs[name] = true

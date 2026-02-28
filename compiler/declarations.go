@@ -227,7 +227,7 @@ func (t *Transformer) isNonJSValueInit(node *sitter.Node) bool {
 	}
 	switch node.Kind() {
 	case "number", "string", "template_string", "true", "false",
-		"ternary_expression", "unary_expression",
+		"ternary_expression",
 		"array", "regex":
 		return true
 	case "new_expression":
@@ -241,16 +241,20 @@ func (t *Transformer) isNonJSValueInit(node *sitter.Node) bool {
 		}
 		return true
 	case "binary_expression":
-		// Go && always returns bool, so it's always non-JSValue.
-		// || and ?? may return JSValue via the IIFE pattern, so check operands.
-		opNode := node.ChildByFieldName("operator")
-		if opNode != nil {
-			op := opNode.Utf8Text(t.source)
-			if op == "||" || op == "??" {
-				left := node.ChildByFieldName("left")
-				right := node.ChildByFieldName("right")
-				return t.isNonJSValueInit(left) && t.isNonJSValueInit(right)
-			}
+		// When either operand returns JSValue, the binary expression now
+		// produces a JSValue result (via jsvalue.Add, jsvalue.Eq, jsvalue.And, etc.)
+		left := node.ChildByFieldName("left")
+		right := node.ChildByFieldName("right")
+		if (left != nil && t.nodeReturnsJSValue(left)) ||
+			(right != nil && t.nodeReturnsJSValue(right)) {
+			return false
+		}
+		return true
+	case "unary_expression":
+		// Unary operations on JSValue (!, -, ~, typeof) now return JSValue
+		argNode := node.ChildByFieldName("argument")
+		if argNode != nil && t.nodeReturnsJSValue(argNode) {
+			return false
 		}
 		return true
 	case "call_expression":

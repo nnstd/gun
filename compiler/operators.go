@@ -96,3 +96,75 @@ func isArithmeticOp(op token.Token) bool {
 	}
 	return false
 }
+
+// jsvalueOpName maps a Go token operator to the corresponding jsvalue helper function name.
+// Returns empty string if no mapping exists.
+func jsvalueOpName(op token.Token) string {
+	switch op {
+	// Arithmetic
+	case token.ADD:
+		return "Add"
+	case token.SUB:
+		return "Sub"
+	case token.MUL:
+		return "Mul"
+	case token.QUO:
+		return "Div"
+	case token.REM:
+		return "Mod"
+	// Comparison
+	case token.EQL:
+		return "Eq"
+	case token.NEQ:
+		return "NEq"
+	case token.LSS:
+		return "Lt"
+	case token.GTR:
+		return "Gt"
+	case token.LEQ:
+		return "LtE"
+	case token.GEQ:
+		return "GtE"
+	// Bitwise
+	case token.AND:
+		return "BitAnd"
+	case token.OR:
+		return "BitOr"
+	case token.XOR:
+		return "BitXor"
+	case token.SHL:
+		return "Shl"
+	case token.SHR:
+		return "Shr"
+	default:
+		return ""
+	}
+}
+
+// jsvalueAugmentedOpName maps an augmented assignment operator to jsvalue function name.
+func jsvalueAugmentedOpName(op string) string {
+	switch op {
+	case "+=":
+		return "Add"
+	case "-=":
+		return "Sub"
+	case "*=":
+		return "Mul"
+	case "/=":
+		return "Div"
+	case "%=":
+		return "Mod"
+	case "&=":
+		return "BitAnd"
+	case "|=":
+		return "BitOr"
+	case "^=":
+		return "BitXor"
+	case "<<=":
+		return "Shl"
+	case ">>=":
+		return "Shr"
+	default:
+		return ""
+	}
+}

@@ -30,6 +30,66 @@ func floatLit(s string) *ast.BasicLit {
 	return basicLit(token.FLOAT, s)
 }
 
+// jsvalueWrapLit wraps a Go AST expression as a *jsvalue.JSValue value.
+// Literals get specific constructors (NewString, NewNumber, NewBool).
+// Expressions already returning *JSValue (jsvalue.* calls, .Get(), etc.) pass through.
+// Everything else is wrapped with jsvalue.From() as a safe fallback.
+func jsvalueWrapLit(expr ast.Expr) ast.Expr {
+	// Already a JSValue expression — pass through
+	if isAlreadyJSValue(expr) {
+		return expr
+	}
+	switch e := expr.(type) {
+	case *ast.BasicLit:
+		switch e.Kind {
+		case token.STRING:
+			return callExpr(selectorExpr(ident("jsvalue"), "NewString"), e)
+		case token.INT:
+			return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), callExpr(ident("float64"), e))
+		case token.FLOAT:
+			return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), e)
+		}
+	case *ast.UnaryExpr:
+		// Handle negative literals: -2 → jsvalue.NewNumber(float64(-2))
+		if e.Op == token.SUB {
+			if lit, ok := e.X.(*ast.BasicLit); ok && (lit.Kind == token.INT || lit.Kind == token.FLOAT) {
+				return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), callExpr(ident("float64"), e))
+			}
+		}
+	case *ast.Ident:
+		if e.Name == "true" || e.Name == "false" {
+			return callExpr(selectorExpr(ident("jsvalue"), "NewBool"), e)
+		}
+		if e.Name == "nil" {
+			return callExpr(selectorExpr(ident("jsvalue"), "NewNull"))
+		}
+	}
+	// Unknown expression type — wrap with jsvalue.From() as safe fallback
+	return callExpr(selectorExpr(ident("jsvalue"), "From"), expr)
+}
+
+// isAlreadyJSValue returns true if the expression is known to produce *jsvalue.JSValue.
+func isAlreadyJSValue(expr ast.Expr) bool {
+	switch e := expr.(type) {
+	case *ast.CallExpr:
+		// jsvalue.NewString(...), jsvalue.From(...), jsvalue.Slice(...), etc.
+		if sel, ok := e.Fun.(*ast.SelectorExpr); ok {
+			if id, ok := sel.X.(*ast.Ident); ok && id.Name == "jsvalue" {
+				return true
+			}
+			// .Get(), .Index(), .Call() on JSValue receivers
+			switch sel.Sel.Name {
+			case "Get", "Index", "Call":
+				return true
+			}
+		}
+	case *ast.SelectorExpr:
+		// obj.Field — could be JSValue property access
+		return false
+	}
+	return false
+}
+
 func field(name string, typ ast.Expr) *ast.Field {
 	f := &ast.Field{Type: typ}
 	if name != "" {

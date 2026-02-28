@@ -380,7 +380,7 @@ func (t *Transformer) transformForStmt(node *sitter.Node) ast.Stmt {
 
 	var cond ast.Expr
 	if condNode != nil {
-		cond = t.transformExpr(condNode)
+		cond = t.ensureBool(t.transformExpr(condNode))
 	}
 
 	var post ast.Stmt
@@ -538,7 +538,7 @@ func (t *Transformer) transformWhileStmt(node *sitter.Node) ast.Stmt {
 
 	var cond ast.Expr
 	if condNode != nil {
-		cond = t.transformExpr(condNode)
+		cond = t.ensureBool(t.transformExpr(condNode))
 		if paren, ok := cond.(*ast.ParenExpr); ok {
 			cond = paren.X
 		}
@@ -566,7 +566,7 @@ func (t *Transformer) transformDoWhileStmt(node *sitter.Node) ast.Stmt {
 
 	var cond ast.Expr
 	if condNode != nil {
-		cond = t.transformExpr(condNode)
+		cond = t.ensureBool(t.transformExpr(condNode))
 		if paren, ok := cond.(*ast.ParenExpr); ok {
 			cond = paren.X
 		}
