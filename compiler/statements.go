@@ -533,6 +533,10 @@ func (t *Transformer) transformForInOrOfStmt(node *sitter.Node) ast.Stmt {
 
 	if isOf {
 		// for (const x of arr) → for _, x := range arr
+		// If the range expression returns JSValue, call .Array() to get []*JSValue
+		if t.nodeReturnsJSValue(rightNode) {
+			x = callExpr(selectorExpr(x, "Array"))
+		}
 		return &ast.RangeStmt{
 			Key:   ident("_"),
 			Value: ident(varName),

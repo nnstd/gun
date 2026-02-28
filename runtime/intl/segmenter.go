@@ -3,41 +3,38 @@ package intl
 import (
 	"unicode/utf8"
 
-	jsvalue "github.com/nnstd/gun/runtime/jsvalue"
+	"github.com/nnstd/gun/runtime/jsvalue"
 )
 
-// Segmenter segments strings into grapheme-like units.
-// This is a simplified Go equivalent of Intl.Segmenter that segments by rune.
-type Segmenter struct{}
-
-// SegmentData holds a single segment from the segmenter.
-type SegmentData struct {
-	Segment string
-}
-
-// NewSegmenter creates a new Segmenter.
-func NewSegmenter() *Segmenter {
-	return &Segmenter{}
-}
-
-// Segment splits the input into individual rune segments.
-// Accepts string or *jsvalue.JSValue.
-func (s *Segmenter) Segment(v any) []SegmentData {
-	var str string
-	switch val := v.(type) {
-	case string:
-		str = val
-	case *jsvalue.JSValue:
-		str = val.String()
-	default:
-		return nil
+// NewSegmenter creates a new Intl.Segmenter as a JSValue class.
+// The segmenter has a segment() method that splits strings into rune segments.
+var Segmenter = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSValue) *jsvalue.JSValue {
+	// Constructor — store options if provided
+	if len(args) > 0 {
+		this.Set("locale", args[0])
+	}
+	if len(args) > 1 {
+		this.Set("options", args[1])
 	}
 
-	var result []SegmentData
-	for i := 0; i < len(str); {
-		r, size := utf8.DecodeRuneInString(str[i:])
-		result = append(result, SegmentData{Segment: string(r)})
-		i += size
-	}
-	return result
-}
+	// Set segment method on the instance directly (since we need closure over this)
+	this.Set("segment", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		str := ""
+		if len(args) > 0 && args[0] != nil {
+			str = args[0].String()
+		}
+
+		var segments []*jsvalue.JSValue
+		for i := 0; i < len(str); {
+			r, size := utf8.DecodeRuneInString(str[i:])
+			seg := jsvalue.NewObject()
+			seg.Set("segment", jsvalue.NewString(string(r)))
+			seg.Set("index", jsvalue.NewNumber(float64(i)))
+			segments = append(segments, seg)
+			i += size
+		}
+		return jsvalue.NewArray(segments...)
+	}))
+
+	return nil
+}, nil)

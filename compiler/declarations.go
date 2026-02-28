@@ -851,7 +851,7 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 				stmts = append(stmts, &ast.AssignStmt{
 					Lhs: []ast.Expr{ident(name)},
 					Tok: token.DEFINE,
-					Rhs: []ast.Expr{selectorExpr(valExpr, capitalize(name))},
+					Rhs: []ast.Expr{callExpr(selectorExpr(valExpr, "Get"), stringLit(name))},
 				})
 				// All destructured fields are JSValue (properties from objects)
 				t.addToCurrentScope(name, false)
@@ -865,7 +865,7 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 					stmts = append(stmts, &ast.AssignStmt{
 						Lhs: []ast.Expr{ident(name)},
 						Tok: token.DEFINE,
-						Rhs: []ast.Expr{selectorExpr(valExpr, capitalize(key))},
+						Rhs: []ast.Expr{callExpr(selectorExpr(valExpr, "Get"), stringLit(key))},
 					})
 					// All destructured fields are JSValue (properties from objects)
 					t.addToCurrentScope(name, false)

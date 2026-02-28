@@ -124,7 +124,7 @@ func TestNewMemberExpression(t *testing.T) {
 	ts := `const seg = new Intl.Segmenter();`
 	out := compile(t, ts)
 	assertNotContains(t, out, "Intl.")
-	assertContains(t, out, "intl.NewSegmenter()")
+	assertContains(t, out, "intl.Segmenter.Call()")
 }
 
 func TestImportMeta(t *testing.T) {

@@ -151,7 +151,7 @@ func TestForOfDestructuring(t *testing.T) {
 	}`
 	out := compile(t, ts)
 	assertContains(t, out, "for _, _item := range items")
-	assertContains(t, out, "label := _item.Name")
+	assertContains(t, out, `_item.Get("name")`)
 }
 
 func TestModuleExportsFunction(t *testing.T) {

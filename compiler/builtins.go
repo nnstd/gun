@@ -149,7 +149,7 @@ func transformBuiltinNew(name string, args []ast.Expr, t *Transformer) ast.Expr 
 		return callExpr(selectorExpr(ident("hono"), "New"))
 	case "IntlSegmenter":
 		t.addImport("github.com/nnstd/gun/runtime/intl")
-		return callExpr(selectorExpr(ident("intl"), "NewSegmenter"))
+		return callExpr(selectorExpr(selectorExpr(ident("intl"), "Segmenter"), "Call"), args...)
 	}
 	return nil
 }

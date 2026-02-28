@@ -184,8 +184,8 @@ func TestObjectDestructuringTopLevel(t *testing.T) {
 	ts := `const obj = { a: 1, b: 2 };
 const { a, b } = obj;`
 	out := compile(t, ts)
-	assertContains(t, out, "var a = obj.A")
-	assertContains(t, out, "var b = obj.B")
+	assertContains(t, out, "obj.Get(\"a\")")
+	assertContains(t, out, "obj.Get(\"b\")")
 	assertNotContains(t, out, "_destructure_placeholder")
 }
 
@@ -205,7 +205,7 @@ func TestObjectDestructuringInFunction(t *testing.T) {
 	console.log(a);
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "var a = obj.A")
+	assertContains(t, out, "obj.Get(\"a\")")
 	assertNotContains(t, out, "_destructure_placeholder")
 }
 
@@ -231,8 +231,8 @@ func TestParamObjectDestructuring(t *testing.T) {
 	ts := `function extract({ name, age }) { return name; }`
 	out := compile(t, ts)
 	assertContains(t, out, "_param0 *jsvalue.JSValue")
-	assertContains(t, out, "name := _param0.Name")
-	assertContains(t, out, "age := _param0.Age")
+	assertContains(t, out, "_param0.Get(\"name\")")
+	assertContains(t, out, "_param0.Get(\"age\")")
 	assertNotContains(t, out, "{ name")
 }
 
@@ -303,7 +303,7 @@ func TestDestructuringParamWithoutDefault(t *testing.T) {
 	// No default value — should NOT be variadic
 	assertNotContains(t, out, "...")
 	assertContains(t, out, "_param0")
-	assertContains(t, out, "name := _param0.Name")
+	assertContains(t, out, "_param0.Get(\"name\")")
 }
 
 func TestClassMethodLocalsUseGet(t *testing.T) {
@@ -619,7 +619,7 @@ func TestDestructuringShorthandPattern(t *testing.T) {
 	if (!name) { return "default"; }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "var name = obj.Name")
+	assertContains(t, out, "obj.Get(\"name\")")
 	assertContains(t, out, "jsvalue.Not(name).Bool()")
 }
 
@@ -630,7 +630,7 @@ func TestDestructuringPairPattern(t *testing.T) {
 	if (!value) { return "default"; }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "var value = obj.Key")
+	assertContains(t, out, `obj.Get("key")`)
 	assertContains(t, out, "jsvalue.Not(value).Bool()")
 }
 
