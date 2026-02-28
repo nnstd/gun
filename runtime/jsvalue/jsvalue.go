@@ -394,6 +394,54 @@ func Truthy(v *JSValue) bool {
 	}
 }
 
+// Splice removes/replaces elements in an array and returns the removed elements.
+// Implements JavaScript Array.prototype.splice(start, deleteCount, ...items).
+func Splice(arrAny any, args ...*JSValue) *JSValue {
+	arr := asArray(arrAny)
+	if arr == nil || arr.arrayVal == nil {
+		return NewArray()
+	}
+	length := len(arr.arrayVal)
+	start := 0
+	if len(args) >= 1 && args[0] != nil {
+		start = int(args[0].Number())
+		if start < 0 {
+			start = length + start
+			if start < 0 {
+				start = 0
+			}
+		}
+		if start > length {
+			start = length
+		}
+	}
+	deleteCount := length - start
+	if len(args) >= 2 && args[1] != nil {
+		deleteCount = int(args[1].Number())
+		if deleteCount < 0 {
+			deleteCount = 0
+		}
+		if start+deleteCount > length {
+			deleteCount = length - start
+		}
+	}
+	// Extract removed elements
+	removed := make([]*JSValue, deleteCount)
+	copy(removed, arr.arrayVal[start:start+deleteCount])
+	// Build new items to insert
+	var newItems []*JSValue
+	for i := 2; i < len(args); i++ {
+		newItems = append(newItems, args[i])
+	}
+	// Rebuild array: before + newItems + after
+	result := make([]*JSValue, 0, length-deleteCount+len(newItems))
+	result = append(result, arr.arrayVal[:start]...)
+	result = append(result, newItems...)
+	result = append(result, arr.arrayVal[start+deleteCount:]...)
+	arr.arrayVal = result
+	return NewArray(removed...)
+}
+
 // asArray converts any to *JSValue, handling []*JSValue from Go rest params.
 func asArray(v any) *JSValue {
 	switch val := v.(type) {

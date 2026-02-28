@@ -77,6 +77,7 @@ func (r *BuiltinRegistry) registerArrayMethods() {
 		{Name: "pop", ReturnType: ReturnJSValue, IsArrayMethod: true},
 		{Name: "shift", ReturnType: ReturnJSValue, IsArrayMethod: true},
 		{Name: "unshift", ReturnType: ReturnNumber, IsArrayMethod: true},
+		{Name: "splice", ReturnType: ReturnArray, IsArrayMethod: true},
 		{Name: "slice", ReturnType: ReturnArray, IsArrayMethod: true},
 		{Name: "concat", ReturnType: ReturnArray, IsArrayMethod: true},
 		{Name: "join", ReturnType: ReturnString, IsArrayMethod: true},
@@ -163,6 +164,7 @@ func (r *BuiltinRegistry) registerJSValuePackageFunctions() {
 		"Shift", "Unshift",
 		"Map", "Filter", "ForEach",
 		"Find", "Some", "Every", "Reduce",
+		"Splice",
 		// String wrapper functions
 		"ToLowerCase", "ToUpperCase", "Trim",
 		"Split", "Replace", "CharAt",

@@ -129,6 +129,16 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 			addImport("slices")
 			return callExpr(selectorExpr(ident("slices"), "Contains"), obj, args[0])
 		}
+	case "splice":
+		// arr.splice(start, deleteCount, ...items) → jsvalue.Splice(arr, args...)
+		if isJSValueReceiver || isJSValueMethodCall(obj) {
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			spliceArgs := []ast.Expr{obj}
+			for _, arg := range args {
+				spliceArgs = append(spliceArgs, jsvalueWrapLit(arg))
+			}
+			return callExpr(selectorExpr(ident("jsvalue"), "Splice"), spliceArgs...)
+		}
 	case "slice":
 		// JSValue receiver: use jsvalue.Slice wrapper
 		if isJSValueReceiver || isJSValueMethodCall(obj) {
