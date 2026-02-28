@@ -551,6 +551,14 @@ func extractParamNames(node *sitter.Node, source []byte) []string {
 			nameNode := param.ChildByFieldName("pattern")
 			if nameNode != nil && nameNode.Kind() == "identifier" {
 				names = append(names, nameNode.Utf8Text(source))
+			} else if nameNode != nil && nameNode.Kind() == "rest_pattern" {
+				// ...args inside required_parameter
+				for j := uint(0); j < nameNode.NamedChildCount(); j++ {
+					if child := nameNode.NamedChild(j); child.Kind() == "identifier" {
+						names = append(names, child.Utf8Text(source))
+						break
+					}
+				}
 			}
 		case "rest_parameter":
 			nameNode := param.ChildByFieldName("pattern")
@@ -562,6 +570,32 @@ func extractParamNames(node *sitter.Node, source []byte) []string {
 		}
 	}
 	return names
+}
+
+// extractRestFlags returns a bool slice parallel to extractParamNames indicating
+// which parameters are rest parameters (...args).
+func extractRestFlags(node *sitter.Node, source []byte) []bool {
+	if node == nil {
+		return nil
+	}
+	var flags []bool
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		param := node.NamedChild(i)
+		switch param.Kind() {
+		case "required_parameter", "optional_parameter":
+			nameNode := param.ChildByFieldName("pattern")
+			if nameNode != nil && nameNode.Kind() == "rest_pattern" {
+				flags = append(flags, true)
+			} else {
+				flags = append(flags, false)
+			}
+		case "rest_parameter":
+			flags = append(flags, true)
+		case "identifier":
+			flags = append(flags, false)
+		}
+	}
+	return flags
 }
 
 // extractParamInfo returns a map of parameter names to whether they have

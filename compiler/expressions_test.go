@@ -148,10 +148,10 @@ func TestLengthOnUntypedParam(t *testing.T) {
 }
 
 func TestEnsureBoolMethodCallOnLocal(t *testing.T) {
-	// Method calls on locals use .Get().Call() and .Bool() for truthiness.
+	// Method calls on locals use .Get().Call(this, ...) and .Bool() for truthiness.
 	ts := `function f(s) { if (s.Match()) { return s; } }`
 	out := compile(t, ts)
-	assertContains(t, out, `s.Get("Match").Call()`)
+	assertContains(t, out, `s.Get("Match").Call(s)`)
 	assertContains(t, out, ".Bool()")
 }
 
@@ -542,7 +542,7 @@ func TestNewExpressionChainedPropertyAccess(t *testing.T) {
 }
 
 func TestMethodCallOnLocalUsesGetCall(t *testing.T) {
-	// Method calls on local variables should use .Get("method").Call()
+	// Method calls on local variables should use .Get("method").Call(this, ...)
 	// since all locals are *jsvalue.JSValue in the all-JSValue architecture.
 	ts := `import { statSync } from 'fs';
 function f(dir) {
@@ -550,13 +550,13 @@ function f(dir) {
 	return stats.isDirectory();
 }`
 	out := compile(t, ts)
-	assertContains(t, out, `stats.Get("isDirectory").Call()`)
+	assertContains(t, out, `stats.Get("isDirectory").Call(stats)`)
 	assertNotContains(t, out, "stats.IsDirectory()")
 }
 
 func TestMethodCallOnParamUsesGetCall(t *testing.T) {
-	// Method calls on function parameters use .Get().Call() for dynamic dispatch.
+	// Method calls on function parameters use .Get().Call(this, ...) for dynamic dispatch.
 	ts := `function f(obj) { return obj.doSomething(1, 2); }`
 	out := compile(t, ts)
-	assertContains(t, out, `obj.Get("doSomething").Call(`)
+	assertContains(t, out, `obj.Get("doSomething").Call(obj,`)
 }

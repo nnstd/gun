@@ -221,8 +221,10 @@ func (t *Transformer) buildMethodSetup(className, methodName string, node *sitte
 	t.pushTypedScope(paramInfo)
 	defer t.popScope()
 
-	// Add 'this' to scope
+	// Add 'this' to scope and track as JSValue local so method calls
+	// on 'this' use .Get().Call() instead of capitalized selectors.
 	t.addToCurrentScope("this", false)
+	t.jsvalueLocals["this"] = true
 
 	// Build the function body
 	var body *ast.BlockStmt
@@ -232,37 +234,74 @@ func (t *Transformer) buildMethodSetup(className, methodName string, node *sitte
 		body = blockStmt()
 	}
 
-	// For instance methods, 'this' needs to be the first arg
-	// The NewClass helper doesn't pass 'this' to prototype methods automatically,
-	// so methods are regular functions. 'this' is accessed via closure or args.
-	// For now, methods don't receive 'this' — they're called as obj.Get("method").Call()
-	// where 'this' binding would need explicit support.
-
-	// Build variadic function params: func(args ...*jsvalue.JSValue) *jsvalue.JSValue
-	// Unpack named params from args
+	// Methods are called as obj.Get("method").Call(args...).
+	// The compiler injects 'this' as the first element of _args at call sites,
+	// so we extract it here: this := _args[0], then unpack named params from _args[1:].
 	var argUnpackStmts []ast.Stmt
+
+	// Extract 'this' from _args[0]
+	if !isStatic {
+		argUnpackStmts = append(argUnpackStmts,
+			&ast.DeclStmt{Decl: varDecl("this", jsValuePtrType(), nil)},
+			&ast.IfStmt{
+				Cond: &ast.BinaryExpr{
+					X:  callExpr(ident("len"), ident("_args")),
+					Op: token.GTR,
+					Y:  intLit("0"),
+				},
+				Body: blockStmt(
+					assignStmt([]ast.Expr{ident("this")}, []ast.Expr{
+						&ast.IndexExpr{X: ident("_args"), Index: intLit("0")},
+					}),
+				),
+			},
+		)
+	}
+
+	// Unpack named params from _args (offset by 1 for instance methods to skip 'this')
+	offset := 0
+	if !isStatic {
+		offset = 1
+	}
 	if paramsNode != nil {
 		paramNames := extractParamNames(paramsNode, t.source)
+		isRest := extractRestFlags(paramsNode, t.source)
 		for i, pName := range paramNames {
 			if pName == "" {
 				continue
 			}
 			pName = sanitizeIdent(pName)
-			argUnpackStmts = append(argUnpackStmts,
-				&ast.DeclStmt{Decl: varDecl(pName, jsValuePtrType(), nil)},
-				&ast.IfStmt{
-					Cond: &ast.BinaryExpr{
-						X:  callExpr(ident("len"), ident("_args")),
-						Op: token.GTR,
-						Y:  intLit(itoa(i)),
+			idx := i + offset
+			if i < len(isRest) && isRest[i] {
+				// Rest param: args = _args[idx:]
+				t.jsvalueSliceLocals[pName] = true
+				argUnpackStmts = append(argUnpackStmts,
+					&ast.AssignStmt{
+						Lhs: []ast.Expr{ident(pName)},
+						Tok: token.DEFINE,
+						Rhs: []ast.Expr{&ast.SliceExpr{
+							X:   ident("_args"),
+							Low: intLit(itoa(idx)),
+						}},
 					},
-					Body: blockStmt(
-						assignStmt([]ast.Expr{ident(pName)}, []ast.Expr{
-							&ast.IndexExpr{X: ident("_args"), Index: intLit(itoa(i))},
-						}),
-					),
-				},
-			)
+				)
+			} else {
+				argUnpackStmts = append(argUnpackStmts,
+					&ast.DeclStmt{Decl: varDecl(pName, jsValuePtrType(), nil)},
+					&ast.IfStmt{
+						Cond: &ast.BinaryExpr{
+							X:  callExpr(ident("len"), ident("_args")),
+							Op: token.GTR,
+							Y:  intLit(itoa(idx)),
+						},
+						Body: blockStmt(
+							assignStmt([]ast.Expr{ident(pName)}, []ast.Expr{
+								&ast.IndexExpr{X: ident("_args"), Index: intLit(itoa(idx))},
+							}),
+						),
+					},
+				)
+			}
 		}
 	}
 	body.List = append(argUnpackStmts, body.List...)
@@ -272,11 +311,12 @@ func (t *Transformer) buildMethodSetup(className, methodName string, node *sitte
 		Type:  &ast.Ellipsis{Elt: jsValuePtrType()},
 	})
 
-	// Determine return type
-	var results *ast.FieldList
+	// All methods wrapped in jsvalue.NewFunction must return *jsvalue.JSValue.
+	// Methods with explicit returns get their values wrapped; void methods
+	// get a nil return appended.
+	results := fieldList(field("", jsValuePtrType()))
+	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 	if hasReturnValue(body) {
-		results = fieldList(field("", jsValuePtrType()))
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		wrapReturnsWithJSValue(body)
 	}
 	ensureTrailingReturn(body, results)

@@ -751,3 +751,42 @@ func TestForOfDestructuringPreRegistersNames(t *testing.T) {
 	assertContains(t, out, "fmt.Sprint(character)")
 	assertContains(t, out, `_item.Get("segment")`)
 }
+
+func TestClassMethodReceivesThis(t *testing.T) {
+	// Class methods should extract 'this' from _args[0].
+	ts := `class Foo {
+	bar() { return this.name; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "var this *jsvalue.JSValue")
+	assertContains(t, out, "this = _args[0]")
+	assertContains(t, out, `this.Get("name")`)
+}
+
+func TestClassMethodRestParams(t *testing.T) {
+	// Class methods with rest params should extract them as a slice from _args.
+	ts := `class Foo {
+	add(...items) { return items; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "items := _args[1:]")
+}
+
+func TestClassMethodThisCallUsesGetCall(t *testing.T) {
+	// Method calls on 'this' should use .Get().Call() for dynamic dispatch.
+	ts := `class Foo {
+	bar() { return this.baz(); }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, `this.Get("baz").Call(this)`)
+}
+
+func TestClassVoidMethodHasReturnType(t *testing.T) {
+	// Void methods wrapped in NewFunction must still have *jsvalue.JSValue return type.
+	ts := `class Foo {
+	reset() { this.count = 0; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewFunction(func(_args ...*jsvalue.JSValue) *jsvalue.JSValue")
+	assertContains(t, out, "return nil")
+}

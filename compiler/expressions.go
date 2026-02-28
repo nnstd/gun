@@ -564,19 +564,21 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 				}
 			}
 
-			// Method call on a local scope variable (JSValue parameter or local):
-			// use .Get("method").Call(args...) for dynamic dispatch.
-			if objNode.Kind() == "identifier" && t.isLocalName(objText) {
+			// Method call on a local scope variable or 'this':
+			// use .Get("method").Call(this, args...) for dynamic dispatch.
+			// Prepend receiver as 'this' so class methods can access it.
+			if (objNode.Kind() == "identifier" && t.isLocalName(objText)) || objNode.Kind() == "this" {
 				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 				obj := t.transformExpr(objNode)
 				for i, arg := range args {
 					args[i] = t.wrapAsJSValue(arg)
 				}
-				return callExpr(selectorExpr(callExpr(selectorExpr(obj, "Get"), stringLit(prop)), "Call"), args...)
+				allArgs := append([]ast.Expr{obj}, args...)
+				return callExpr(selectorExpr(callExpr(selectorExpr(obj, "Get"), stringLit(prop)), "Call"), allArgs...)
 			}
 
 			// Method call on a package-level untyped variable (JSValue):
-			// use .Get("method").Call(args...) for dynamic dispatch.
+			// use .Get("method").Call(this, args...) for dynamic dispatch.
 			if objNode.Kind() == "identifier" {
 				if typed, ok := t.pkgVarTyped[objText]; ok && !typed {
 					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
@@ -584,7 +586,8 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 					for i, arg := range args {
 						args[i] = t.wrapAsJSValue(arg)
 					}
-					return callExpr(selectorExpr(callExpr(selectorExpr(obj, "Get"), stringLit(prop)), "Call"), args...)
+					allArgs := append([]ast.Expr{obj}, args...)
+					return callExpr(selectorExpr(callExpr(selectorExpr(obj, "Get"), stringLit(prop)), "Call"), allArgs...)
 				}
 			}
 		}
@@ -820,9 +823,9 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 		}
 	}
 
-	// For local scope variables (function parameters typed as *jsvalue.JSValue),
+	// For local scope variables and 'this' (typed as *jsvalue.JSValue),
 	// use dynamic property access via Get() instead of Go selector expressions.
-	if objNode.Kind() == "identifier" && t.isLocalName(objNode.Utf8Text(t.source)) {
+	if (objNode.Kind() == "identifier" && t.isLocalName(objNode.Utf8Text(t.source))) || objNode.Kind() == "this" {
 		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		return callExpr(selectorExpr(obj, "Get"), stringLit(prop))
 	}

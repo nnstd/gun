@@ -105,7 +105,12 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 				return callExpr(selectorExpr(ident("jsvalue"), "Repeat"), origObj, jsvalueWrapLit(args[0]))
 			}
 			addImport("strings")
-			return callExpr(selectorExpr(ident("strings"), "Repeat"), obj, args[0])
+			// Coerce count arg to int — it may be a JSValue expression
+			count := args[0]
+			if isAlreadyJSValue(count) {
+				count = callExpr(ident("int"), callExpr(selectorExpr(count, "Number")))
+			}
+			return callExpr(selectorExpr(ident("strings"), "Repeat"), obj, count)
 		}
 	case "toLowerCase":
 		if wasJSValue {
