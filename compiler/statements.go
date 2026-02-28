@@ -74,6 +74,25 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 							}
 						}
 					}
+					// obj.prop = value on JSValue → obj.Set("prop", wrappedValue)
+					if leftNode.Kind() == "member_expression" {
+						memObj := leftNode.ChildByFieldName("object")
+						memProp := leftNode.ChildByFieldName("property")
+						if memObj != nil && memProp != nil {
+							isJSV := memObj.Kind() == "this" || (memObj.Kind() == "identifier" && t.isUntypedLocal(memObj.Utf8Text(t.source))) || t.nodeReturnsJSValue(memObj)
+							if memObj.Kind() == "this" || (memObj.Kind() == "identifier" && memObj.Utf8Text(t.source) == "this") {
+								isJSV = true
+							}
+							if isJSV {
+								obj := t.transformExpr(memObj)
+								rhs := t.transformExpr(rightNode)
+								if obj != nil && rhs != nil {
+									rhs = t.wrapAsJSValue(rhs)
+									return exprStmt(callExpr(selectorExpr(obj, "Set"), stringLit(memProp.Utf8Text(t.source)), rhs))
+								}
+							}
+						}
+					}
 					lhs := t.transformExpr(leftNode)
 					rhs := t.transformExpr(rightNode)
 					if lhs != nil && rhs != nil {

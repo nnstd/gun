@@ -1,7 +1,6 @@
 package compiler
 
 import (
-	"fmt"
 	"go/ast"
 	"go/token"
 	"strings"
@@ -1540,15 +1539,14 @@ func (t *Transformer) transformNewExpr(node *sitter.Node) ast.Expr {
 		return r
 	}
 
-	// Default: new Foo(args) → NewFoo(args) or &Foo{}
-	// Wrap args with jsvalue.From() since user-defined constructors take *jsvalue.JSValue.
-	if len(args) > 0 {
-		for i, arg := range args {
-			args[i] = t.wrapAsJSValue(arg)
-		}
-		return callExpr(ident(fmt.Sprintf("New%s", capitalize(name))), args...)
+	// Default: new Foo(args) → Foo.Call(args...)
+	// Classes are JSValue constructor functions; .Call() creates an instance.
+	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	for i, arg := range args {
+		args[i] = t.wrapAsJSValue(arg)
 	}
-	return addrOf(compositeLit(ident(name)))
+	ctor := t.transformExpr(ctorNode)
+	return callExpr(selectorExpr(ctor, "Call"), args...)
 }
 
 // inferModuleType walks a tree-sitter node to determine if it originates from

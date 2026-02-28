@@ -7,6 +7,31 @@ import (
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
+// transformClassDecl transforms a TypeScript class into JSValue-based objects.
+//
+// class Dog extends Animal {
+//     name: string;
+//     constructor(name) { this.name = name; }
+//     bark() { return this.name; }
+//     static create() { return new Dog("Rex"); }
+// }
+//
+// Becomes:
+//
+// var Dog = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSValue) *jsvalue.JSValue {
+//     this.Set("name", args[0])
+//     return nil
+// }, Animal)
+//
+// func init() {
+//     Dog.Get("prototype").Set("bark", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+//         this := args[0]  // NOT YET — see note below
+//         return this.Get("name")
+//     }))
+//     Dog.Set("create", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+//         return Dog.Call(jsvalue.NewString("Rex"))
+//     }))
+// }
 func (t *Transformer) transformClassDecl(node *sitter.Node) []ast.Decl {
 	nameNode := node.ChildByFieldName("name")
 	bodyNode := node.ChildByFieldName("body")
@@ -16,218 +41,265 @@ func (t *Transformer) transformClassDecl(node *sitter.Node) []ast.Decl {
 	}
 
 	className := capitalize(nameNode.Utf8Text(t.source))
-	recv := receiverName(className)
+	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 
-	var decls []ast.Decl
-	var structFields []*ast.Field
-	var ctorParams *ast.FieldList
-	var ctorBody *ast.BlockStmt
-	var methods []*ast.FuncDecl
-
-	// Check for extends
-	var parentName string
-	superclassNode := node.ChildByFieldName("superclass")
-	if superclassNode != nil {
-		parentName = capitalize(superclassNode.Utf8Text(t.source))
-	}
-
-	if bodyNode != nil {
-		for i := uint(0); i < bodyNode.NamedChildCount(); i++ {
-			member := bodyNode.NamedChild(i)
-			switch member.Kind() {
-			case "public_field_definition", "property_definition":
-				f := t.transformClassField(member)
-				if f != nil {
-					structFields = append(structFields, f)
-				}
-
-			case "method_definition":
-				nameN := member.ChildByFieldName("name")
-				if nameN == nil {
-					continue
-				}
-				// Skip computed property names like [Symbol] methods — no Go equivalent
-				if nameN.Kind() == "computed_property_name" {
-					continue
-				}
-				mName := nameN.Utf8Text(t.source)
-
-				if mName == "constructor" {
-					ctorParams, ctorBody = t.transformConstructor(member, className, recv)
-				} else {
-					m := t.transformMethod(member, className, recv)
-					if m != nil {
-						methods = append(methods, m)
+	// Check for extends (inside class_heritage → extends_clause)
+	var parentExpr ast.Expr = ident("nil")
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if child.Kind() == "class_heritage" {
+			for j := uint(0); j < child.NamedChildCount(); j++ {
+				ext := child.NamedChild(j)
+				if ext.Kind() == "extends_clause" {
+					valNode := ext.ChildByFieldName("value")
+					if valNode != nil {
+						parentExpr = t.transformExpr(valNode)
+					} else if ext.NamedChildCount() > 0 {
+						parentExpr = t.transformExpr(ext.NamedChild(0))
 					}
 				}
 			}
 		}
 	}
 
-	// Add parent embed if extends
-	if parentName != "" {
-		embedField := &ast.Field{Type: ident(parentName)}
-		structFields = append([]*ast.Field{embedField}, structFields...)
-	}
+	// Collect constructor body, methods, and static methods
+	var ctorStmts []ast.Stmt
+	var ctorParamsNode *sitter.Node
+	var methodSetups []ast.Stmt
+	var staticSetups []ast.Stmt
 
-	// Struct type declaration
-	structDecl := typeDecl(className, &ast.StructType{
-		Fields: fieldList(structFields...),
-	})
-	decls = append(decls, structDecl)
+	if bodyNode != nil {
+		for i := uint(0); i < bodyNode.NamedChildCount(); i++ {
+			member := bodyNode.NamedChild(i)
+			switch member.Kind() {
+			case "public_field_definition", "property_definition":
+				// Class field: this.name = defaultValue (in constructor)
+				// For now, skip — fields are set via constructor or as prototype properties
 
-	// Constructor → NewClassName function
-	if ctorBody != nil {
-		if ctorParams == nil {
-			ctorParams = fieldList()
+			case "method_definition":
+				nameN := member.ChildByFieldName("name")
+				if nameN == nil {
+					continue
+				}
+				if nameN.Kind() == "computed_property_name" {
+					continue
+				}
+				mName := nameN.Utf8Text(t.source)
+
+				// Check if static
+				isStatic := false
+				for j := uint(0); j < member.ChildCount(); j++ {
+					child := member.Child(j)
+					if child.Kind() == "static" || (child.IsNamed() == false && child.Utf8Text(t.source) == "static") {
+						isStatic = true
+						break
+					}
+				}
+
+				if mName == "constructor" {
+					ctorParamsNode = member.ChildByFieldName("parameters")
+					ctorStmts = t.transformClassConstructorBody(member)
+				} else if isStatic {
+					stmt := t.buildMethodSetup(className, mName, member, true)
+					if stmt != nil {
+						staticSetups = append(staticSetups, stmt)
+					}
+				} else {
+					stmt := t.buildMethodSetup(className, mName, member, false)
+					if stmt != nil {
+						methodSetups = append(methodSetups, stmt)
+					}
+				}
+			}
 		}
-		ctorFn := funcDecl(
-			"New"+className,
-			ctorParams,
-			fieldList(field("", ptrType(ident(className)))),
-			ctorBody,
-		)
-		decls = append(decls, ctorFn)
 	}
 
-	// Methods
-	for _, m := range methods {
-		decls = append(decls, m)
+	// Build constructor function literal
+	// func(this *jsvalue.JSValue, args ...*jsvalue.JSValue) *jsvalue.JSValue { ... }
+	ctorParams := fieldList(
+		field("this", jsValuePtrType()),
+		&ast.Field{
+			Names: []*ast.Ident{ident("_args")},
+			Type:  &ast.Ellipsis{Elt: jsValuePtrType()},
+		},
+	)
+
+	// Unpack named params from args if the constructor had named params
+	var argUnpackStmts []ast.Stmt
+	if ctorParamsNode != nil {
+		paramNames := extractParamNames(ctorParamsNode, t.source)
+		for i, pName := range paramNames {
+			if pName == "" {
+				continue
+			}
+			pName = sanitizeIdent(pName)
+			// var paramName *jsvalue.JSValue; if len(args) > i { paramName = args[i] }
+			argUnpackStmts = append(argUnpackStmts,
+				&ast.DeclStmt{Decl: varDecl(pName, jsValuePtrType(), nil)},
+				&ast.IfStmt{
+					Cond: &ast.BinaryExpr{
+						X:  callExpr(ident("len"), ident("_args")),
+						Op: token.GTR,
+						Y:  intLit(itoa(i)),
+					},
+					Body: blockStmt(
+						assignStmt([]ast.Expr{ident(pName)}, []ast.Expr{
+							&ast.IndexExpr{X: ident("_args"), Index: intLit(itoa(i))},
+						}),
+					),
+				},
+			)
+		}
 	}
+
+	allCtorStmts := append(argUnpackStmts, ctorStmts...)
+	allCtorStmts = append(allCtorStmts, returnStmt(ident("nil")))
+
+	ctorFuncLit := &ast.FuncLit{
+		Type: &ast.FuncType{
+			Params:  ctorParams,
+			Results: fieldList(field("", jsValuePtrType())),
+		},
+		Body: &ast.BlockStmt{List: allCtorStmts},
+	}
+
+	// var ClassName = jsvalue.NewClass(ctorFn, parentOrNil)
+	classVarDecl := varDecl(className, nil,
+		callExpr(selectorExpr(ident("jsvalue"), "NewClass"), ctorFuncLit, parentExpr))
+
+	var decls []ast.Decl
+	decls = append(decls, classVarDecl)
+
+	// Add method and static setups as init statements
+	if len(methodSetups) > 0 || len(staticSetups) > 0 {
+		allSetups := append(methodSetups, staticSetups...)
+		initBody := &ast.BlockStmt{List: allSetups}
+		initFn := funcDecl("init", fieldList(), nil, initBody)
+		decls = append(decls, initFn)
+	}
+
+	// Track the class as a typed local (constructor function, not JSValue var)
+	if len(t.localScopes) > 0 {
+		t.addToCurrentScope(className, true)
+	}
+	t.pkgVarTyped[className] = false // class constructor is a JSValue function
 
 	return decls
 }
 
-func (t *Transformer) transformClassField(node *sitter.Node) *ast.Field {
-	nameNode := node.ChildByFieldName("name")
-	typeNode := node.ChildByFieldName("type")
-
-	if nameNode == nil {
-		return nil
-	}
-
-	name := capitalize(nameNode.Utf8Text(t.source))
-
-	var typ ast.Expr = t.jsValueType()
-	if typeNode != nil {
-		mapped := t.getTypeAnnotation(typeNode)
-		if mapped != nil {
-			typ = mapped
-		}
-	}
-
-	origName := nameNode.Utf8Text(t.source)
-	tag := "`json:\"" + origName + "\"`"
-
-	return &ast.Field{
-		Names: []*ast.Ident{ident(name)},
-		Type:  typ,
-		Tag:   basicLit(token.STRING, tag),
-	}
-}
-
-func (t *Transformer) transformConstructor(node *sitter.Node, className, recv string) (*ast.FieldList, *ast.BlockStmt) {
+// transformClassConstructorBody transforms the constructor body,
+// rewriting this.x to this.Set("x", ...) / this.Get("x").
+func (t *Transformer) transformClassConstructorBody(node *sitter.Node) []ast.Stmt {
 	paramsNode := node.ChildByFieldName("parameters")
 	bodyNode := node.ChildByFieldName("body")
 
-	params, paramStmts := t.transformParams(paramsNode)
-
-	// Push scope so locals declared in the constructor body are tracked.
 	paramInfo := extractParamInfo(paramsNode, t.source)
 	t.pushTypedScope(paramInfo)
 	defer t.popScope()
 
-	// Build constructor body:
-	// recv := &ClassName{}
-	// <translated body with this.x → recv.X>
-	// return recv
-	stmts := []ast.Stmt{
-		&ast.AssignStmt{
-			Lhs: []ast.Expr{ident(recv)},
-			Tok: token.DEFINE,
-			Rhs: []ast.Expr{addrOf(compositeLit(ident(className)))},
-		},
-	}
+	// Add 'this' to scope so it's recognized as a local
+	t.addToCurrentScope("this", false)
 
-	if len(paramStmts) > 0 {
-		stmts = append(stmts, paramStmts...)
-	}
-
-	if bodyNode != nil {
-		block := t.transformBlock(bodyNode)
-		for _, stmt := range block.List {
-			stmts = append(stmts, t.rewriteThis(stmt, recv))
-		}
-	}
-
-	stmts = append(stmts, returnStmt(ident(recv)))
-
-	return params, &ast.BlockStmt{List: stmts}
-}
-
-func (t *Transformer) transformMethod(node *sitter.Node, className, recv string) *ast.FuncDecl {
-	nameNode := node.ChildByFieldName("name")
-	paramsNode := node.ChildByFieldName("parameters")
-	returnTypeNode := node.ChildByFieldName("return_type")
-	bodyNode := node.ChildByFieldName("body")
-
-	if nameNode == nil {
+	if bodyNode == nil {
 		return nil
 	}
 
-	mName := capitalize(nameNode.Utf8Text(t.source))
-	params, paramStmts := t.transformParams(paramsNode)
+	block := t.transformBlock(bodyNode)
+	return block.List
+}
 
-	// Push scope so locals declared in the method body are tracked.
+// buildMethodSetup creates a statement that sets a method on the class prototype
+// (or the class itself for static methods).
+//
+// For instance methods: ClassName.Get("prototype").Set("methodName", jsvalue.NewFunction(...))
+// For static methods: ClassName.Set("methodName", jsvalue.NewFunction(...))
+func (t *Transformer) buildMethodSetup(className, methodName string, node *sitter.Node, isStatic bool) ast.Stmt {
+	paramsNode := node.ChildByFieldName("parameters")
+	bodyNode := node.ChildByFieldName("body")
+
 	paramInfo := extractParamInfo(paramsNode, t.source)
 	t.pushTypedScope(paramInfo)
 	defer t.popScope()
 
-	// All-JSValue: ignore return type annotations
-	var results *ast.FieldList
-	_ = returnTypeNode
+	// Add 'this' to scope
+	t.addToCurrentScope("this", false)
 
+	// Build the function body
 	var body *ast.BlockStmt
 	if bodyNode != nil {
 		body = t.transformBlock(bodyNode)
-		if len(paramStmts) > 0 {
-			body.List = append(paramStmts, body.List...)
-		}
-		// Rewrite this.x → recv.X
-		rewritten := make([]ast.Stmt, len(body.List))
-		for i, stmt := range body.List {
-			rewritten[i] = t.rewriteThis(stmt, recv)
-		}
-		body.List = rewritten
 	} else {
 		body = blockStmt()
 	}
 
-	if results == nil {
-		if inferred := inferReturnType(body); inferred != nil {
-			results = inferred
-		} else if hasReturnValue(body) {
-			results = fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-			t.addImport("fmt")
-			wrapReturnsWithJSValue(body)
+	// For instance methods, 'this' needs to be the first arg
+	// The NewClass helper doesn't pass 'this' to prototype methods automatically,
+	// so methods are regular functions. 'this' is accessed via closure or args.
+	// For now, methods don't receive 'this' — they're called as obj.Get("method").Call()
+	// where 'this' binding would need explicit support.
+
+	// Build variadic function params: func(args ...*jsvalue.JSValue) *jsvalue.JSValue
+	// Unpack named params from args
+	var argUnpackStmts []ast.Stmt
+	if paramsNode != nil {
+		paramNames := extractParamNames(paramsNode, t.source)
+		for i, pName := range paramNames {
+			if pName == "" {
+				continue
+			}
+			pName = sanitizeIdent(pName)
+			argUnpackStmts = append(argUnpackStmts,
+				&ast.DeclStmt{Decl: varDecl(pName, jsValuePtrType(), nil)},
+				&ast.IfStmt{
+					Cond: &ast.BinaryExpr{
+						X:  callExpr(ident("len"), ident("_args")),
+						Op: token.GTR,
+						Y:  intLit(itoa(i)),
+					},
+					Body: blockStmt(
+						assignStmt([]ast.Expr{ident(pName)}, []ast.Expr{
+							&ast.IndexExpr{X: ident("_args"), Index: intLit(itoa(i))},
+						}),
+					),
+				},
+			)
 		}
 	}
+	body.List = append(argUnpackStmts, body.List...)
 
-	return methodDecl(recv, mName, ptrType(ident(className)), params, results, body)
-}
-
-// rewriteThis replaces `this` identifiers with the receiver variable name.
-// This is a simplified rewrite that handles common patterns.
-func (t *Transformer) rewriteThis(stmt ast.Stmt, recv string) ast.Stmt {
-	ast.Inspect(stmt, func(n ast.Node) bool {
-		switch x := n.(type) {
-		case *ast.Ident:
-			if x.Name == "this" {
-				x.Name = recv
-			}
-		}
-		return true
+	params := fieldList(&ast.Field{
+		Names: []*ast.Ident{ident("_args")},
+		Type:  &ast.Ellipsis{Elt: jsValuePtrType()},
 	})
-	return stmt
+
+	// Determine return type
+	var results *ast.FieldList
+	if hasReturnValue(body) {
+		results = fieldList(field("", jsValuePtrType()))
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addImport("fmt")
+		wrapReturnsWithJSValue(body)
+	}
+	ensureTrailingReturn(body, results)
+
+	fnLit := &ast.FuncLit{
+		Type: &ast.FuncType{Params: params, Results: results},
+		Body: body,
+	}
+
+	// Wrap in jsvalue.NewFunction
+	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	fnVal := callExpr(selectorExpr(ident("jsvalue"), "NewFunction"), fnLit)
+
+	// Build the .Set() call
+	var target ast.Expr
+	if isStatic {
+		// ClassName.Set("methodName", fn)
+		target = ident(className)
+	} else {
+		// ClassName.Get("prototype").Set("methodName", fn)
+		target = callExpr(selectorExpr(ident(className), "Get"), stringLit("prototype"))
+	}
+
+	return exprStmt(callExpr(selectorExpr(target, "Set"), stringLit(methodName), fnVal))
 }

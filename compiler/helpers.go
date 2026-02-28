@@ -10,6 +10,10 @@ import (
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
+func itoa(i int) string {
+	return fmt.Sprintf("%d", i)
+}
+
 func ident(name string) *ast.Ident {
 	return &ast.Ident{Name: name}
 }

@@ -59,17 +59,17 @@ func TestClassDeclaration(t *testing.T) {
 		bark(): string { return this.name; }
 	}`
 	out := compile(t, ts)
-	assertContains(t, out, "type Dog struct")
-	assertContains(t, out, "func NewDog(name *jsvalue.JSValue) *Dog")
-	assertContains(t, out, "func (d *Dog) Bark() *jsvalue.JSValue")
+	assertContains(t, out, "jsvalue.NewClass(")
+	assertContains(t, out, `this.Set("name",`)
+	assertContains(t, out, `Dog.Get("prototype").Set("bark"`)
 }
 
 func TestClassExtends(t *testing.T) {
 	ts := `class Animal { name: string; }
 	class Dog extends Animal { bark(): string { return this.name; } }`
 	out := compile(t, ts)
-	assertContains(t, out, "type Dog struct")
-	assertContains(t, out, "Animal") // embedded parent
+	assertContains(t, out, "jsvalue.NewClass(")
+	assertContains(t, out, "Animal)") // parent class passed to NewClass
 }
 
 func TestNumericEnum(t *testing.T) {
@@ -168,10 +168,9 @@ class Foo {
 	greet(): string { return this.name; }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "type Foo struct")
-	assertContains(t, out, "func (f *Foo) Greet() *jsvalue.JSValue")
+	assertContains(t, out, "jsvalue.NewClass(")
+	assertContains(t, out, `Foo.Get("prototype").Set("greet"`)
 	assertNotContains(t, out, "[sym]")
-	assertNotContains(t, out, "func (f *Foo) Sym")
 }
 
 func TestExportStringAliasDoubleQuote(t *testing.T) {

@@ -105,9 +105,11 @@ console.log($0);`
 }
 
 func TestNewExpressionWrapsArgsWithJSValue(t *testing.T) {
+	// new Foo(args) → Foo.Call(args...) since classes are JSValue constructors.
 	ts := `const p = new Parser({cwd: "/tmp"});`
 	out := compile(t, ts)
-	assertContains(t, out, "NewParser(jsvalue.From(jsvalue.ObjectFrom(")
+	assertContains(t, out, "Parser.Call(")
+	assertContains(t, out, "jsvalue.ObjectFrom(")
 }
 
 func TestAwaitStripped(t *testing.T) {

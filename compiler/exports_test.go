@@ -17,7 +17,7 @@ func TestExportDefaultAnonFunction(t *testing.T) {
 func TestExportDefaultClass(t *testing.T) {
 	ts := `export default class Foo { }`
 	out := compile(t, ts)
-	assertContains(t, out, "type Foo struct")
+	assertContains(t, out, "jsvalue.NewClass(")
 }
 
 func TestExportDefaultIdentifier(t *testing.T) {

@@ -247,7 +247,9 @@ func (t *Transformer) isNonJSValueInit(node *sitter.Node) bool {
 		}
 		return true
 	case "new_expression":
-		// new Map() and new Set() now produce *jsvalue.JSValue
+		// All new expressions produce *jsvalue.JSValue (classes are JSValue constructors)
+		return false
+	case "new_expression_UNUSED":
 		ctorNode := node.ChildByFieldName("constructor")
 		if ctorNode != nil {
 			name := ctorNode.Utf8Text(t.source)
