@@ -257,8 +257,9 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 		addImport("github.com/nnstd/gun/runtime/json")
 		return ident("json")
 	case "Error":
-		addImport("errors")
-		return ident("errors")
+		// Error() calls are handled by transformGlobalCall.
+		// Don't import "errors" — just return the identifier.
+		return ident("Error")
 	case "process":
 		// process as standalone value — return a JSValue object with process properties
 		// so process?.version, process?.versions etc. work through .Get()
