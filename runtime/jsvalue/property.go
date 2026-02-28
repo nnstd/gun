@@ -11,7 +11,14 @@ type PropertyDescriptor struct {
 }
 
 // Get retrieves a property by name, walking the prototype chain.
+// Special: "__proto__" returns the internal prototype (not an own property).
 func (v *JSValue) Get(name string) *JSValue {
+	// __proto__ returns the internal prototype link, not an own property.
+	// This is safe from prototype pollution because Set("__proto__", x)
+	// creates an own property — it never modifies the internal chain.
+	if name == "__proto__" {
+		return v.GetPrototype()
+	}
 	if v.properties != nil {
 		if desc, ok := v.properties[name]; ok {
 			if desc.Get != nil {

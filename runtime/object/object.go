@@ -6,6 +6,9 @@ import (
 	"github.com/nnstd/gun/runtime/jsvalue"
 )
 
+// Prototype is the Object.prototype singleton.
+var Prototype = jsvalue.ObjectPrototype
+
 func Keys(obj *jsvalue.JSValue) *jsvalue.JSValue {
 	return jsvalue.Keys(obj)
 }
@@ -59,8 +62,36 @@ func toJSValue(v any) *jsvalue.JSValue {
 	return jsvalue.From(v)
 }
 
+// Create creates a new object with the specified prototype.
 func Create(proto *jsvalue.JSValue) *jsvalue.JSValue {
-	return jsvalue.NewObject()
+	obj := jsvalue.NewObject()
+	if proto != nil {
+		obj.SetPrototype(proto)
+	}
+	return obj
+}
+
+// SetPrototypeOf sets the prototype of an object.
+func SetPrototypeOf(obj, proto *jsvalue.JSValue) *jsvalue.JSValue {
+	if obj != nil {
+		obj.SetPrototype(proto)
+	}
+	return obj
+}
+
+// GetPrototypeOf returns the prototype of an object.
+func GetPrototypeOf(obj *jsvalue.JSValue) *jsvalue.JSValue {
+	if obj != nil {
+		return obj.GetPrototype()
+	}
+	return jsvalue.NewNull()
+}
+
+// Freeze prevents modification of existing property values and prevents
+// addition of new properties. Returns the frozen object.
+func Freeze(obj *jsvalue.JSValue) *jsvalue.JSValue {
+	// Stub for now — full implementation would set all properties to non-writable
+	return obj
 }
 
 func DefineProperty(obj any, prop any, desc any) *jsvalue.JSValue {

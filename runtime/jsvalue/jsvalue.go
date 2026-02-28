@@ -223,6 +223,21 @@ func (v *JSValue) SymbolDesc() string {
 	return v.symbolDesc
 }
 
+// SetPrototype sets the [[Prototype]] internal slot.
+// This is the ONLY way to change the prototype chain. Set("__proto__", v)
+// creates an own property — it does NOT modify the chain (prototype pollution safe).
+func (v *JSValue) SetPrototype(proto *JSValue) {
+	v.prototype = proto
+}
+
+// GetPrototype returns the [[Prototype]] internal slot.
+func (v *JSValue) GetPrototype() *JSValue {
+	if v.prototype != nil {
+		return v.prototype
+	}
+	return NewNull()
+}
+
 // Array returns the underlying array elements, or nil if not an array.
 func (v *JSValue) Array() []*JSValue {
 	return v.arrayVal
@@ -1324,6 +1339,47 @@ func TypeOf(a *JSValue) *JSValue {
 		return NewString("undefined")
 	}
 	return NewString(a.TypeString())
+}
+
+// ---------------------------------------------------------------------------
+// Class construction
+// ---------------------------------------------------------------------------
+
+// NewClass creates a JS class: a constructor function with a prototype object.
+// The constructor's "prototype" property holds the prototype that instances inherit from.
+// parent is the parent class (or nil for no inheritance).
+func NewClass(constructor func(this *JSValue, args ...*JSValue) *JSValue, parent *JSValue) *JSValue {
+	proto := NewObject()
+	if parent != nil {
+		// Inheritance: Child.prototype.__proto__ = Parent.prototype
+		parentProto := parent.Get("prototype")
+		if parentProto != nil && parentProto.typ != TypeUndefined {
+			proto.SetPrototype(parentProto)
+		}
+	}
+
+	ctor := NewFunction(func(args ...*JSValue) *JSValue {
+		// new Class(args): create instance with prototype chain
+		instance := NewObject()
+		instance.SetPrototype(proto)
+		result := constructor(instance, args...)
+		// If constructor explicitly returns an object, use it; otherwise use instance
+		if result != nil && result.typ == TypeObject {
+			return result
+		}
+		return instance
+	})
+
+	// Set up Class.prototype and Class.prototype.constructor
+	ctor.Set("prototype", proto)
+	proto.Set("constructor", ctor)
+
+	// Inherit static methods from parent
+	if parent != nil {
+		ctor.SetPrototype(parent)
+	}
+
+	return ctor
 }
 
 // IsArrayValue returns a *JSValue boolean indicating whether v is an array.

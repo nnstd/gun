@@ -281,6 +281,18 @@ func transformObjectCall(prop string, args []ast.Expr, addImport func(string)) a
 			return callExpr(selectorExpr(ident("object"), "DefineProperty"), args[0], args[1], args[2])
 		}
 		return ident("nil")
+	case "setPrototypeOf":
+		if len(args) >= 2 {
+			return callExpr(selectorExpr(ident("object"), "SetPrototypeOf"), args[0], args[1])
+		}
+	case "getPrototypeOf":
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("object"), "GetPrototypeOf"), args[0])
+		}
+	case "freeze":
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("object"), "Freeze"), args[0])
+		}
 	}
 	return nil
 }

@@ -67,8 +67,12 @@ func init() {
 	})
 	ObjectPrototype.DefineProperty("hasOwnProperty", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
-			// Expects: this is not passed via args in this simplified model.
-			// This is a placeholder; real usage requires binding.
+			// Two calling patterns:
+			// 1. obj.hasOwnProperty("key") — not supported without 'this' binding
+			// 2. Object.prototype.hasOwnProperty.call(obj, "key") — args[0]=obj, args[1]=key
+			if len(args) >= 2 {
+				return NewBool(args[0].HasOwnProperty(args[1].String()))
+			}
 			return NewBool(false)
 		}),
 		Writable:     true,
