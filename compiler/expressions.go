@@ -533,6 +533,9 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 					// Runtime accepts any for array param, handling []*JSValue internally.
 					if objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objText] && t.builtins.IsArrayMethod(prop) {
 						t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+						for k, a := range coercedArgs {
+							coercedArgs[k] = jsvalueWrapLit(a)
+						}
 						funcName := capitalize(prop)
 						return callExpr(selectorExpr(ident("jsvalue"), funcName), append([]ast.Expr{obj}, coercedArgs...)...)
 					}
