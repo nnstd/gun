@@ -838,6 +838,39 @@ func (t *Transformer) transformDestructuring(pattern *sitter.Node, value *sitter
 	return t.transformDestructuringFromExpr(pattern, t.transformExpr(value))
 }
 
+// preRegisterDestructureNames registers destructured variable names in scope
+// BEFORE the body is transformed, so they're recognized as JSValue locals.
+func (t *Transformer) preRegisterDestructureNames(pattern *sitter.Node) {
+	if pattern == nil {
+		return
+	}
+	switch pattern.Kind() {
+	case "object_pattern":
+		for i := uint(0); i < pattern.NamedChildCount(); i++ {
+			child := pattern.NamedChild(i)
+			switch child.Kind() {
+			case "shorthand_property_identifier_pattern":
+				t.addToCurrentScope(child.Utf8Text(t.source), false)
+				t.jsvalueLocals[child.Utf8Text(t.source)] = true
+			case "pair_pattern":
+				valNode := child.ChildByFieldName("value")
+				if valNode != nil {
+					t.addToCurrentScope(valNode.Utf8Text(t.source), false)
+					t.jsvalueLocals[valNode.Utf8Text(t.source)] = true
+				}
+			}
+		}
+	case "array_pattern":
+		for i := uint(0); i < pattern.NamedChildCount(); i++ {
+			child := pattern.NamedChild(i)
+			if child.Kind() == "identifier" {
+				t.addToCurrentScope(child.Utf8Text(t.source), false)
+				t.jsvalueLocals[child.Utf8Text(t.source)] = true
+			}
+		}
+	}
+}
+
 func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valExpr ast.Expr) []ast.Stmt {
 	var stmts []ast.Stmt
 

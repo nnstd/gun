@@ -511,6 +511,12 @@ func (t *Transformer) transformForInOrOfStmt(node *sitter.Node) ast.Stmt {
 		x = t.transformExpr(rightNode)
 	}
 
+	// Pre-register destructured variable names in scope so the body
+	// transformation recognizes them as JSValue locals.
+	if destructurePattern != nil {
+		t.preRegisterDestructureNames(destructurePattern)
+	}
+
 	var body *ast.BlockStmt
 	if bodyNode != nil && bodyNode.Kind() == "statement_block" {
 		body = t.transformBlock(bodyNode)
@@ -567,6 +573,9 @@ func (t *Transformer) transformWhileStmt(node *sitter.Node) ast.Stmt {
 		}
 	}
 
+	// Pre-register destructured variable names in scope so the body
+	// transformation recognizes them as JSValue locals.
+
 	var body *ast.BlockStmt
 	if bodyNode != nil && bodyNode.Kind() == "statement_block" {
 		body = t.transformBlock(bodyNode)
@@ -594,6 +603,9 @@ func (t *Transformer) transformDoWhileStmt(node *sitter.Node) ast.Stmt {
 			cond = paren.X
 		}
 	}
+
+	// Pre-register destructured variable names in scope so the body
+	// transformation recognizes them as JSValue locals.
 
 	var body *ast.BlockStmt
 	if bodyNode != nil && bodyNode.Kind() == "statement_block" {

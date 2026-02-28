@@ -1041,7 +1041,8 @@ func hasJSValueStringWrapper(prop string) bool {
 	switch prop {
 	case "substring", "lastIndexOf", "indexOf", "split", "trim", "repeat",
 		"toLowerCase", "toUpperCase", "startsWith", "endsWith",
-		"charAt", "replace", "replaceAll", "match":
+		"charAt", "replace", "replaceAll", "match",
+		"codePointAt", "charCodeAt", "toString":
 		return true
 	}
 	return false
