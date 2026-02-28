@@ -3,6 +3,7 @@ package compiler
 import (
 	"go/ast"
 	"go/token"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -75,17 +76,28 @@ func (t *Transformer) transform(root *sitter.Node) *ast.File {
 		Decls: t.decls,
 	}
 
-	// Add imports
+	// Add imports, pruning any that aren't actually referenced in the AST
 	if len(t.imports) > 0 {
+		usedIdents := collectUsedIdents(t.decls)
 		var specs []ast.Spec
 		for pkg, alias := range t.imports {
-			specs = append(specs, importSpecAlias(pkg, alias))
+			// Determine the identifier used in code for this import
+			name := alias
+			if name == "" {
+				// Non-aliased: Go uses the last path segment as the package name
+				name = path.Base(pkg)
+			}
+			if usedIdents[name] {
+				specs = append(specs, importSpecAlias(pkg, alias))
+			}
 		}
-		importDecl := &ast.GenDecl{Tok: token.IMPORT, Specs: specs}
-		if len(specs) > 1 {
-			importDecl.Lparen = 1 // triggers parenthesized form
+		if len(specs) > 0 {
+			importDecl := &ast.GenDecl{Tok: token.IMPORT, Specs: specs}
+			if len(specs) > 1 {
+				importDecl.Lparen = 1 // triggers parenthesized form
+			}
+			file.Decls = append([]ast.Decl{importDecl}, file.Decls...)
 		}
-		file.Decls = append([]ast.Decl{importDecl}, file.Decls...)
 	}
 
 	return file
@@ -701,7 +713,6 @@ func (t *Transformer) transformAnonFuncAsDefault(node *sitter.Node) *ast.FuncDec
 		} else if hasReturnValue(body) {
 			results = fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
 			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-			t.addImport("fmt")
 			wrapReturnsWithJSValue(body)
 		}
 	}

@@ -1464,7 +1464,6 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 		} else if hasReturnValue(body) {
 			results = fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
 			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-			t.addImport("fmt")
 			wrapReturnsWithJSValue(body)
 		}
 	}
@@ -1509,7 +1508,6 @@ func (t *Transformer) transformFuncExpr(node *sitter.Node) ast.Expr {
 		} else if hasReturnValue(body) {
 			results = fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
 			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-			t.addImport("fmt")
 			wrapReturnsWithJSValue(body)
 		}
 	}

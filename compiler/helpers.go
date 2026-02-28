@@ -488,9 +488,33 @@ func wrapExprWithJSValue(expr ast.Expr) ast.Expr {
 			return callExpr(selectorExpr(ident("jsvalue"), "NewNull"))
 		}
 	}
-	// Generic: wrap with NewString(fmt.Sprintf("%v", expr)) as fallback
-	return callExpr(selectorExpr(ident("jsvalue"), "NewString"),
-		callExpr(selectorExpr(ident("fmt"), "Sprintf"), stringLit("%v"), expr))
+	// Already a JSValue expression — pass through
+	if isAlreadyJSValue(expr) {
+		return expr
+	}
+	// Generic: wrap with jsvalue.From(expr) as fallback
+	return callExpr(selectorExpr(ident("jsvalue"), "From"), expr)
+}
+
+// collectUsedIdents walks the Go AST declarations and returns the set of
+// all identifier names that appear as the X in selector expressions (pkg.Symbol)
+// or as standalone identifiers. Used to prune unused imports.
+func collectUsedIdents(decls []ast.Decl) map[string]bool {
+	used := make(map[string]bool)
+	for _, d := range decls {
+		ast.Inspect(d, func(n ast.Node) bool {
+			switch node := n.(type) {
+			case *ast.SelectorExpr:
+				if id, ok := node.X.(*ast.Ident); ok {
+					used[id.Name] = true
+				}
+			case *ast.Ident:
+				used[node.Name] = true
+			}
+			return true
+		})
+	}
+	return used
 }
 
 // goKeywords is the set of Go reserved words that cannot be used as identifiers.

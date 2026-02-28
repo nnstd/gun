@@ -277,7 +277,6 @@ func (t *Transformer) buildMethodSetup(className, methodName string, node *sitte
 	if hasReturnValue(body) {
 		results = fieldList(field("", jsValuePtrType()))
 		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-		t.addImport("fmt")
 		wrapReturnsWithJSValue(body)
 	}
 	ensureTrailingReturn(body, results)
