@@ -6,13 +6,17 @@ import (
 	"github.com/nnstd/gun/runtime/jsvalue"
 )
 
-func Stringify(v any) string {
-	b, _ := stdjson.Marshal(v)
-	return string(b)
+func Stringify(v *jsvalue.JSValue) *jsvalue.JSValue {
+	b, _ := stdjson.Marshal(v.String())
+	return jsvalue.NewString(string(b))
 }
 
-func Parse(s string) *jsvalue.JSValue {
+func Parse(s *jsvalue.JSValue) *jsvalue.JSValue {
+	str := ""
+	if s != nil {
+		str = s.String()
+	}
 	var v any
-	stdjson.Unmarshal([]byte(s), &v)
+	stdjson.Unmarshal([]byte(str), &v)
 	return jsvalue.From(v)
 }

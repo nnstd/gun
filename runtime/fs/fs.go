@@ -1,214 +1,339 @@
 package fs
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/nnstd/gun/runtime/jsvalue"
 )
 
 // ReadFileSync reads the entire contents of a file.
-// Accepts any type for path (string or *jsvalue.JSValue) and optional encoding.
-// Returns []byte directly, matching JS single-value semantics.
-func ReadFileSync(path any, opts ...any) []byte {
-	data, _ := os.ReadFile(fmt.Sprint(path))
-	return data
+// Returns the file content as a JSValue string.
+func ReadFileSync(path *jsvalue.JSValue, opts ...*jsvalue.JSValue) *jsvalue.JSValue {
+	p := ""
+	if path != nil {
+		p = path.String()
+	}
+	data, _ := os.ReadFile(p)
+	return jsvalue.NewString(string(data))
 }
 
 // Realpath resolves a path to its canonical absolute pathname.
-func Realpath(path string) string {
-	abs, err := filepath.Abs(path)
+func Realpath(path *jsvalue.JSValue) *jsvalue.JSValue {
+	p := ""
+	if path != nil {
+		p = path.String()
+	}
+	abs, err := filepath.Abs(p)
 	if err != nil {
 		return path
 	}
 	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
-		return abs
+		return jsvalue.NewString(abs)
 	}
-	return resolved
+	return jsvalue.NewString(resolved)
 }
 
 // WriteFileSync writes data to a file, replacing it if it already exists.
-func WriteFileSync(path string, data []byte) error {
-	return os.WriteFile(path, data, 0644)
+func WriteFileSync(path *jsvalue.JSValue, data *jsvalue.JSValue) *jsvalue.JSValue {
+	p := ""
+	if path != nil {
+		p = path.String()
+	}
+	d := ""
+	if data != nil {
+		d = data.String()
+	}
+	os.WriteFile(p, []byte(d), 0644)
+	return jsvalue.NewUndefined()
 }
 
 // ExistsSync returns true if the path exists.
-func ExistsSync(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+func ExistsSync(path *jsvalue.JSValue) *jsvalue.JSValue {
+	p := ""
+	if path != nil {
+		p = path.String()
+	}
+	_, err := os.Stat(p)
+	return jsvalue.NewBool(err == nil)
 }
 
 // MkdirSync creates a directory and all parent directories.
-func MkdirSync(path string) error {
-	return os.MkdirAll(path, 0755)
+func MkdirSync(path *jsvalue.JSValue) *jsvalue.JSValue {
+	p := ""
+	if path != nil {
+		p = path.String()
+	}
+	os.MkdirAll(p, 0755)
+	return jsvalue.NewUndefined()
 }
 
 // ReaddirSync reads the contents of a directory.
-func ReaddirSync(path string) ([]os.DirEntry, error) {
-	return os.ReadDir(path)
+func ReaddirSync(path *jsvalue.JSValue) *jsvalue.JSValue {
+	p := ""
+	if path != nil {
+		p = path.String()
+	}
+	entries, err := os.ReadDir(p)
+	if err != nil {
+		return jsvalue.NewArray()
+	}
+	elems := make([]*jsvalue.JSValue, len(entries))
+	for i, e := range entries {
+		elems[i] = jsvalue.NewString(e.Name())
+	}
+	return jsvalue.NewArray(elems...)
 }
 
 // UnlinkSync removes a file.
-func UnlinkSync(path string) error {
-	return os.Remove(path)
+func UnlinkSync(path *jsvalue.JSValue) *jsvalue.JSValue {
+	p := ""
+	if path != nil {
+		p = path.String()
+	}
+	os.Remove(p)
+	return jsvalue.NewUndefined()
 }
 
 // StatSync returns file info for the given path.
-func StatSync(path string) (os.FileInfo, error) {
-	return os.Stat(path)
+func StatSync(path *jsvalue.JSValue) *jsvalue.JSValue {
+	p := ""
+	if path != nil {
+		p = path.String()
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		return jsvalue.NewNull()
+	}
+	obj := jsvalue.NewObject()
+	obj.Set("size", jsvalue.NewNumber(float64(info.Size())))
+	obj.Set("isDirectory", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		return jsvalue.NewBool(info.IsDir())
+	}))
+	obj.Set("isFile", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		return jsvalue.NewBool(!info.IsDir())
+	}))
+	return obj
 }
 
 // RmdirSync removes a directory.
-func RmdirSync(path string) error {
-	return os.Remove(path)
+func RmdirSync(path *jsvalue.JSValue) *jsvalue.JSValue {
+	p := ""
+	if path != nil {
+		p = path.String()
+	}
+	os.Remove(p)
+	return jsvalue.NewUndefined()
 }
 
 // AppendFileSync appends data to a file, creating it if it doesn't exist.
-func AppendFileSync(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+func AppendFileSync(path *jsvalue.JSValue, data *jsvalue.JSValue) *jsvalue.JSValue {
+	p := ""
+	if path != nil {
+		p = path.String()
+	}
+	d := ""
+	if data != nil {
+		d = data.String()
+	}
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return err
+		return jsvalue.NewUndefined()
 	}
 	defer f.Close()
-	_, err = f.Write(data)
-	return err
+	f.Write([]byte(d))
+	return jsvalue.NewUndefined()
 }
 
 // CopyFileSync copies src to dst.
-func CopyFileSync(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
+func CopyFileSync(src, dst *jsvalue.JSValue) *jsvalue.JSValue {
+	s := ""
+	if src != nil {
+		s = src.String()
 	}
-	return os.WriteFile(dst, data, 0644)
+	d := ""
+	if dst != nil {
+		d = dst.String()
+	}
+	data, err := os.ReadFile(s)
+	if err != nil {
+		return jsvalue.NewUndefined()
+	}
+	os.WriteFile(d, data, 0644)
+	return jsvalue.NewUndefined()
 }
 
 // RenameSync renames (moves) a file.
-func RenameSync(oldPath, newPath string) error {
-	return os.Rename(oldPath, newPath)
+func RenameSync(oldPath, newPath *jsvalue.JSValue) *jsvalue.JSValue {
+	o := ""
+	if oldPath != nil {
+		o = oldPath.String()
+	}
+	n := ""
+	if newPath != nil {
+		n = newPath.String()
+	}
+	os.Rename(o, n)
+	return jsvalue.NewUndefined()
 }
 
-// --- fs/promises equivalents (no "Sync" suffix) ---
+// --- fs/promises equivalents ---
 
-// ReadFile reads the entire contents of a file.
-func ReadFile(path string) ([]byte, error) {
-	return os.ReadFile(path)
+func ReadFile(path *jsvalue.JSValue) *jsvalue.JSValue {
+	return ReadFileSync(path)
 }
 
-// WriteFile writes data to a file, replacing it if it already exists.
-func WriteFile(path string, data []byte) error {
-	return os.WriteFile(path, data, 0644)
+func WriteFile(path *jsvalue.JSValue, data *jsvalue.JSValue) *jsvalue.JSValue {
+	return WriteFileSync(path, data)
 }
 
-// AppendFile appends data to a file, creating it if it doesn't exist.
-func AppendFile(path string, data []byte) error {
+func AppendFile(path *jsvalue.JSValue, data *jsvalue.JSValue) *jsvalue.JSValue {
 	return AppendFileSync(path, data)
 }
 
-// CopyFile copies src to dst.
-func CopyFile(src, dst string) error {
+func CopyFile(src, dst *jsvalue.JSValue) *jsvalue.JSValue {
 	return CopyFileSync(src, dst)
 }
 
-// Rename renames (moves) a file.
-func Rename(oldPath, newPath string) error {
-	return os.Rename(oldPath, newPath)
+func Rename(oldPath, newPath *jsvalue.JSValue) *jsvalue.JSValue {
+	return RenameSync(oldPath, newPath)
 }
 
-// Mkdir creates a directory and all parent directories.
-func Mkdir(path string) error {
-	return os.MkdirAll(path, 0755)
+func Mkdir(path *jsvalue.JSValue) *jsvalue.JSValue {
+	return MkdirSync(path)
 }
 
-// Readdir reads the contents of a directory.
-func Readdir(path string) ([]os.DirEntry, error) {
-	return os.ReadDir(path)
+func Readdir(path *jsvalue.JSValue) *jsvalue.JSValue {
+	return ReaddirSync(path)
 }
 
-// Unlink removes a file.
-func Unlink(path string) error {
-	return os.Remove(path)
+func Unlink(path *jsvalue.JSValue) *jsvalue.JSValue {
+	return UnlinkSync(path)
 }
 
-// Rmdir removes a directory.
-func Rmdir(path string) error {
-	return os.Remove(path)
+func Stat(path *jsvalue.JSValue) *jsvalue.JSValue {
+	return StatSync(path)
 }
 
-// Stat returns file info for the given path.
-func Stat(path string) (os.FileInfo, error) {
-	return os.Stat(path)
+func Lstat(path *jsvalue.JSValue) *jsvalue.JSValue {
+	return StatSync(path) // simplified: same as Stat for now
 }
 
-// Lstat returns file info without following symbolic links.
-func Lstat(path string) (os.FileInfo, error) {
-	return os.Lstat(path)
+func Rm(path *jsvalue.JSValue) *jsvalue.JSValue {
+	p := ""
+	if path != nil {
+		p = path.String()
+	}
+	os.RemoveAll(p)
+	return jsvalue.NewUndefined()
 }
 
-// Rm removes files and directories recursively.
-func Rm(path string) error {
-	return os.RemoveAll(path)
+func Access(path *jsvalue.JSValue) *jsvalue.JSValue {
+	p := ""
+	if path != nil {
+		p = path.String()
+	}
+	_, err := os.Stat(p)
+	if err != nil {
+		return jsvalue.NewBool(false)
+	}
+	return jsvalue.NewBool(true)
 }
 
-// Access tests whether the path exists and is accessible.
-func Access(path string) error {
-	_, err := os.Stat(path)
-	return err
+func Chmod(path *jsvalue.JSValue, mode *jsvalue.JSValue) *jsvalue.JSValue {
+	p := ""
+	if path != nil {
+		p = path.String()
+	}
+	m := os.FileMode(0644)
+	if mode != nil {
+		m = os.FileMode(int(mode.Number()))
+	}
+	os.Chmod(p, m)
+	return jsvalue.NewUndefined()
 }
 
-// Chmod changes the file mode bits.
-func Chmod(path string, mode os.FileMode) error {
-	return os.Chmod(path, mode)
+func Chown(path *jsvalue.JSValue, uid, gid *jsvalue.JSValue) *jsvalue.JSValue {
+	p := ""
+	if path != nil {
+		p = path.String()
+	}
+	u := 0
+	if uid != nil {
+		u = int(uid.Number())
+	}
+	g := 0
+	if gid != nil {
+		g = int(gid.Number())
+	}
+	os.Chown(p, u, g)
+	return jsvalue.NewUndefined()
 }
 
-// Chown changes the numeric uid and gid of the file.
-func Chown(path string, uid, gid int) error {
-	return os.Chown(path, uid, gid)
+func Link(existingPath, newPath *jsvalue.JSValue) *jsvalue.JSValue {
+	e := ""
+	if existingPath != nil {
+		e = existingPath.String()
+	}
+	n := ""
+	if newPath != nil {
+		n = newPath.String()
+	}
+	os.Link(e, n)
+	return jsvalue.NewUndefined()
 }
 
-// Link creates a hard link.
-func Link(existingPath, newPath string) error {
-	return os.Link(existingPath, newPath)
+func Symlink(target, path *jsvalue.JSValue) *jsvalue.JSValue {
+	t := ""
+	if target != nil {
+		t = target.String()
+	}
+	p := ""
+	if path != nil {
+		p = path.String()
+	}
+	os.Symlink(t, p)
+	return jsvalue.NewUndefined()
 }
 
-// Symlink creates a symbolic link.
-func Symlink(target, path string) error {
-	return os.Symlink(target, path)
+func Readlink(path *jsvalue.JSValue) *jsvalue.JSValue {
+	p := ""
+	if path != nil {
+		p = path.String()
+	}
+	link, err := os.Readlink(p)
+	if err != nil {
+		return jsvalue.NewString("")
+	}
+	return jsvalue.NewString(link)
 }
 
-// Readlink reads the destination of a symbolic link.
-func Readlink(path string) (string, error) {
-	return os.Readlink(path)
+func Truncate(path *jsvalue.JSValue, size *jsvalue.JSValue) *jsvalue.JSValue {
+	p := ""
+	if path != nil {
+		p = path.String()
+	}
+	s := int64(0)
+	if size != nil {
+		s = int64(size.Number())
+	}
+	os.Truncate(p, s)
+	return jsvalue.NewUndefined()
 }
 
-// Truncate truncates the file to the specified length.
-func Truncate(path string, size int64) error {
-	return os.Truncate(path, size)
+func Mkdtemp(prefix *jsvalue.JSValue) *jsvalue.JSValue {
+	p := ""
+	if prefix != nil {
+		p = prefix.String()
+	}
+	dir, err := os.MkdirTemp("", p)
+	if err != nil {
+		return jsvalue.NewString("")
+	}
+	return jsvalue.NewString(dir)
 }
 
-// Mkdtemp creates a unique temporary directory.
-func Mkdtemp(prefix string) (string, error) {
-	return os.MkdirTemp("", prefix)
-}
-
-// Cp recursively copies src to dst.
-func Cp(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if info.IsDir() {
-			return os.MkdirAll(target, info.Mode())
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(target, data, info.Mode())
-	})
+func Cp(src, dst *jsvalue.JSValue) *jsvalue.JSValue {
+	return CopyFileSync(src, dst)
 }
