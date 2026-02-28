@@ -381,6 +381,15 @@ func (t *Transformer) isInCurrentScopeAsNonSlice(name string) bool {
 	return false
 }
 
+// isCrossFileFunction checks if goName is declared as a function in another
+// file of the same package (via cross-file exports from CompilePackage).
+func (t *Transformer) isCrossFileFunction(goName string) bool {
+	if _, ok := t.funcParamCounts[goName]; ok {
+		return true
+	}
+	return false
+}
+
 // jsValueType returns *jsvalue.JSValue and registers the import.
 func (t *Transformer) jsValueType() ast.Expr {
 	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
@@ -733,6 +742,13 @@ func (t *Transformer) transformExportClause(exportNode *sitter.Node, clause *sit
 		if reexportMod != "" {
 			t.transformReexport(origName, goName, reexportMod)
 		} else {
+			// Skip re-export if a function with this exact capitalized name
+			// already exists in another file (e.g. func ApplyExtends in apply-extends.go).
+			// Don't skip when the original name differs (e.g. export { isFullWidth }
+			// needs var IsFullWidth = isFullWidth).
+			if goName == capitalize(origName) && t.isCrossFileFunction(goName) {
+				continue
+			}
 			t.decls = append(t.decls, varDecl(goName, nil, ident(origName)))
 		}
 	}

@@ -18,12 +18,12 @@ type PackageExports map[string][]PackageExport
 // When samePackageImports is true, relative imports are treated as same-package
 // references (no Go import generated) — used for flattened node_module packages.
 func Compile(source []byte, pkgName, moduleName string, samePackageImports bool) ([]byte, error) {
-	return CompileWithExports(source, pkgName, moduleName, samePackageImports, nil)
+	return CompileWithExports(source, pkgName, moduleName, "", samePackageImports, nil)
 }
 
 // CompileWithExports transpiles TypeScript source with knowledge of cross-file exports.
 // exports provides metadata about symbols exported from other files in the same package.
-func CompileWithExports(source []byte, pkgName, moduleName string, samePackageImports bool, exports PackageExports) ([]byte, error) {
+func CompileWithExports(source []byte, pkgName, moduleName, currentFile string, samePackageImports bool, exports PackageExports) ([]byte, error) {
 	tree, err := parseTypeScript(source)
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
@@ -33,8 +33,12 @@ func CompileWithExports(source []byte, pkgName, moduleName string, samePackageIm
 	transformer := newTransformer(source, pkgName, moduleName, samePackageImports)
 
 	// Pre-populate transformer with cross-file export knowledge
+	// (exclude the current file's own exports to avoid self-conflicts)
 	if exports != nil {
-		for _, fileExports := range exports {
+		for fileName, fileExports := range exports {
+			if fileName == currentFile {
+				continue
+			}
 			for _, exp := range fileExports {
 				switch exp.Kind {
 				case "var", "enum":
@@ -77,7 +81,7 @@ func CompilePackage(files map[string][]byte, pkgName, moduleName string) (map[st
 	// Phase 2: Compile each file with cross-file knowledge
 	results := make(map[string][]byte)
 	for name, source := range files {
-		out, err := CompileWithExports(source, pkgName, moduleName, true, exports)
+		out, err := CompileWithExports(source, pkgName, moduleName, name, true, exports)
 		if err != nil {
 			return nil, fmt.Errorf("compile %s: %w", name, err)
 		}
