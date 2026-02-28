@@ -947,7 +947,7 @@ func isNilNode(node *sitter.Node) bool {
 // hasJSValueStringWrapper reports whether a string method has a dedicated jsvalue.* wrapper.
 func hasJSValueStringWrapper(prop string) bool {
 	switch prop {
-	case "substring", "lastIndexOf", "split", "trim", "repeat",
+	case "substring", "lastIndexOf", "indexOf", "split", "trim", "repeat",
 		"toLowerCase", "toUpperCase", "startsWith", "endsWith",
 		"charAt", "replace", "replaceAll":
 		return true

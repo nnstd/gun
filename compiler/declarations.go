@@ -471,29 +471,17 @@ func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.
 
 		case "rest_parameter":
 			nameNode := param.ChildByFieldName("pattern")
-			typeNode := param.ChildByFieldName("type")
 
 			pName := "args"
 			if nameNode != nil {
 				pName = sanitizeIdent(nameNode.Utf8Text(t.source))
 			}
 
-			var elemType ast.Expr
-			if typeNode != nil {
-				mapped := t.getTypeAnnotation(typeNode)
-				if mapped != nil {
-					// If it's already a slice type, use the element type
-					if at, ok := mapped.(*ast.ArrayType); ok {
-						elemType = at.Elt
-					} else {
-						elemType = mapped
-					}
-				}
-			}
-			if elemType == nil {
-				elemType = ptrType(selectorExpr(ident("jsvalue"), "JSValue"))
-				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-			}
+			// All-JSValue: rest params are always ...*jsvalue.JSValue
+			var elemType ast.Expr = ptrType(selectorExpr(ident("jsvalue"), "JSValue"))
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			// Track rest params as JSValue slice locals
+			t.jsvalueSliceLocals[pName] = true
 
 			fields = append(fields, field(pName, &ast.Ellipsis{Elt: elemType}))
 		}
