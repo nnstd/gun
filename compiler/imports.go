@@ -83,8 +83,6 @@ func init() {
 		"strict": "", // namespace import for assert/strict
 	})
 	registerModule("module", "github.com/nnstd/gun/runtime/module", "module", nil)
-	registerModule("cliui", "github.com/nnstd/gun/runtime/cliui", "cliui", nil)
-
 	registerModule("y18n", "github.com/nnstd/gun/runtime/y18n", "y18n", nil)
 registerModule("yargs", "github.com/nnstd/gun/runtime/yargs", "yargs", map[string]string{
 		"default": "Default",
