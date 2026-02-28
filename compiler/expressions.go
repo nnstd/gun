@@ -564,14 +564,15 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 				}
 			}
 
-			// Method call on a local scope variable (JSValue parameter):
-			// use selector form so it compiles as obj.Method(args)
+			// Method call on a local scope variable (JSValue parameter or local):
+			// use .Get("method").Call(args...) for dynamic dispatch.
 			if objNode.Kind() == "identifier" && t.isLocalName(objText) {
+				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 				obj := t.transformExpr(objNode)
-				// JSValue slice locals ([]*jsvalue.JSValue) don't have JSValue methods;
-				// wrap with jsvalue.NewArray() to convert to *jsvalue.JSValue first.
-
-				return callExpr(selectorExpr(obj, capitalize(prop)), args...)
+				for i, arg := range args {
+					args[i] = t.wrapAsJSValue(arg)
+				}
+				return callExpr(selectorExpr(callExpr(selectorExpr(obj, "Get"), stringLit(prop)), "Call"), args...)
 			}
 
 			// Method call on a package-level untyped variable (JSValue):

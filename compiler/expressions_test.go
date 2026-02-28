@@ -147,11 +147,12 @@ func TestLengthOnUntypedParam(t *testing.T) {
 	assertNotContains(t, out, "len(s)")
 }
 
-func TestEnsureBoolMethodCallGetsNilCheck(t *testing.T) {
-	// Method calls (e.g. obj.Match()) may return *jsvalue.JSValue → need != nil
+func TestEnsureBoolMethodCallOnLocal(t *testing.T) {
+	// Method calls on locals use .Get().Call() and .Bool() for truthiness.
 	ts := `function f(s) { if (s.Match()) { return s; } }`
 	out := compile(t, ts)
-	assertContains(t, out, "!= nil")
+	assertContains(t, out, `s.Get("Match").Call()`)
+	assertContains(t, out, ".Bool()")
 }
 
 func TestEnsureBoolPlainCallNotWrapped(t *testing.T) {
@@ -538,4 +539,24 @@ func TestNewExpressionChainedPropertyAccess(t *testing.T) {
 	out := compile(t, ts)
 	assertContains(t, out, `.Get("name")`)
 	assertNotContains(t, out, ".Name")
+}
+
+func TestMethodCallOnLocalUsesGetCall(t *testing.T) {
+	// Method calls on local variables should use .Get("method").Call()
+	// since all locals are *jsvalue.JSValue in the all-JSValue architecture.
+	ts := `import { statSync } from 'fs';
+function f(dir) {
+	const stats = statSync(dir);
+	return stats.isDirectory();
+}`
+	out := compile(t, ts)
+	assertContains(t, out, `stats.Get("isDirectory").Call()`)
+	assertNotContains(t, out, "stats.IsDirectory()")
+}
+
+func TestMethodCallOnParamUsesGetCall(t *testing.T) {
+	// Method calls on function parameters use .Get().Call() for dynamic dispatch.
+	ts := `function f(obj) { return obj.doSomething(1, 2); }`
+	out := compile(t, ts)
+	assertContains(t, out, `obj.Get("doSomething").Call(`)
 }

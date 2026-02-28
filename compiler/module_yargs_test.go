@@ -20,8 +20,8 @@ yargs.default(hideBin(process.argv))
 	assertContains(t, out, "func(yargs *yargs.Yargs) *yargs.Yargs")
 	// Handler callback should have *yargs.Argv parameter
 	assertContains(t, out, "func(argv *yargs.Argv)")
-	// Builder body should call methods on the yargs parameter, not the package
-	assertContains(t, out, "yargs.Positional(")
+	// Builder body should call methods via .Get().Call() for dynamic dispatch
+	assertContains(t, out, `yargs.Get("positional").Call(`)
 	// Handler body should use Get() for property access
 	assertContains(t, out, `argv.Get("name")`)
 }

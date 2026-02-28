@@ -387,6 +387,14 @@ func stmtsHaveReturn(stmts []ast.Stmt) bool {
 			if stmtsHaveReturn(s.List) {
 				return true
 			}
+		case *ast.ForStmt:
+			if s.Body != nil && stmtsHaveReturn(s.Body.List) {
+				return true
+			}
+		case *ast.RangeStmt:
+			if s.Body != nil && stmtsHaveReturn(s.Body.List) {
+				return true
+			}
 		}
 	}
 	return false
