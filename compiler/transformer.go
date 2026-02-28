@@ -293,12 +293,8 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		// JSValue results (via jsvalue.Add, jsvalue.Eq, jsvalue.Or, etc.)
 		leftNode := node.ChildByFieldName("left")
 		rightNode := node.ChildByFieldName("right")
-		if (leftNode != nil && t.nodeReturnsJSValue(leftNode)) ||
-			(rightNode != nil && t.nodeReturnsJSValue(rightNode)) {
-			return true
-		}
-		// Also check for package-level vars
-		if leftNode != nil && t.isPkgLevelVar(leftNode) {
+		if (leftNode != nil && (t.nodeReturnsJSValue(leftNode) || t.isPkgLevelVar(leftNode))) ||
+			(rightNode != nil && (t.nodeReturnsJSValue(rightNode) || t.isPkgLevelVar(rightNode))) {
 			return true
 		}
 		return false
@@ -318,6 +314,9 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 			return true
 		}
 		return false
+	case "new_expression":
+		// new X() transforms to X.Call() which returns *jsvalue.JSValue
+		return true
 	case "member_expression":
 		objNode := node.ChildByFieldName("object")
 		propNode := node.ChildByFieldName("property")
@@ -671,6 +670,11 @@ func (t *Transformer) transformAnonFuncAsDefault(node *sitter.Node) *ast.FuncDec
 	returnTypeNode := node.ChildByFieldName("return_type")
 	bodyNode := node.ChildByFieldName("body")
 
+	// Push scope for function parameters so they're tracked as locals.
+	paramInfo := extractParamInfo(paramsNode, t.source)
+	t.pushTypedScope(paramInfo)
+	defer t.popScope()
+
 	params, paramStmts := t.transformParams(paramsNode)
 	var results *ast.FieldList
 	if returnTypeNode != nil {
@@ -701,6 +705,8 @@ func (t *Transformer) transformAnonFuncAsDefault(node *sitter.Node) *ast.FuncDec
 			wrapReturnsWithJSValue(body)
 		}
 	}
+
+	ensureTrailingReturn(body, results)
 
 	return funcDecl("Default", params, results, body)
 }
