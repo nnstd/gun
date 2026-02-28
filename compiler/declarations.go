@@ -337,14 +337,9 @@ func (t *Transformer) transformFuncDecl(node *sitter.Node, exported bool) *ast.F
 
 	params, paramStmts := t.transformParams(paramsNode)
 	var results *ast.FieldList
-	if returnTypeNode != nil {
-		retType := t.getTypeAnnotation(returnTypeNode)
-		if retType != nil {
-			results = fieldList(field("", retType))
-			// Track the return type for ensureBool() to check
-			t.funcReturnTypes[name] = getTypeString(retType)
-		}
-	}
+	// In the all-JSValue world, explicit return type annotations are ignored —
+	// all functions return *jsvalue.JSValue (handled below in the hasReturnValue check).
+	_ = returnTypeNode
 
 	var body *ast.BlockStmt
 	if bodyNode != nil {
@@ -385,25 +380,12 @@ func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.
 		switch param.Kind() {
 		case "required_parameter", "optional_parameter":
 			nameNode := param.ChildByFieldName("pattern")
-			typeNode := param.ChildByFieldName("type")
+			_ = param.ChildByFieldName("type") // type annotations ignored in all-JSValue mode
 			valueNode := param.ChildByFieldName("value")
 
-			var pType ast.Expr
-			if typeNode != nil {
-				mapped := t.getTypeAnnotation(typeNode)
-				if mapped != nil {
-					pType = mapped
-				}
-			}
-			if pType == nil {
-				pType = ptrType(selectorExpr(ident("jsvalue"), "JSValue"))
-				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-			}
-
-			// Optional params become pointer types
-			if param.Kind() == "optional_parameter" {
-				pType = ptrType(pType)
-			}
+			// All-JSValue: all params are *jsvalue.JSValue
+			var pType ast.Expr = ptrType(selectorExpr(ident("jsvalue"), "JSValue"))
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 
 			// Handle rest pattern in required_parameter (JS without type annotations)
 			// tree-sitter parses `...args` as required_parameter > rest_pattern
@@ -415,17 +397,9 @@ func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.
 						break
 					}
 				}
+				// All-JSValue: rest params are always ...*jsvalue.JSValue
 				var elemType ast.Expr = ptrType(selectorExpr(ident("jsvalue"), "JSValue"))
 				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-				if typeNode != nil {
-					if mapped := t.getTypeAnnotation(typeNode); mapped != nil {
-						if at, ok := mapped.(*ast.ArrayType); ok {
-							elemType = at.Elt
-						} else {
-							elemType = mapped
-						}
-					}
-				}
 				fields = append(fields, field(restName, &ast.Ellipsis{Elt: elemType}))
 				continue
 			}
@@ -684,12 +658,11 @@ func (t *Transformer) transformInterfaceAsGoInterface(name string, body *sitter.
 		mName := capitalize(mNameNode.Utf8Text(t.source))
 		params, _ := t.transformParams(paramsNode)
 
+		// All-JSValue: interface methods return *jsvalue.JSValue
 		var results *ast.FieldList
 		if returnNode != nil {
-			retType := t.getTypeAnnotation(returnNode)
-			if retType != nil {
-				results = fieldList(field("", retType))
-			}
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			results = fieldList(field("", jsValuePtrType()))
 		}
 
 		methods = append(methods, &ast.Field{
@@ -740,12 +713,11 @@ func (t *Transformer) transformInterfaceAsStruct(name string, body *sitter.Node)
 			}
 			mName := capitalize(mNameNode.Utf8Text(t.source))
 			params, _ := t.transformParams(paramsNode)
+			// All-JSValue: interface methods return *jsvalue.JSValue
 			var results *ast.FieldList
 			if returnNode != nil {
-				retType := t.getTypeAnnotation(returnNode)
-				if retType != nil {
-					results = fieldList(field("", retType))
-				}
+				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+				results = fieldList(field("", jsValuePtrType()))
 			}
 			fields = append(fields, &ast.Field{
 				Names: []*ast.Ident{ident(mName)},

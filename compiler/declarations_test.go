@@ -24,25 +24,25 @@ func TestConstStringDeclaration(t *testing.T) {
 
 func TestFunctionDeclaration(t *testing.T) {
 	out := compile(t, `function add(a: number, b: number): number { return a + b; }`)
-	assertContains(t, out, "func add(a float64, b float64) float64")
-	assertContains(t, out, "return a + b")
+	assertContains(t, out, "func add(a *jsvalue.JSValue, b *jsvalue.JSValue) *jsvalue.JSValue")
+	assertContains(t, out, "jsvalue.Add(")
 }
 
 func TestArrowFunction(t *testing.T) {
 	out := compile(t, `const double = (x: number): number => x * 2;`)
-	assertContains(t, out, "func(x float64) float64")
-	assertContains(t, out, "return x * 2")
+	assertContains(t, out, "func(x *jsvalue.JSValue) *jsvalue.JSValue")
+	assertContains(t, out, "jsvalue.Mul(")
 }
 
 func TestExportCapitalizesName(t *testing.T) {
 	out := compile(t, `export function greet(name: string): string { return name; }`)
-	assertContains(t, out, "func Greet(name string) string")
+	assertContains(t, out, "func Greet(name *jsvalue.JSValue) *jsvalue.JSValue")
 }
 
 func TestInterfaceWithMethods(t *testing.T) {
 	out := compile(t, `interface Reader { read(buf: string): number; }`)
 	assertContains(t, out, "type Reader interface")
-	assertContains(t, out, "Read(buf string) float64")
+	assertContains(t, out, "Read(buf *jsvalue.JSValue) *jsvalue.JSValue")
 }
 
 func TestInterfaceWithProperties(t *testing.T) {
@@ -60,8 +60,8 @@ func TestClassDeclaration(t *testing.T) {
 	}`
 	out := compile(t, ts)
 	assertContains(t, out, "type Dog struct")
-	assertContains(t, out, "func NewDog(name string) *Dog")
-	assertContains(t, out, "func (d *Dog) Bark() string")
+	assertContains(t, out, "func NewDog(name *jsvalue.JSValue) *Dog")
+	assertContains(t, out, "func (d *Dog) Bark() *jsvalue.JSValue")
 }
 
 func TestClassExtends(t *testing.T) {
@@ -96,32 +96,32 @@ func TestTypeAlias(t *testing.T) {
 func TestParamGoKeywordEscaped(t *testing.T) {
 	ts := `const emitWarning = (warning: string, type: string) => process.emitWarning(warning, type)`
 	out := compile(t, ts)
-	assertContains(t, out, "type_ string")
+	assertContains(t, out, "type_ *jsvalue.JSValue")
 	assertNotContains(t, out, "type string")
 }
 
 func TestRestParameter(t *testing.T) {
 	ts := `function sum(...nums: number[]): number { return 0; }`
 	out := compile(t, ts)
-	assertContains(t, out, "nums ...float64")
+	assertContains(t, out, "nums ...*jsvalue.JSValue")
 }
 
 func TestOptionalParameter(t *testing.T) {
 	ts := `function greet(name?: string): void {}`
 	out := compile(t, ts)
-	assertContains(t, out, "*string")
+	assertContains(t, out, "name *jsvalue.JSValue")
 }
 
 func TestNullableUnionType(t *testing.T) {
 	ts := `function maybe(x: string | null): void {}`
 	out := compile(t, ts)
-	assertContains(t, out, "*string")
+	assertContains(t, out, "x *jsvalue.JSValue")
 }
 
 func TestBooleanType(t *testing.T) {
 	ts := `function check(b: boolean): boolean { return b; }`
 	out := compile(t, ts)
-	assertContains(t, out, "func check(b bool) bool")
+	assertContains(t, out, "func check(b *jsvalue.JSValue) *jsvalue.JSValue")
 }
 
 func TestMainFunctionGenerated(t *testing.T) {
@@ -151,13 +151,13 @@ func TestVarNoTypeNoValue(t *testing.T) {
 func TestParamGoKeywordMap(t *testing.T) {
 	ts := `function f(map: string): void {}`
 	out := compile(t, ts)
-	assertContains(t, out, "map_ string")
+	assertContains(t, out, "map_ *jsvalue.JSValue")
 }
 
 func TestParamGoKeywordRange(t *testing.T) {
 	ts := `function f(range: number): void {}`
 	out := compile(t, ts)
-	assertContains(t, out, "range_ float64")
+	assertContains(t, out, "range_ *jsvalue.JSValue")
 }
 
 func TestClassComputedMethodSkipped(t *testing.T) {
@@ -169,7 +169,7 @@ class Foo {
 }`
 	out := compile(t, ts)
 	assertContains(t, out, "type Foo struct")
-	assertContains(t, out, "func (f *Foo) Greet() string")
+	assertContains(t, out, "func (f *Foo) Greet() *jsvalue.JSValue")
 	assertNotContains(t, out, "[sym]")
 	assertNotContains(t, out, "func (f *Foo) Sym")
 }
@@ -405,8 +405,8 @@ func TestCodePointAtTyped(t *testing.T) {
 	if (cp <= 0x1F) { return true; }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "var cp = int(")
-	assertNotContains(t, out, "cp.Number()")
+	assertContains(t, out, "var cp =")
+	assertContains(t, out, "jsvalue.LtE(")
 }
 
 func TestJSValueComparedWithBoolLit(t *testing.T) {
@@ -524,14 +524,14 @@ func TestHoistedFuncLiteralArgsWrapped(t *testing.T) {
 }
 
 func TestLogicalAndWithComparisonsIsTyped(t *testing.T) {
-	// var x = a != b && c != d should be bool, not *jsvalue.JSValue
+	// All-JSValue: && with JSValue operands produces JSValue via jsvalue.And
 	ts := `function f(s: string) {
 	var check = s !== s.toLowerCase() && s !== s.toUpperCase();
 	if (!check) { return s; }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "!check")
-	assertNotContains(t, out, "check == nil")
+	assertContains(t, out, "jsvalue.And(")
+	assertContains(t, out, "jsvalue.Not(check).Bool()")
 }
 
 func TestRegexLiteralIsTyped(t *testing.T) {

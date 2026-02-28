@@ -10,9 +10,9 @@ func TestIfStatement(t *testing.T) {
 		if (x > 0) { return "pos"; } else { return "neg"; }
 	}`
 	out := compile(t, ts)
-	assertContains(t, out, "if x > 0")
-	assertContains(t, out, `return "pos"`)
-	assertContains(t, out, `return "neg"`)
+	assertContains(t, out, "jsvalue.Gt(")
+	assertContains(t, out, `jsvalue.NewString("pos")`)
+	assertContains(t, out, `jsvalue.NewString("neg")`)
 }
 
 func TestForOfLoop(t *testing.T) {
@@ -38,7 +38,7 @@ func TestWhileLoop(t *testing.T) {
 		while (n > 0) { n--; }
 	}`
 	out := compile(t, ts)
-	assertContains(t, out, "for n > 0")
+	assertContains(t, out, "jsvalue.Gt(")
 }
 
 func TestDoWhile(t *testing.T) {

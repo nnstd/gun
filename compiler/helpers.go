@@ -529,8 +529,7 @@ func extractParamNames(node *sitter.Node, source []byte) []string {
 }
 
 // extractParamInfo returns a map of parameter names to whether they have
-// explicit type annotations. true = has type annotation (Go native type),
-// false = no annotation (defaults to *jsvalue.JSValue).
+// explicit type annotations. In all-JSValue mode, all params are untyped (false).
 func extractParamInfo(node *sitter.Node, source []byte) map[string]bool {
 	if node == nil {
 		return nil
@@ -541,20 +540,16 @@ func extractParamInfo(node *sitter.Node, source []byte) map[string]bool {
 		switch param.Kind() {
 		case "required_parameter", "optional_parameter":
 			nameNode := param.ChildByFieldName("pattern")
-			typeNode := param.ChildByFieldName("type")
 			if nameNode != nil && nameNode.Kind() == "identifier" {
-				info[nameNode.Utf8Text(source)] = typeNode != nil && !isAnyType(typeNode, source)
+				info[nameNode.Utf8Text(source)] = false // all-JSValue: always untyped
 			}
-			// Destructured parameters generate synthetic _paramN names — track
-			// them as untyped so subscript access uses .Get()/.Index().
 			if nameNode != nil && (nameNode.Kind() == "object_pattern" || nameNode.Kind() == "array_pattern") {
-				info[fmt.Sprintf("_param%d", i)] = typeNode != nil && !isAnyType(typeNode, source)
+				info[fmt.Sprintf("_param%d", i)] = false
 			}
 		case "rest_parameter":
 			nameNode := param.ChildByFieldName("pattern")
-			typeNode := param.ChildByFieldName("type")
 			if nameNode != nil {
-				info[nameNode.Utf8Text(source)] = typeNode != nil && !isAnyType(typeNode, source)
+				info[nameNode.Utf8Text(source)] = false
 			}
 		case "identifier":
 			info[param.Utf8Text(source)] = false

@@ -183,13 +183,9 @@ func (t *Transformer) transformMethod(node *sitter.Node, className, recv string)
 	t.pushTypedScope(paramInfo)
 	defer t.popScope()
 
+	// All-JSValue: ignore return type annotations
 	var results *ast.FieldList
-	if returnTypeNode != nil {
-		retType := t.getTypeAnnotation(returnTypeNode)
-		if retType != nil {
-			results = fieldList(field("", retType))
-		}
-	}
+	_ = returnTypeNode
 
 	var body *ast.BlockStmt
 	if bodyNode != nil {

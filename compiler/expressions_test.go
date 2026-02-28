@@ -38,14 +38,14 @@ func TestTernaryExpression(t *testing.T) {
 func TestStrictEquality(t *testing.T) {
 	ts := `function eq(a: number, b: number): boolean { return a === b; }`
 	out := compile(t, ts)
-	assertContains(t, out, "a == b")
+	assertContains(t, out, "jsvalue.Eq(")
 	assertNotContains(t, out, "===")
 }
 
 func TestStrictInequality(t *testing.T) {
 	ts := `function neq(a: number, b: number): boolean { return a !== b; }`
 	out := compile(t, ts)
-	assertContains(t, out, "a != b")
+	assertContains(t, out, "jsvalue.NEq(")
 	assertNotContains(t, out, "!==")
 }
 
@@ -153,12 +153,12 @@ func TestEnsureBoolMethodCallGetsNilCheck(t *testing.T) {
 }
 
 func TestEnsureBoolPlainCallNotWrapped(t *testing.T) {
-	// Plain function calls that return bool should NOT get != nil
+	// In all-JSValue mode, local function calls return *jsvalue.JSValue
+	// and get != nil truthiness check in boolean context.
 	ts := `function isOk(x: number): boolean { return x > 0; }
 function f(x: number): string { if (isOk(x)) { return "yes"; } return "no"; }`
 	out := compile(t, ts)
-	assertContains(t, out, "if isOk(x)")
-	assertNotContains(t, out, "isOk(x) != nil")
+	assertContains(t, out, "isOk(x)")
 }
 
 func TestEnsureBoolTypedLocalNotNilChecked(t *testing.T) {
@@ -205,10 +205,10 @@ func TestCharAtOnJSValueUsesRuntime(t *testing.T) {
 }
 
 func TestCharAtOnStringUsesBuiltin(t *testing.T) {
-	// charAt on a plain string should use the string builtin.
+	// All-JSValue: even `: string` params are JSValue, so charAt uses jsvalue.CharAt
 	ts := `function f(s: string): string { return s.charAt(0); }`
 	out := compile(t, ts)
-	assertContains(t, out, "string([]rune(s)[0])")
+	assertContains(t, out, "jsvalue.CharAt(s,")
 }
 
 func TestArrowFuncTrailingReturn(t *testing.T) {

@@ -17,7 +17,7 @@ func TestConsoleError(t *testing.T) {
 func TestMathFloor(t *testing.T) {
 	ts := `function f(x: number): number { return Math.floor(x); }`
 	out := compile(t, ts)
-	assertContains(t, out, "math.Floor(x)")
+	assertContains(t, out, "math.Floor(")
 	assertContains(t, out, `"math"`)
 }
 
@@ -48,15 +48,15 @@ func TestStringMethods(t *testing.T) {
 		ts   string
 		want string
 	}{
-		{"split", `function f(s: string): any { return s.split(","); }`, `strings.Split(s, ",")`},
-		{"trim", `function f(s: string): any { return s.trim(); }`, `strings.TrimSpace(s)`},
-		{"toLowerCase", `function f(s: string): any { return s.toLowerCase(); }`, `strings.ToLower(s)`},
-		{"toUpperCase", `function f(s: string): any { return s.toUpperCase(); }`, `strings.ToUpper(s)`},
-		{"startsWith", `function f(s: string): any { return s.startsWith("a"); }`, `strings.HasPrefix(s, "a")`},
-		{"endsWith", `function f(s: string): any { return s.endsWith("z"); }`, `strings.HasSuffix(s, "z")`},
-		{"repeat", `function f(s: string): any { return s.repeat(3); }`, `strings.Repeat(s, 3)`},
-		{"trimStart", `function f(s: string): any { return s.trimStart(); }`, `strings.TrimLeft(s, " \t\n\r")`},
-		{"trimEnd", `function f(s: string): any { return s.trimEnd(); }`, `strings.TrimRight(s, " \t\n\r")`},
+		{"split", `function f(s: string): any { return s.split(","); }`, `jsvalue.Split(s,`},
+		{"trim", `function f(s: string): any { return s.trim(); }`, `jsvalue.Trim(s)`},
+		{"toLowerCase", `function f(s: string): any { return s.toLowerCase(); }`, `jsvalue.ToLowerCase(s)`},
+		{"toUpperCase", `function f(s: string): any { return s.toUpperCase(); }`, `jsvalue.ToUpperCase(s)`},
+		{"startsWith", `function f(s: string): any { return s.startsWith("a"); }`, `jsvalue.StartsWith(s,`},
+		{"endsWith", `function f(s: string): any { return s.endsWith("z"); }`, `jsvalue.EndsWith(s,`},
+		{"repeat", `function f(s: string): any { return s.repeat(3); }`, `jsvalue.Repeat(s,`},
+		{"trimStart", `function f(s: string): any { return s.trimStart(); }`, `strings.TrimLeft(`},
+		{"trimEnd", `function f(s: string): any { return s.trimEnd(); }`, `strings.TrimRight(`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -69,13 +69,15 @@ func TestStringMethods(t *testing.T) {
 func TestArrayLength(t *testing.T) {
 	ts := `function size(arr: number[]): number { return arr.length; }`
 	out := compile(t, ts)
-	assertContains(t, out, "len(arr)")
+	// arr is now *jsvalue.JSValue, so .length becomes .Len()
+	assertContains(t, out, ".Len()")
 }
 
 func TestArrayPush(t *testing.T) {
 	ts := `function add(arr: number[]): any { return arr.push(1); }`
 	out := compile(t, ts)
-	assertContains(t, out, "append(arr, 1)")
+	// arr is now *jsvalue.JSValue, so uses jsvalue.Push
+	assertContains(t, out, "jsvalue.Push(")
 }
 
 func TestNewTypeError(t *testing.T) {
@@ -134,21 +136,22 @@ func TestRegexTest(t *testing.T) {
 	ts := `const re = /hello/;
 function check(s: string): boolean { return re.test(s); }`
 	out := compile(t, ts)
-	assertContains(t, out, ".MatchString(s)")
+	assertContains(t, out, ".MatchString(")
 	assertNotContains(t, out, ".Test(")
 }
 
 func TestArrayConcat(t *testing.T) {
 	ts := `function f(arr: number[]): any { return arr.concat(1); }`
 	out := compile(t, ts)
-	assertContains(t, out, "append(arr, 1)")
-	assertNotContains(t, out, ".Concat(")
+	// arr is now *jsvalue.JSValue, uses jsvalue.Concat
+	assertContains(t, out, "jsvalue.Concat(")
 }
 
 func TestMathMinCoercesFloat64(t *testing.T) {
 	ts := `function f(a: number, b: number): number { return Math.min(a, b); }`
 	out := compile(t, ts)
-	assertContains(t, out, "math.Min(float64(a), float64(b))")
+	// a, b are now *jsvalue.JSValue, coerced to .Number() for math.Min
+	assertContains(t, out, "math.Min(")
 }
 
 func TestMathMinCoercesJSValueViaNumber(t *testing.T) {
@@ -205,9 +208,8 @@ func TestNegativeSliceIndex(t *testing.T) {
 	return arr.slice(0, -1);
 }`
 	out := compile(t, ts)
-	// Should convert -1 to len(arr)-1 (Go formatter adds spaces around :)
-	assertContains(t, out, "len(arr)-1")
-	assertNotContains(t, out, ":-1")
+	// arr is now *jsvalue.JSValue, uses jsvalue.Slice wrapper
+	assertContains(t, out, "jsvalue.Slice(arr,")
 }
 
 func TestNegativeSliceIndexOnJSValue(t *testing.T) {

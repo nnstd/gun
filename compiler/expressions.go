@@ -1217,9 +1217,15 @@ func (t *Transformer) transformTernary(node *sitter.Node) ast.Expr {
 }
 
 // inferTernaryResultType returns a Go type expression for the IIFE wrapping a
-// ternary. When both branches clearly produce the same type, that type is used;
+// ternary. When either branch involves JSValue, returns *jsvalue.JSValue.
+// When both branches clearly produce the same native type, that type is used;
 // otherwise falls back to `any`.
 func (t *Transformer) inferTernaryResultType(cons, alt *sitter.Node) ast.Expr {
+	// If either branch returns JSValue, the whole ternary should return JSValue.
+	if t.nodeReturnsJSValue(cons) || t.nodeReturnsJSValue(alt) {
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		return jsValuePtrType()
+	}
 	a := t.inferNodeResultType(cons)
 	b := t.inferNodeResultType(alt)
 	if a != "" && a == b {
@@ -1298,12 +1304,9 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 	}
 	defer t.popScope()
 
+	// All-JSValue: ignore return type annotations, determined by body content
 	var results *ast.FieldList
-	if returnTypeNode != nil {
-		if retType := t.getTypeAnnotation(returnTypeNode); retType != nil {
-			results = fieldList(field("", retType))
-		}
-	}
+	_ = returnTypeNode
 
 	var body *ast.BlockStmt
 	if bodyNode != nil {
