@@ -535,8 +535,8 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 							coercedArgs[i] = callExpr(selectorExpr(ident("jsvalue"), "From"), a)
 						}
 					}
-					// map/filter/forEach on JSValue slice locals need the receiver wrapped
-					if (prop == "map" || prop == "filter" || prop == "forEach") && objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objText] {
+					// Collection methods on JSValue slice locals need the receiver wrapped
+					if t.builtins.IsArrayMethod(prop) && objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objText] {
 						t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 						obj = callExpr(selectorExpr(ident("jsvalue"), "NewArray"), &ast.Ident{Name: objText + "..."})
 					}
@@ -654,6 +654,19 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 	return callExpr(fun, args...)
 }
 
+// isKnownGlobalObject returns true if the name is a known JS/Go global object
+// (console, Math, JSON, Object, process, etc.) that should NOT get .Get() dispatch.
+func isKnownGlobalObject(name string) bool {
+	switch name {
+	case "console", "Math", "JSON", "Object", "Array", "Number", "Boolean",
+		"Error", "TypeError", "RangeError", "Date", "RegExp", "Symbol",
+		"process", "module", "require", "globalThis",
+		"undefined", "null", "NaN", "Infinity":
+		return true
+	}
+	return false
+}
+
 // isRuntimePackage returns true if the name is a known Gun runtime package alias.
 func isRuntimePackage(name string) bool {
 	switch name {
@@ -695,11 +708,14 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 
 	prop := propNode.Utf8Text(t.source)
 
-	// Same-package namespace import: templates.foo → Foo (direct symbol reference)
+	// Same-package namespace import: use .Get() for JSValue object property access.
+	// This handles cross-file variable references like DefaultValuesForTypeKey.BOOLEAN.
 	if objNode.Kind() == "identifier" {
 		name := objNode.Utf8Text(t.source)
 		if imp, ok := t.importedNames[name]; ok && imp.goSymbol == "" && imp.goPkgName == "" {
-			return ident(capitalize(prop))
+			obj := t.transformExpr(objNode)
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			return callExpr(selectorExpr(obj, "Get"), stringLit(prop))
 		}
 	}
 
@@ -755,6 +771,26 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 	if objNode.Kind() == "identifier" {
 		name := objNode.Utf8Text(t.source)
 		if typed, ok := t.pkgVarTyped[name]; ok && !typed {
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			return callExpr(selectorExpr(obj, "Get"), stringLit(prop))
+		}
+	}
+
+	// If the object is a JSValue expression (from Get(), method call, etc.),
+	// use .Get() for property access.
+	if t.nodeReturnsJSValue(objNode) {
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		return callExpr(selectorExpr(obj, "Get"), stringLit(prop))
+	}
+
+	// Unknown identifiers from OTHER transpiled files in the same package.
+	// These are cross-file package-level variables, all *jsvalue.JSValue.
+	if objNode.Kind() == "identifier" {
+		name := objNode.Utf8Text(t.source)
+		_, isImported := t.importedNames[name]
+		_, isOwnPkgVar := t.pkgVarTyped[name]
+		isKnownGlobal := isKnownGlobalObject(name)
+		if !isImported && !isKnownGlobal && !t.isLocalName(name) && !isOwnPkgVar {
 			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 			return callExpr(selectorExpr(obj, "Get"), stringLit(prop))
 		}

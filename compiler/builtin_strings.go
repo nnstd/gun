@@ -203,6 +203,20 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 	case "match":
 		// str.match(regex) → regex.FindStringSubmatch(str)
 		if len(args) > 0 {
+			if wasJSValue {
+				// JSValue receiver: use MatchString for the match check.
+				// For full match result, use fmt.Sprint coercion on the regex arg.
+				addImport("fmt")
+				addImport("regexp")
+				addImport("github.com/nnstd/gun/runtime/jsvalue")
+				// Convert JSValue regex pattern to *regexp.Regexp and use FindStringSubmatch
+				return callExpr(
+					selectorExpr(
+						callExpr(selectorExpr(ident("regexp"), "MustCompile"),
+							callExpr(selectorExpr(ident("fmt"), "Sprint"), args[0])),
+						"FindStringSubmatch"),
+					callExpr(selectorExpr(ident("fmt"), "Sprint"), origObj))
+			}
 			return callExpr(selectorExpr(args[0], "FindStringSubmatch"), obj)
 		}
 	}

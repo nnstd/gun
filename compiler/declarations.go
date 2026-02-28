@@ -188,6 +188,14 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 			}
 		}
 
+		// Track locals assigned from jsvalueSliceLocals (e.g. var toCheck = patterns)
+		if valueNode != nil && valueNode.Kind() == "identifier" {
+			rhsName := valueNode.Utf8Text(t.source)
+			if t.jsvalueSliceLocals[rhsName] {
+				t.jsvalueSliceLocals[name] = true
+			}
+		}
+
 		// Track locals that hold *jsvalue.JSValue (not slices or maps)
 		// so method calls on them are properly coerced.
 		if !typed && valueNode != nil && t.nodeReturnsJSValue(valueNode) {
