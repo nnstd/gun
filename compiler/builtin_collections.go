@@ -165,8 +165,13 @@ func transformCollectionMethod(obj ast.Expr, prop string, args []ast.Expr, addIm
 			funcName := capitalize(prop) // Map, Filter, ForEach
 			return callExpr(selectorExpr(ident("jsvalue"), funcName), append([]ast.Expr{obj}, args...)...)
 		}
-	case "reduce", "find", "some", "every":
-		// These need more complex transforms; pass through for now
+	case "find", "some", "every", "reduce":
+		// Transform to package-level function calls like map/filter/forEach
+		if len(args) > 0 && (isJSValueReceiver || isJSValueMethodCall(obj)) {
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			funcName := capitalize(prop) // Find, Some, Every, Reduce
+			return callExpr(selectorExpr(ident("jsvalue"), funcName), append([]ast.Expr{obj}, args...)...)
+		}
 	}
 	return nil
 }

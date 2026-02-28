@@ -26,6 +26,17 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 		addImport("fmt")
 		return callExpr(selectorExpr(ident("fmt"), "Sprint"), obj)
 	case "indexOf":
+		if wasJSValue {
+			// JSValue receiver: use strings.Index but wrap result as JSValue
+			addImport("strings")
+			addImport("fmt")
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"),
+				callExpr(ident("float64"),
+					callExpr(selectorExpr(ident("strings"), "Index"),
+						callExpr(selectorExpr(ident("fmt"), "Sprint"), origObj),
+						callExpr(selectorExpr(ident("fmt"), "Sprint"), args[0]))))
+		}
 		addImport("strings")
 		if len(args) > 0 {
 			return callExpr(selectorExpr(ident("strings"), "Index"), obj, args[0])

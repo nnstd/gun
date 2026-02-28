@@ -162,6 +162,7 @@ func (r *BuiltinRegistry) registerJSValuePackageFunctions() {
 		"Slice", "Concat", "Push",
 		"Shift", "Unshift",
 		"Map", "Filter", "ForEach",
+		"Find", "Some", "Every", "Reduce",
 		// String wrapper functions
 		"ToLowerCase", "ToUpperCase", "Trim",
 		"Split", "Replace", "CharAt",

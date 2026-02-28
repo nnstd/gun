@@ -632,7 +632,31 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 
 	fun := t.transformExpr(fnNode)
 	args := t.transformArgs(argsNode)
+
+	// When calling runtime package functions (fs.ReadFileSync, path.Join, etc.),
+	// wrap literal arguments with jsvalueWrapLit since all runtime functions
+	// now accept *jsvalue.JSValue.
+	if sel, ok := fun.(*ast.SelectorExpr); ok {
+		if pkgIdent, ok := sel.X.(*ast.Ident); ok {
+			if isRuntimePackage(pkgIdent.Name) {
+				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+				for i, arg := range args {
+					args[i] = jsvalueWrapLit(arg)
+				}
+			}
+		}
+	}
+
 	return callExpr(fun, args...)
+}
+
+// isRuntimePackage returns true if the name is a known Gun runtime package alias.
+func isRuntimePackage(name string) bool {
+	switch name {
+	case "fs", "nodepath", "json", "process", "module":
+		return true
+	}
+	return false
 }
 
 func (t *Transformer) transformArgs(node *sitter.Node) []ast.Expr {

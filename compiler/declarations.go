@@ -405,6 +405,9 @@ func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.
 						break
 					}
 				}
+				// Track rest params as JSValue slice locals so collection methods
+				// wrap them with jsvalue.NewArray(args...) before calling
+				t.jsvalueSliceLocals[restName] = true
 				// All-JSValue: rest params are always ...*jsvalue.JSValue
 				var elemType ast.Expr = ptrType(selectorExpr(ident("jsvalue"), "JSValue"))
 				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")

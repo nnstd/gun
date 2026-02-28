@@ -476,6 +476,143 @@ func ForEach(arr *JSValue, fn any) {
 	}
 }
 
+// Find returns the first element for which fn returns truthy, or undefined.
+func Find(arr *JSValue, fn any) *JSValue {
+	if arr == nil || arr.arrayVal == nil {
+		return NewUndefined()
+	}
+	switch f := fn.(type) {
+	case func(*JSValue) *JSValue:
+		for _, elem := range arr.arrayVal {
+			if Truthy(f(elem)) {
+				return elem
+			}
+		}
+	case func(*JSValue, *JSValue) *JSValue:
+		for i, elem := range arr.arrayVal {
+			if Truthy(f(elem, NewNumber(float64(i)))) {
+				return elem
+			}
+		}
+	case func(*JSValue) bool:
+		for _, elem := range arr.arrayVal {
+			if f(elem) {
+				return elem
+			}
+		}
+	case *JSValue:
+		if f != nil && f.funcVal != nil {
+			for _, elem := range arr.arrayVal {
+				if Truthy(f.funcVal(elem)) {
+					return elem
+				}
+			}
+		}
+	}
+	return NewUndefined()
+}
+
+// Some returns true if at least one element satisfies the predicate.
+func Some(arr *JSValue, fn any) *JSValue {
+	if arr == nil || arr.arrayVal == nil {
+		return NewBool(false)
+	}
+	switch f := fn.(type) {
+	case func(*JSValue) *JSValue:
+		for _, elem := range arr.arrayVal {
+			if Truthy(f(elem)) {
+				return NewBool(true)
+			}
+		}
+	case func(*JSValue, *JSValue) *JSValue:
+		for i, elem := range arr.arrayVal {
+			if Truthy(f(elem, NewNumber(float64(i)))) {
+				return NewBool(true)
+			}
+		}
+	case func(*JSValue) bool:
+		for _, elem := range arr.arrayVal {
+			if f(elem) {
+				return NewBool(true)
+			}
+		}
+	case *JSValue:
+		if f != nil && f.funcVal != nil {
+			for _, elem := range arr.arrayVal {
+				if Truthy(f.funcVal(elem)) {
+					return NewBool(true)
+				}
+			}
+		}
+	}
+	return NewBool(false)
+}
+
+// Every returns true if all elements satisfy the predicate.
+func Every(arr *JSValue, fn any) *JSValue {
+	if arr == nil || arr.arrayVal == nil {
+		return NewBool(true)
+	}
+	switch f := fn.(type) {
+	case func(*JSValue) *JSValue:
+		for _, elem := range arr.arrayVal {
+			if !Truthy(f(elem)) {
+				return NewBool(false)
+			}
+		}
+	case func(*JSValue, *JSValue) *JSValue:
+		for i, elem := range arr.arrayVal {
+			if !Truthy(f(elem, NewNumber(float64(i)))) {
+				return NewBool(false)
+			}
+		}
+	case func(*JSValue) bool:
+		for _, elem := range arr.arrayVal {
+			if !f(elem) {
+				return NewBool(false)
+			}
+		}
+	}
+	return NewBool(true)
+}
+
+// Reduce applies fn against an accumulator and each element. Returns the final accumulated value.
+func Reduce(arr *JSValue, fn any, initial ...*JSValue) *JSValue {
+	if arr == nil || arr.arrayVal == nil {
+		if len(initial) > 0 {
+			return initial[0]
+		}
+		return NewUndefined()
+	}
+	var acc *JSValue
+	startIdx := 0
+	if len(initial) > 0 {
+		acc = initial[0]
+	} else if len(arr.arrayVal) > 0 {
+		acc = arr.arrayVal[0]
+		startIdx = 1
+	} else {
+		return NewUndefined()
+	}
+	switch f := fn.(type) {
+	case func(*JSValue, *JSValue) *JSValue:
+		for i := startIdx; i < len(arr.arrayVal); i++ {
+			acc = f(acc, arr.arrayVal[i])
+		}
+	case func(*JSValue, *JSValue, *JSValue) *JSValue:
+		for i := startIdx; i < len(arr.arrayVal); i++ {
+			acc = f(acc, arr.arrayVal[i], NewNumber(float64(i)))
+		}
+	case *JSValue:
+		if f != nil && f.funcVal != nil {
+			for i := startIdx; i < len(arr.arrayVal); i++ {
+				acc = f.funcVal(acc, arr.arrayVal[i])
+			}
+		}
+	}
+	return acc
+}
+
 // MatchString tests whether a regex JSValue matches the given value.
 // This implements JavaScript's regex.test(s) method.
 // The value argument is coerced to string if it's a JSValue.

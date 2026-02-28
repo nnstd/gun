@@ -142,12 +142,12 @@ const w = eastAsianWidth(42, {wide: true});`
 	assertContains(t, out, "jsvalue.ObjectFrom(")
 }
 
-func TestKnownModuleArgsNotWrapped(t *testing.T) {
+func TestKnownModuleArgsWrapped(t *testing.T) {
+	// All-JSValue: runtime package args are wrapped with jsvalue constructors
 	ts := `import { readFileSync } from "fs";
 const data = readFileSync("hello.txt");`
 	out := compile(t, ts)
-	assertContains(t, out, `fs.ReadFileSync("hello.txt")`)
-	assertNotContains(t, out, "jsvalue.From")
+	assertContains(t, out, `fs.ReadFileSync(jsvalue.NewString("hello.txt"))`)
 }
 
 func TestConsoleErrorUsesRuntimePackage(t *testing.T) {
