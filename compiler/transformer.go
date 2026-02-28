@@ -265,9 +265,9 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 						return false
 					}
 
-					// Check if receiver is a JSValue (untyped parameter or JSValue local)
-					isJSValueReceiver := objNode.Kind() == "identifier" &&
-						(t.isUntypedLocal(objNode.Utf8Text(t.source)) || t.jsvalueLocals[objNode.Utf8Text(t.source)])
+						// Check if receiver is a JSValue expression
+						isJSValueReceiver := t.nodeReturnsJSValue(objNode)
+
 
 					// String methods on JSValue receivers return JSValue (wrapped)
 					if isJSValueReceiver && t.builtins.ReturnsJSValueForUntypedReceiver(prop) {
