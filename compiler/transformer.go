@@ -302,6 +302,15 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 			return true
 		}
 		return false
+	case "ternary_expression":
+		// Ternary with JSValue branches produces JSValue
+		consNode := node.ChildByFieldName("consequence")
+		altNode := node.ChildByFieldName("alternative")
+		if (consNode != nil && t.nodeReturnsJSValue(consNode)) ||
+			(altNode != nil && t.nodeReturnsJSValue(altNode)) {
+			return true
+		}
+		return false
 	case "member_expression":
 		objNode := node.ChildByFieldName("object")
 		propNode := node.ChildByFieldName("property")

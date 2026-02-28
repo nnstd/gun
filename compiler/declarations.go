@@ -227,8 +227,16 @@ func (t *Transformer) isNonJSValueInit(node *sitter.Node) bool {
 	}
 	switch node.Kind() {
 	case "number", "string", "template_string", "true", "false",
-		"ternary_expression",
 		"array", "regex":
+		return true
+	case "ternary_expression":
+		// If either branch returns JSValue, the ternary is JSValue
+		consNode := node.ChildByFieldName("consequence")
+		altNode := node.ChildByFieldName("alternative")
+		if (consNode != nil && t.nodeReturnsJSValue(consNode)) ||
+			(altNode != nil && t.nodeReturnsJSValue(altNode)) {
+			return false
+		}
 		return true
 	case "new_expression":
 		// new Map() and new Set() now produce *jsvalue.JSValue
