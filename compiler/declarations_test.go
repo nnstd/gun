@@ -687,3 +687,15 @@ func TestArrayDestructuringWithRestPattern(t *testing.T) {
 	assertContains(t, out, "var first = arr.Index(0)")
 	assertContains(t, out, "jsvalue.Not(first).Bool()")
 }
+
+// --- All-JSValue regression tests ---
+
+func TestTypedParamsAreJSValue(t *testing.T) {
+	ts := `function f(x: number, s: string): boolean { return true; }`
+	out := compile(t, ts)
+	assertContains(t, out, "x *jsvalue.JSValue")
+	assertContains(t, out, "s *jsvalue.JSValue")
+	assertContains(t, out, ") *jsvalue.JSValue")
+	assertNotContains(t, out, "float64")
+	assertNotContains(t, out, ") bool")
+}

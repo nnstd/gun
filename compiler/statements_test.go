@@ -291,3 +291,11 @@ func TestForLoopJSValueIncrement(t *testing.T) {
 	assertContains(t, out, "jsvalue.NewNumber(ii.Number() + 1)")
 	assertNotContains(t, out, "ii++")
 }
+
+// --- All-JSValue regression tests ---
+
+func TestForLoopConditionWithJSValueComparison(t *testing.T) {
+	ts := `function f(arr, n) { for (let i = 0; i < n; i++) {} }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Lt(")
+}

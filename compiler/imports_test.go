@@ -157,3 +157,12 @@ func TestConsoleErrorUsesRuntimePackage(t *testing.T) {
 	assertNotContains(t, out, "os.Stderr")
 }
 
+
+// --- All-JSValue regression tests ---
+
+func TestFsReadFileSyncArgsWrapped(t *testing.T) {
+	ts := `import { readFileSync } from "fs";
+const data = readFileSync("hello.txt");`
+	out := compile(t, ts)
+	assertContains(t, out, `fs.ReadFileSync(jsvalue.NewString("hello.txt"))`)
+}

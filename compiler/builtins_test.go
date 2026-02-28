@@ -253,3 +253,110 @@ func TestNumberGlobalCall(t *testing.T) {
 	assertContains(t, out, "x.Number()")
 	assertNotContains(t, out, "float64(x)")
 }
+
+// --- All-JSValue regression tests ---
+
+func TestReplaceAcceptsRegexJSValue(t *testing.T) {
+	// jsvalue.Replace accepts *JSValue for pattern (string or regex).
+	ts := `function f(s) { return s.replace(/abc/, "xyz"); }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Replace(")
+	assertNotContains(t, out, "strings.Replace(")
+}
+
+func TestSplitAcceptsJSValueSeparator(t *testing.T) {
+	ts := `function f(key) { return key.split("."); }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Split(key,")
+	assertContains(t, out, `jsvalue.NewString(".")`)
+}
+
+func TestCharAtAcceptsJSValueIndex(t *testing.T) {
+	ts := `function f(s) { return s.charAt(0); }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.CharAt(s,")
+}
+
+func TestSliceAcceptsJSValueArgs(t *testing.T) {
+	ts := `function f(arr) { return arr.slice(1, 3); }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Slice(arr,")
+	assertContains(t, out, "jsvalue.NewNumber")
+}
+
+func TestLastIndexOfWrapsArgs(t *testing.T) {
+	ts := `function f(s) { return s.lastIndexOf("x"); }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.LastIndexOf(s,")
+}
+
+func TestJoinWrapsJSValueSeparator(t *testing.T) {
+	ts := `function f(arr) { return arr.join(","); }`
+	out := compile(t, ts)
+	assertContains(t, out, `jsvalue.Join(arr, jsvalue.NewString(","))`)
+}
+
+func TestIsArrayReturnsJSValue(t *testing.T) {
+	ts := `function f(x) { return Array.isArray(x); }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.IsArrayValue(x)")
+}
+
+func TestMatchOnJSValueUsesRegexpCompile(t *testing.T) {
+	// arg.match(pattern) where both are JSValue compiles regex from pattern.
+	ts := `function f(arg, pattern) { return arg.match(pattern); }`
+	out := compile(t, ts)
+	assertContains(t, out, "regexp.MustCompile(")
+	assertContains(t, out, "FindStringSubmatch")
+	assertNotContains(t, out, "pattern.FindStringSubmatch")
+}
+
+func TestSpliceOnJSValue(t *testing.T) {
+	ts := `function f(arr) { return arr.splice(1, 2); }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Splice(")
+}
+
+func TestIndexOfOnComplexReceiverReturnsJSValue(t *testing.T) {
+	// indexOf on a .Get() chain returns JSValue so comparisons use jsvalue.Eq.
+	ts := `function f(obj, val) { return obj.items.indexOf(val) === -1; }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Eq(")
+	assertNotContains(t, out, "== -1")
+}
+
+func TestRegExpPatternUnwrapsJSValue(t *testing.T) {
+	// new RegExp(jsValueExpr) where arg is jsvalue.Add → .String() unwrap.
+	ts := `function f(prefix) { return new RegExp("^" + prefix + "$"); }`
+	out := compile(t, ts)
+	assertContains(t, out, "regexp.MustCompile(")
+	assertContains(t, out, ".String()")
+}
+
+func TestProcessVersionMember(t *testing.T) {
+	ts := `const v = process.version;`
+	out := compile(t, ts)
+	assertContains(t, out, "process.Version")
+	assertNotContains(t, out, "NewBool(true).Version")
+}
+
+func TestProcessAsStandaloneUsesAsJSValue(t *testing.T) {
+	ts := `const exists = process ? true : false;`
+	out := compile(t, ts)
+	assertContains(t, out, "process.AsJSValue()")
+}
+
+func TestErrorCallNoUnusedImport(t *testing.T) {
+	// Error() as a function call should NOT import "errors" package.
+	ts := `function f(msg) { return Error(msg); }`
+	out := compile(t, ts)
+	assertNotContains(t, out, `"errors"`)
+}
+
+func TestPushOnSliceLocalWrapsLiteralArgs(t *testing.T) {
+	// push(true) on a []*jsvalue.JSValue slice wraps the literal.
+	ts := `function f() { const arr = []; arr.push(true); }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Push(")
+	assertContains(t, out, "jsvalue.NewBool(true)")
+}

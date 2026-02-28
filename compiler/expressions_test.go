@@ -396,3 +396,102 @@ function f(val) { return mixin.normalize(val); }
 	assertContains(t, out, `.Get("normalize").Call(`)
 	assertNotContains(t, out, `.Get("normalize")(`)
 }
+
+// --- All-JSValue regression tests ---
+
+func TestBinaryAddUsesJSValueHelper(t *testing.T) {
+	ts := `function f(a, b) { return a + b; }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Add(")
+}
+
+func TestBinaryEqUsesJSValueHelper(t *testing.T) {
+	ts := `function f(a, b) { return a === b; }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Eq(")
+}
+
+func TestBinaryLtUsesJSValueHelper(t *testing.T) {
+	ts := `function f(a, b) { return a < b; }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Lt(")
+}
+
+func TestLogicalOrUsesJSValueHelper(t *testing.T) {
+	ts := `function f(x) { return x || "default"; }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Or(")
+}
+
+func TestLogicalAndUsesJSValueHelper(t *testing.T) {
+	ts := `function f(a, b) { return a && b; }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.And(")
+}
+
+func TestUnaryNotUsesJSValueHelper(t *testing.T) {
+	ts := `function f(x) { if (!x) { return true; } }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Not(x).Bool()")
+}
+
+func TestUnaryNegUsesJSValueHelper(t *testing.T) {
+	ts := `function f(x) { return -x; }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Neg(")
+}
+
+func TestTypeofUsesJSValueHelper(t *testing.T) {
+	ts := `function f(x) { return typeof x; }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.TypeOf(")
+}
+
+func TestBitNotInBoolContext(t *testing.T) {
+	ts := `function f(s) { var i = "abc"; if (~i) { return true; } }`
+	out := compile(t, ts)
+	assertContains(t, out, "!= 0")
+}
+
+func TestNullishCoalescingUsesJSValue(t *testing.T) {
+	ts := `function f(x) { return x ?? "default"; }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Nullish(")
+}
+
+func TestEnsureBoolOnJSValueCallUsesBool(t *testing.T) {
+	// JSValue expressions in boolean context use .Bool(), not != nil.
+	ts := `function f(x) { if (x.get("key")) { return true; } }`
+	out := compile(t, ts)
+	assertContains(t, out, ".Bool()")
+}
+
+func TestTernaryWithJSValueBranchesReturnsJSValue(t *testing.T) {
+	ts := `function f(x, y) { return x ? x : y; }`
+	out := compile(t, ts)
+	assertContains(t, out, "func() *jsvalue.JSValue")
+}
+
+func TestBinaryExpressionJSValuePropagation(t *testing.T) {
+	// Variable from binary expression with JSValue operands → tracked as JSValue.
+	ts := `function f(s) {
+	var check = s !== s.toLowerCase() && s !== s.toUpperCase();
+	if (!check) { return s; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.And(")
+	assertContains(t, out, "jsvalue.Not(check)")
+}
+
+func TestPackageLevelUntypedVarUsesGet(t *testing.T) {
+	ts := `var obj = {};
+const x = obj.foo;`
+	out := compile(t, ts)
+	assertContains(t, out, `.Get("foo")`)
+}
+
+func TestUntypedLocalCallUsesJSValueCall(t *testing.T) {
+	ts := `function f(fn) { return fn(42); }`
+	out := compile(t, ts)
+	assertContains(t, out, ".Call(")
+}
