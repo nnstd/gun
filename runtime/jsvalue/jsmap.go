@@ -47,9 +47,35 @@ func jsValueEqual(a, b *JSValue) bool {
 	}
 }
 
-// NewMap creates an empty Map JSValue.
+// NewMap creates an empty Map JSValue with set/get/has/delete methods.
 func NewMap() *JSValue {
-	return &JSValue{typ: TypeMap, mapVal: &jsMap{}}
+	m := &JSValue{typ: TypeMap, mapVal: &jsMap{}, properties: make(map[string]*PropertyDescriptor)}
+	// Add standard Map methods so they can be called via .Get("method").Call()
+	m.Set("set", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) >= 2 {
+			return MapSet(m, args[0], args[1])
+		}
+		return m
+	}))
+	m.Set("get", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) >= 1 {
+			return MapGet(m, args[0])
+		}
+		return NewUndefined()
+	}))
+	m.Set("has", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) >= 1 {
+			return MapHas(m, args[0])
+		}
+		return NewBool(false)
+	}))
+	m.Set("delete", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) >= 1 {
+			return MapDelete(m, args[0])
+		}
+		return NewBool(false)
+	}))
+	return m
 }
 
 // MapGet returns the value for key, or undefined.

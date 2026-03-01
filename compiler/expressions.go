@@ -1214,6 +1214,16 @@ func isJSValueExpr(expr ast.Expr) bool {
 	if isJSValueGet(expr) {
 		return true
 	}
+	// IIFE (immediately invoked function expression) that returns *jsvalue.JSValue
+	if call, ok := expr.(*ast.CallExpr); ok {
+		if fnLit, ok := call.Fun.(*ast.FuncLit); ok {
+			if fnLit.Type.Results != nil && len(fnLit.Type.Results.List) == 1 {
+				if isJSValuePtrType(fnLit.Type.Results.List[0].Type) {
+					return true
+				}
+			}
+		}
+	}
 	// Identifiers that look like JSValue (checked by caller context)
 	return false
 }
