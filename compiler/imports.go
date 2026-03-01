@@ -83,9 +83,6 @@ func init() {
 		"strict": "", // namespace import for assert/strict
 	})
 	registerModule("module", "github.com/nnstd/gun/runtime/module", "module", nil)
-	registerModule("yargs", "github.com/nnstd/gun/runtime/yargs", "yargs", map[string]string{
-		"default": "Default",
-	})
 }
 
 func (t *Transformer) transformImport(node *sitter.Node) {
