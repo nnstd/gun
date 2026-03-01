@@ -750,20 +750,18 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			}
 
 			// Method call on a local scope variable or 'this':
-			// use .Get("method").Call(this, args...) for dynamic dispatch.
-			// Prepend receiver as 'this' so class methods can access it.
+			// use .MethodCall("method", args...) which auto-prepends receiver as 'this'.
 			if (objNode.Kind() == "identifier" && t.isLocalName(objText)) || objNode.Kind() == "this" {
 				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 				obj := t.transformExpr(objNode)
 				for i, arg := range args {
 					args[i] = t.wrapAsJSValue(arg)
 				}
-				allArgs := append([]ast.Expr{obj}, args...)
-				return callExpr(selectorExpr(callExpr(selectorExpr(obj, "Get"), stringLit(prop)), "Call"), allArgs...)
+				allArgs := append([]ast.Expr{stringLit(prop)}, args...)
+				return callExpr(selectorExpr(obj, "MethodCall"), allArgs...)
 			}
 
 			// Method call on a package-level untyped variable (JSValue):
-			// use .Get("method").Call(this, args...) for dynamic dispatch.
 			if objNode.Kind() == "identifier" {
 				if typed, ok := t.pkgVarTyped[objText]; ok && !typed {
 					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
@@ -771,13 +769,13 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 					for i, arg := range args {
 						args[i] = t.wrapAsJSValue(arg)
 					}
-					allArgs := append([]ast.Expr{obj}, args...)
-					return callExpr(selectorExpr(callExpr(selectorExpr(obj, "Get"), stringLit(prop)), "Call"), allArgs...)
+					allArgs := append([]ast.Expr{stringLit(prop)}, args...)
+					return callExpr(selectorExpr(obj, "MethodCall"), allArgs...)
 				}
 			}
 
 			// Catch-all: method call on any JSValue-returning expression
-			// (call results, new expressions, etc.) uses .Get("method").Call(this, args...).
+			// (call results, new expressions, etc.) uses .MethodCall("method", args...).
 			// For complex receivers (calls, chains), wrap in IIFE to evaluate once.
 			if t.nodeReturnsJSValue(objNode) {
 				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
@@ -785,12 +783,11 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 				for i, arg := range args {
 					args[i] = t.wrapAsJSValue(arg)
 				}
-				// If receiver is complex (not a simple identifier), wrap in IIFE
-				// to avoid evaluating it twice (once for .Get, once for Call this).
+				allArgs := append([]ast.Expr{stringLit(prop)}, args...)
 				if !isSimpleExpr(obj) {
 					recv := ident("_recv")
-					allArgs := append([]ast.Expr{recv}, args...)
-					innerCall := callExpr(selectorExpr(callExpr(selectorExpr(recv, "Get"), stringLit(prop)), "Call"), allArgs...)
+					recvArgs := append([]ast.Expr{stringLit(prop)}, args...)
+					innerCall := callExpr(selectorExpr(recv, "MethodCall"), recvArgs...)
 					return callExpr(&ast.FuncLit{
 						Type: &ast.FuncType{
 							Params:  fieldList(field("_recv", jsValuePtrType())),
@@ -799,8 +796,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 						Body: blockStmt(returnStmt(innerCall)),
 					}, obj)
 				}
-				allArgs := append([]ast.Expr{obj}, args...)
-				return callExpr(selectorExpr(callExpr(selectorExpr(obj, "Get"), stringLit(prop)), "Call"), allArgs...)
+				return callExpr(selectorExpr(obj, "MethodCall"), allArgs...)
 			}
 		}
 	}
@@ -1253,9 +1249,9 @@ func isJSValueMethodCall(expr ast.Expr) bool {
 		return globalBuiltins.IsJSValuePackageFunction(sel.Sel.Name)
 	}
 
-	// Check for other JSValue methods (Get, Index, etc.)
+	// Check for other JSValue methods (Get, Index, Call, MethodCall, etc.)
 	switch sel.Sel.Name {
-	case "Get", "Index", "Call", "ToSlice":
+	case "Get", "Index", "Call", "MethodCall", "ToSlice":
 		return true
 	}
 	return false

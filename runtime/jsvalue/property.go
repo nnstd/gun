@@ -1,5 +1,21 @@
 package jsvalue
 
+import "strconv"
+
+// parseArrayIndex checks if a property name is a valid non-negative integer
+// index (like "0", "1", "42") and returns the index. This enables JS-style
+// arr["0"] === arr[0] semantics.
+func parseArrayIndex(name string) (int, bool) {
+	if len(name) == 0 || (name[0] == '0' && len(name) > 1) {
+		return 0, name == "0" // "0" is valid, "01" is not
+	}
+	n, err := strconv.Atoi(name)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
+}
+
 // PropertyDescriptor describes a single property on a JSValue.
 type PropertyDescriptor struct {
 	Value        *JSValue
@@ -22,6 +38,12 @@ func (v *JSValue) Get(name string) *JSValue {
 	// creates an own property — it never modifies the internal chain.
 	if name == "__proto__" {
 		return v.GetPrototype()
+	}
+	// For arrays, numeric string keys access arrayVal (JS: arr["0"] === arr[0])
+	if v.arrayVal != nil {
+		if idx, ok := parseArrayIndex(name); ok && idx < len(v.arrayVal) {
+			return v.arrayVal[idx]
+		}
 	}
 	if v.properties != nil {
 		if desc, ok := v.properties[name]; ok {

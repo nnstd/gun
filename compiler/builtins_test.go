@@ -397,10 +397,10 @@ func TestGenericDotCallOnFunction(t *testing.T) {
 }
 
 func TestJSValueFunctionFromGetChainUsesCall(t *testing.T) {
-	// obj.method(42) on local uses .Get("method").Call() for dynamic dispatch.
+	// obj.method(42) on local uses .MethodCall("method",) for dynamic dispatch.
 	ts := `function f(obj) { return obj.method(42); }`
 	out := compile(t, ts)
-	assertContains(t, out, `obj.Get("method").Call(`)
+	assertContains(t, out, `obj.MethodCall("method",`)
 }
 
 func TestNewErrorUsesJserror(t *testing.T) {

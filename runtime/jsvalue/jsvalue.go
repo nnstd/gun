@@ -44,6 +44,16 @@ type JSValue struct {
 	regexVal   interface{} // stores *regexp.Regexp to avoid import cycle
 	mapVal     *jsMap
 	setVal     *jsSet
+	isMethod   bool // true for class methods that expect this as _args[0]
+}
+
+// MarkAsMethod marks this function as a class method that expects 'this'
+// as the first argument when called via MethodCall.
+func (v *JSValue) MarkAsMethod() *JSValue {
+	if v != nil {
+		v.isMethod = true
+	}
+	return v
 }
 
 var symbolCounter uint64
@@ -377,6 +387,25 @@ func (v *JSValue) Call(args ...*JSValue) *JSValue {
 	return NewUndefined()
 }
 
+// MethodCall invokes a method on a JSValue object with the given arguments.
+// For class methods (marked with MarkAsMethod), prepends the receiver as 'this'
+// so the method can extract it from _args[0]. For plain functions, passes
+// args directly without prepending this.
+func (v *JSValue) MethodCall(method string, args ...*JSValue) *JSValue {
+	fn := v.Get(method)
+	if fn == nil {
+		return NewUndefined()
+	}
+	// Only prepend 'this' for functions that expect it (class methods)
+	if fn.isMethod {
+		allArgs := make([]*JSValue, 0, 1+len(args))
+		allArgs = append(allArgs, v)
+		allArgs = append(allArgs, args...)
+		return fn.Call(allArgs...)
+	}
+	return fn.Call(args...)
+}
+
 // ToSlice converts an any value to []*JSValue. Handles []*JSValue passthrough
 // and *JSValue (via .Array()). Used when an IIFE returns any but the target is []*JSValue.
 func ToSlice(v any) []*JSValue {
@@ -535,8 +564,7 @@ func Map(arrAny any, fn any) *JSValue {
 	case *JSValue:
 		if f != nil && f.funcVal != nil {
 			for i, elem := range arr.arrayVal {
-				results[i] = f.funcVal(elem)
-				_ = i
+				results[i] = f.funcVal(elem, NewNumber(float64(i)))
 			}
 		}
 	}
@@ -572,8 +600,8 @@ func Filter(arrAny any, fn any) *JSValue {
 		}
 	case *JSValue:
 		if f != nil && f.funcVal != nil {
-			for _, elem := range arr.arrayVal {
-				r := f.funcVal(elem)
+			for i, elem := range arr.arrayVal {
+				r := f.funcVal(elem, NewNumber(float64(i)))
 				if r != nil && r.Bool() {
 					results = append(results, elem)
 				}
@@ -609,8 +637,8 @@ func ForEach(arrAny any, fn any) {
 		}
 	case *JSValue:
 		if f != nil && f.funcVal != nil {
-			for _, elem := range arr.arrayVal {
-				f.funcVal(elem)
+			for i, elem := range arr.arrayVal {
+				f.funcVal(elem, NewNumber(float64(i)))
 			}
 		}
 	}

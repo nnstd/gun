@@ -631,29 +631,11 @@ func (t *Transformer) wrapFuncLitAsJSValue(fnLit *ast.FuncLit, paramNames []stri
 		}
 	}
 
-	// When called as a method via obj.Get("method").Call(obj, arg1, arg2),
-	// the first element of _args is 'this' (the receiver). Strip it when
-	// there are more args than expected params, so plain functions work correctly.
-	var wrapperStmts []ast.Stmt
-	if paramIdx > 0 && !hasVariadicSpread {
-		wrapperStmts = append(wrapperStmts, &ast.IfStmt{
-			Cond: &ast.BinaryExpr{
-				X:  callExpr(ident("len"), ident("_args")),
-				Op: token.GTR,
-				Y:  intLit(itoa(paramIdx)),
-			},
-			Body: blockStmt(assignStmt(
-				[]ast.Expr{ident("_args")},
-				[]ast.Expr{&ast.SliceExpr{X: ident("_args"), Low: intLit("1")}},
-			)),
-		})
-	}
-
 	innerCall := callExpr(fnLit, callArgs...)
 	if hasVariadicSpread {
 		innerCall.Ellipsis = 1 // non-zero triggers "args..." syntax
 	}
-	wrapperStmts = append(wrapperStmts, returnStmt(innerCall))
+	wrapperStmts := []ast.Stmt{returnStmt(innerCall)}
 
 	variadicFn := &ast.FuncLit{
 		Type: &ast.FuncType{

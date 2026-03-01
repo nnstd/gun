@@ -419,6 +419,8 @@ func (t *Transformer) buildMethodSetup(className, methodName string, node *sitte
 		target = callExpr(selectorExpr(ident(className), "Get"), stringLit("prototype"))
 	}
 
+	// Mark as method so MethodCall knows to prepend 'this'
+	fnVal = callExpr(selectorExpr(fnVal, "MarkAsMethod"))
 	return exprStmt(callExpr(selectorExpr(target, "Set"), stringLit(methodName), fnVal))
 }
 
@@ -516,6 +518,8 @@ func (t *Transformer) transformClassMethodWithDynamicName(className string, memb
 	} else {
 		target = callExpr(selectorExpr(ident(className), "Get"), stringLit("prototype"))
 	}
+	// Mark as method so MethodCall knows to prepend 'this'
+	fnVal = callExpr(selectorExpr(fnVal, "MarkAsMethod"))
 	key := callExpr(selectorExpr(ident("jsvalue"), "PropertyKey"), ident(symName))
 	return exprStmt(callExpr(selectorExpr(target, "Set"), key, fnVal))
 }

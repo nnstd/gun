@@ -790,7 +790,7 @@ func TestClassMethodThisCallUsesGetCall(t *testing.T) {
 	bar() { return this.baz(); }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, `this.Get("baz").Call(this)`)
+	assertContains(t, out, `this.MethodCall("baz")`)
 }
 
 func TestClassVoidMethodHasReturnType(t *testing.T) {
@@ -972,7 +972,7 @@ func TestMethodOnCallResultUsesGetCall(t *testing.T) {
 	// Method call on a call result (JSValue) uses .Get().Call()
 	ts := `function f(s) { return String(s).normalize(); }`
 	out := compile(t, ts)
-	assertContains(t, out, `.Get("normalize").Call(`)
+	assertContains(t, out, `.MethodCall("normalize")`)
 }
 
 func TestObjectLiteralInOrUsesJSValueOr(t *testing.T) {
