@@ -66,6 +66,15 @@ func transformGlobalCall(name string, args []ast.Expr, t *Transformer) ast.Expr 
 		// Array(n) → jsvalue.NewArray() — creates empty array (length handled at runtime)
 		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewArray"))
+	case "String":
+		// String(x) → jsvalue.NewString(fmt.Sprint(x))
+		t.addImport("fmt")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("jsvalue"), "NewString"),
+				callExpr(selectorExpr(ident("fmt"), "Sprint"), args[0]))
+		}
+		return callExpr(selectorExpr(ident("jsvalue"), "NewString"), stringLit(""))
 	}
 	if isErrorType(name) {
 		// Error("msg") → jserror.Error.Call(msg) — JS spec: Error() without new also creates Error

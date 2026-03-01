@@ -493,7 +493,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 				if (isUntypedLocal || t.nodeReturnsJSValue(objNode)) && !t.builtins.IsArrayMethod(prop) && !t.builtins.IsRegexMethod(prop) {
 					t.addImport("fmt")
 					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-					obj = callExpr(selectorExpr(ident("fmt"), "Sprint"), obj)
+					coercedObj := callExpr(selectorExpr(ident("fmt"), "Sprint"), obj)
 					coercedArgs := make([]ast.Expr, len(args))
 					copy(coercedArgs, args)
 					for i, arg := range coercedArgs {
@@ -502,7 +502,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 							coercedArgs[i] = callExpr(selectorExpr(ident("fmt"), "Sprint"), arg)
 						}
 					}
-					if r := transformBuiltinMethod(obj, prop, coercedArgs, t.addImport); r != nil {
+					if r := transformBuiltinMethod(coercedObj, prop, coercedArgs, t.addImport); r != nil {
 						// Wrap result in JSValue based on return type
 						switch prop {
 						case "split":
@@ -591,6 +591,18 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 					allArgs := append([]ast.Expr{obj}, args...)
 					return callExpr(selectorExpr(callExpr(selectorExpr(obj, "Get"), stringLit(prop)), "Call"), allArgs...)
 				}
+			}
+
+			// Catch-all: method call on any JSValue-returning expression
+			// (call results, new expressions, etc.) uses .Get("method").Call(this, args...).
+			if t.nodeReturnsJSValue(objNode) {
+				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+				obj := t.transformExpr(objNode)
+				for i, arg := range args {
+					args[i] = t.wrapAsJSValue(arg)
+				}
+				allArgs := append([]ast.Expr{obj}, args...)
+				return callExpr(selectorExpr(callExpr(selectorExpr(obj, "Get"), stringLit(prop)), "Call"), allArgs...)
 			}
 		}
 	}

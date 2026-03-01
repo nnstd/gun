@@ -195,6 +195,15 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		if typed, ok := t.pkgVarTyped[sanitized]; ok && !typed {
 			return true
 		}
+		// Imported transpiled symbols (named imports, not namespace) are JSValue
+		if imp, ok := t.importedNames[name]; ok && imp.isTranspiled && imp.goSymbol != "" {
+			return true
+		}
+		// Global functions that return JSValue
+		switch name {
+		case "String", "Array", "Error", "TypeError", "RangeError", "ReferenceError":
+			return true
+		}
 		return false
 	case "subscript_expression":
 		objNode := node.ChildByFieldName("object")
@@ -215,6 +224,12 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		// Plain function call to untyped local → returns *jsvalue.JSValue
 		if fnNode != nil && fnNode.Kind() == "identifier" && t.isUntypedLocal(fnNode.Utf8Text(t.source)) {
 			return true
+		}
+		// Global functions that return JSValue (String, Array, Error, etc.)
+		if fnNode != nil && fnNode.Kind() == "identifier" {
+			if t.nodeReturnsJSValue(fnNode) {
+				return true
+			}
 		}
 		// Plain function call to imported function → returns *jsvalue.JSValue
 		if fnNode != nil && fnNode.Kind() == "identifier" {
@@ -344,6 +359,12 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		return true
 	case "regex":
 		// Regex literals are now jsvalue.NewRegex(...) — returns *jsvalue.JSValue
+		return true
+	case "object":
+		// Object literals produce jsvalue.ObjectFrom(...) — returns *jsvalue.JSValue
+		return true
+	case "array":
+		// Array literals produce jsvalue.NewArray(...) — returns *jsvalue.JSValue
 		return true
 	case "member_expression":
 		objNode := node.ChildByFieldName("object")
