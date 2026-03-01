@@ -325,6 +325,8 @@ func (t *Transformer) buildMethodSetup(className, methodName string, node *sitte
 							}),
 						),
 					},
+					// Suppress "declared and not used" for unused params
+					assignStmt([]ast.Expr{ident("_")}, []ast.Expr{ident(pName)}),
 				)
 			}
 		}
