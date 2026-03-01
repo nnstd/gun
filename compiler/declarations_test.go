@@ -1137,3 +1137,57 @@ func TestStringAsCallback(t *testing.T) {
 	assertContains(t, out, "jsvalue.Map(")
 	assertContains(t, out, "jsvalue.NewFunction(")
 }
+
+func TestUnusedClassMethodParam(t *testing.T) {
+	// Unused class method params get _ = pName suppression
+	ts := `class Foo {
+	bar(a, b, c) { return a; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "_ = b")
+	assertContains(t, out, "_ = c")
+}
+
+func TestMultiVarForInit(t *testing.T) {
+	// for (let i = 0, ii = arr.length; ...) → extra vars declared before loop
+	ts := `function f(arr) {
+	for (let i = 0, size = arr.length; i < size; i++) {
+		console.log(arr[i]);
+	}
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "size :=")
+	assertContains(t, out, "for i :=")
+}
+
+func TestSamePackageNamespaceResolvesDirect(t *testing.T) {
+	// import * as X from "./file" + X.foo → Foo (capitalized direct reference)
+	ts := `import * as templates from "./completion-templates.js";
+const s = templates.completionShTemplate;`
+	out, _ := Compile([]byte(ts), "mypkg", "mymod", true)
+	assertContains(t, string(out), "CompletionShTemplate")
+	assertNotContains(t, string(out), "templates.Get(")
+}
+
+func TestParenthesizedDestructuringAssignment(t *testing.T) {
+	// ({ a: this.a, b: this.b } = obj) — parenthesized object destructuring
+	ts := `class Foo {
+	unfreeze(obj) {
+		({ a: this.a, b: this.b } = obj);
+	}
+}`
+	out := compile(t, ts)
+	assertContains(t, out, `.Set("a"`)
+	assertContains(t, out, `.Set("b"`)
+	assertNotContains(t, out, "nil =")
+}
+
+func TestClassMethodDestructuredParam(t *testing.T) {
+	// Class method with destructured param extracts fields
+	ts := `class Foo {
+	bar({ name, age }) { return name; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, `_param0.Get("name")`)
+	assertContains(t, out, `_param0.Get("age")`)
+}
