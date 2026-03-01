@@ -57,67 +57,71 @@ func init() {
 	}
 
 	// Built-in methods on FunctionPrototype.
+	// Marked as methods so MethodCall passes the function as 'this' (args[0]).
+	bindFn := NewFunction(func(args ...*JSValue) *JSValue {
+		// bind(thisArg, ...boundArgs) → returns a new function
+		// args[0] = the original function (this), args[1] = thisArg, args[2:] = bound args
+		if len(args) < 2 {
+			return NewUndefined()
+		}
+		origFn := args[0]
+		thisArg := args[1]
+		boundArgs := args[2:]
+		if origFn == nil || origFn.funcVal == nil {
+			return NewUndefined()
+		}
+		return NewFunction(func(callArgs ...*JSValue) *JSValue {
+			all := make([]*JSValue, 0, 1+len(boundArgs)+len(callArgs))
+			all = append(all, thisArg)
+			all = append(all, boundArgs...)
+			all = append(all, callArgs...)
+			return origFn.funcVal(all...)
+		})
+	})
+	bindFn.MarkAsMethod()
 	FunctionPrototype.DefineProperty("bind", &PropertyDescriptor{
-		Value: NewFunction(func(args ...*JSValue) *JSValue {
-			// bind(thisArg, ...boundArgs) → returns a new function
-			// args[0] = the original function (this), args[1] = thisArg, args[2:] = bound args
-			if len(args) < 2 {
-				return NewUndefined()
-			}
-			origFn := args[0]
-			thisArg := args[1]
-			boundArgs := args[2:]
-			if origFn == nil || origFn.funcVal == nil {
-				return NewUndefined()
-			}
-			return NewFunction(func(callArgs ...*JSValue) *JSValue {
-				// Prepend thisArg and boundArgs before callArgs
-				all := make([]*JSValue, 0, 1+len(boundArgs)+len(callArgs))
-				all = append(all, thisArg)
-				all = append(all, boundArgs...)
-				all = append(all, callArgs...)
-				return origFn.funcVal(all...)
-			})
-		}),
+		Value:        bindFn,
 		Writable:     true,
 		Enumerable:   false,
 		Configurable: true,
 	})
+	callFn := NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) < 1 {
+			return NewUndefined()
+		}
+		origFn := args[0]
+		if origFn == nil || origFn.funcVal == nil {
+			return NewUndefined()
+		}
+		return origFn.funcVal(args[1:]...)
+	})
+	callFn.MarkAsMethod()
 	FunctionPrototype.DefineProperty("call", &PropertyDescriptor{
-		Value: NewFunction(func(args ...*JSValue) *JSValue {
-			// call(thisArg, ...callArgs) → calls the function
-			if len(args) < 1 {
-				return NewUndefined()
-			}
-			origFn := args[0]
-			if origFn == nil || origFn.funcVal == nil {
-				return NewUndefined()
-			}
-			return origFn.funcVal(args[1:]...)
-		}),
+		Value:        callFn,
 		Writable:     true,
 		Enumerable:   false,
 		Configurable: true,
 	})
+	applyFn := NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) < 1 {
+			return NewUndefined()
+		}
+		origFn := args[0]
+		if origFn == nil || origFn.funcVal == nil {
+			return NewUndefined()
+		}
+		callArgs := []*JSValue{}
+		if len(args) >= 2 {
+			callArgs = append(callArgs, args[1])
+		}
+		if len(args) >= 3 && args[2] != nil && args[2].arrayVal != nil {
+			callArgs = append(callArgs, args[2].arrayVal...)
+		}
+		return origFn.funcVal(callArgs...)
+	})
+	applyFn.MarkAsMethod()
 	FunctionPrototype.DefineProperty("apply", &PropertyDescriptor{
-		Value: NewFunction(func(args ...*JSValue) *JSValue {
-			// apply(thisArg, argsArray) → calls the function
-			if len(args) < 1 {
-				return NewUndefined()
-			}
-			origFn := args[0]
-			if origFn == nil || origFn.funcVal == nil {
-				return NewUndefined()
-			}
-			callArgs := []*JSValue{}
-			if len(args) >= 2 {
-				callArgs = append(callArgs, args[1]) // thisArg
-			}
-			if len(args) >= 3 && args[2] != nil && args[2].arrayVal != nil {
-				callArgs = append(callArgs, args[2].arrayVal...)
-			}
-			return origFn.funcVal(callArgs...)
-		}),
+		Value:        applyFn,
 		Writable:     true,
 		Enumerable:   false,
 		Configurable: true,
