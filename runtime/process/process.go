@@ -19,8 +19,17 @@ var Platform = jsvalue.NewString(func() string {
 	}
 }())
 
-var Stdout = stdos.Stdout
-var Stderr = stdos.Stderr
+var Stdout = func() *jsvalue.JSValue {
+	obj := jsvalue.NewObject()
+	// process.stdout.columns — terminal width (default 80)
+	obj.Set("columns", jsvalue.NewNumber(80))
+	return obj
+}()
+var Stderr = func() *jsvalue.JSValue {
+	obj := jsvalue.NewObject()
+	obj.Set("columns", jsvalue.NewNumber(80))
+	return obj
+}()
 var Pid = jsvalue.NewNumber(float64(stdos.Getpid()))
 var Versions = jsvalue.NewObject()
 var Version = jsvalue.NewString(runtime.Version())

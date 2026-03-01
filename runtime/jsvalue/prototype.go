@@ -117,4 +117,50 @@ func init() {
 		Enumerable:   false,
 		Configurable: true,
 	})
+
+	// ArrayPrototype fill: arr.fill(value) fills all elements with value.
+	// In the transpiled context, this is called as .Get("fill").Call(this, value).
+	ArrayPrototype.DefineProperty("fill", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) < 2 {
+				return NewArray()
+			}
+			this := args[0]
+			val := args[1]
+			if this == nil || this.arrayVal == nil {
+				return NewArray()
+			}
+			for i := range this.arrayVal {
+				this.arrayVal[i] = val
+			}
+			return this
+		}),
+		Writable:     true,
+		Enumerable:   false,
+		Configurable: true,
+	})
+
+	// ArrayPrototype at: arr.at(index) returns element at index (supports negative).
+	ArrayPrototype.DefineProperty("at", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) < 2 {
+				return NewUndefined()
+			}
+			this := args[0]
+			idx := int(args[1].Number())
+			if this == nil || this.arrayVal == nil {
+				return NewUndefined()
+			}
+			if idx < 0 {
+				idx = len(this.arrayVal) + idx
+			}
+			if idx < 0 || idx >= len(this.arrayVal) {
+				return NewUndefined()
+			}
+			return this.arrayVal[idx]
+		}),
+		Writable:     true,
+		Enumerable:   false,
+		Configurable: true,
+	})
 }

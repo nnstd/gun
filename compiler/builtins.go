@@ -112,6 +112,10 @@ func transformBuiltinNew(name string, args []ast.Expr, t *Transformer) ast.Expr 
 	case "Set":
 		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewSet"))
+	case "Array":
+		// new Array(n) → jsvalue.NewArray() (size ignored, filled at runtime)
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		return callExpr(selectorExpr(ident("jsvalue"), "NewArray"))
 	case "Date":
 		t.addImport("time")
 		return callExpr(selectorExpr(ident("time"), "Now"))

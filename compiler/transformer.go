@@ -355,6 +355,15 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 			}
 			return true
 		}
+		// process.stdout/stderr are JSValue objects
+		if objNode != nil && objNode.Kind() == "identifier" && objNode.Utf8Text(t.source) == "process" {
+			if propNode != nil {
+				prop := propNode.Utf8Text(t.source)
+				if prop == "stdout" || prop == "stderr" || prop == "env" || prop == "argv" {
+					return true
+				}
+			}
+		}
 		return false
 	}
 	return false
