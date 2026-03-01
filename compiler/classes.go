@@ -336,13 +336,10 @@ func (t *Transformer) buildMethodSetup(className, methodName string, node *sitte
 	})
 
 	// All methods wrapped in jsvalue.NewFunction must return *jsvalue.JSValue.
-	// Methods with explicit returns get their values wrapped; void methods
-	// get a nil return appended.
+	// Always wrap returns (both value returns and bare returns → nil).
 	results := fieldList(field("", jsValuePtrType()))
 	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-	if hasReturnValue(body) {
-		wrapReturnsWithJSValue(body)
-	}
+	wrapReturnsWithJSValue(body)
 	ensureTrailingReturn(body, results)
 
 	fnLit := &ast.FuncLit{
