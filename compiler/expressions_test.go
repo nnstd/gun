@@ -564,3 +564,43 @@ func TestMethodCallOnParamUsesGetCall(t *testing.T) {
 	out := compile(t, ts)
 	assertContains(t, out, `obj.Get("doSomething").Call(obj,`)
 }
+
+func TestArrowFuncWrappedInNewFunction(t *testing.T) {
+	// Arrow functions assigned to variables become jsvalue.NewFunction
+	ts := `const greet = (name) => name;`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewFunction(func(_args ...*jsvalue.JSValue) *jsvalue.JSValue")
+}
+
+func TestFuncExprWrappedInNewFunction(t *testing.T) {
+	// Function expressions become jsvalue.NewFunction
+	ts := `const add = function(a, b) { return a + b; };`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewFunction(func(_args ...*jsvalue.JSValue) *jsvalue.JSValue")
+}
+
+func TestArrowReturningTemplateStringWrapped(t *testing.T) {
+	// Arrow returning template string: return value wrapped in jsvalue.From()
+	ts := "const greet = (name) => `hello ${name}`;"
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.From(fmt.Sprintf(")
+}
+
+func TestTranspiledImportCalledViaCall(t *testing.T) {
+	// Transpiled cross-package imports use .Call() for invocation
+	ts := `import emojiRegex from 'emoji-regex';
+const re = emojiRegex();`
+	out := compileWithModule(t, ts, "myapp")
+	assertContains(t, out, "emoji_regex.Default.Call(")
+}
+
+func TestSamePackageTranspiledCallUsesCall(t *testing.T) {
+	// Same-package transpiled imports also use .Call()
+	ts := `import { helper } from "./utils";
+helper();`
+	out, err := Compile([]byte(ts), "mypkg", "mymod", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertContains(t, string(out), "Helper.Call()")
+}

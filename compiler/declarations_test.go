@@ -792,3 +792,72 @@ func TestClassVoidMethodHasReturnType(t *testing.T) {
 	assertContains(t, out, "jsvalue.NewFunction(func(_args ...*jsvalue.JSValue) *jsvalue.JSValue")
 	assertContains(t, out, "return nil")
 }
+
+func TestDestructuringParamDefaultCallsOriginal(t *testing.T) {
+	// Destructured params with defaults: wrapper calls original function
+	// preserving variadic destructuring param handling.
+	ts := `export default function f({onlyFirst = false} = {}) {
+		return onlyFirst;
+	}`
+	out := compile(t, ts)
+	// Wrapper calls inner function with spread args
+	assertContains(t, out, "_args[0:]...")
+	// Inner function has variadic destructuring param
+	assertContains(t, out, "_args0 ...*jsvalue.JSValue")
+	// Original destructuring logic preserved
+	assertContains(t, out, "if len(_args0) > 0")
+	assertContains(t, out, "onlyFirst := jsvalue.NewBool(false)")
+}
+
+func TestMultiParamWithDestructuringDefault(t *testing.T) {
+	// Mixed regular and destructuring params: wrapper passes regular params
+	// individually and spreads the variadic destructuring param.
+	ts := `export function eastAsianWidth(codePoint, {ambiguousAsWide = false} = {}) {
+		return codePoint;
+	}`
+	out := compile(t, ts)
+	// Regular param passed via IIFE extraction
+	assertContains(t, out, "if len(_args) > 0")
+	assertContains(t, out, "return _args[0]")
+	// Variadic destructuring param spread
+	assertContains(t, out, "_args[1:]...")
+}
+
+func TestFuncDeclBecomesJSValueVar(t *testing.T) {
+	// Top-level function declarations become var = jsvalue.NewFunction(...)
+	ts := `function helper(x) { return x; }`
+	out := compile(t, ts)
+	assertContains(t, out, "var helper = jsvalue.NewFunction(")
+	assertNotContains(t, out, "func helper(")
+}
+
+func TestFuncDeclMainStaysGoFunc(t *testing.T) {
+	// main() and init() remain as Go func declarations
+	ts := `function main() { console.log("hi"); }`
+	out := compile(t, ts)
+	assertContains(t, out, "func main()")
+	assertNotContains(t, out, "var main =")
+}
+
+func TestExportedFuncDeclBecomesJSValueVar(t *testing.T) {
+	// Exported functions become capitalized var = jsvalue.NewFunction(...)
+	ts := `export function validate(x) { return x; }`
+	out := compile(t, ts)
+	assertContains(t, out, "var Validate = jsvalue.NewFunction(")
+}
+
+func TestPkgLevelFuncCalledViaCall(t *testing.T) {
+	// Same-file package-level function calls use .Call()
+	ts := `function helper(x) { return x; }
+function main() { helper(42); }`
+	out := compile(t, ts)
+	assertContains(t, out, "helper.Call(")
+}
+
+func TestExportedNameReferencedCapitalized(t *testing.T) {
+	// References to exported vars within same file use capitalized name
+	ts := `export const colors = ["red"];
+const all = colors;`
+	out := compile(t, ts)
+	assertContains(t, out, "var all = Colors")
+}
