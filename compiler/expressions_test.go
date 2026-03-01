@@ -4,7 +4,7 @@ import "testing"
 
 func TestArrayLiteral(t *testing.T) {
 	out := compile(t, `const nums = [1, 2, 3];`)
-	assertContains(t, out, "[]float64{")
+	assertContains(t, out, "jsvalue.NewArray(jsvalue.NewNumber(float64(1)), jsvalue.NewNumber(float64(2)), jsvalue.NewNumber(float64(3)))")
 }
 
 func TestObjectLiteral(t *testing.T) {
@@ -287,26 +287,25 @@ func TestArrayIsArray(t *testing.T) {
 }
 
 func TestArrayLiteralIndexUsesNativeSubscript(t *testing.T) {
-	// Variables initialized from array literals are typed Go slices,
-	// so indexing should use native [] not .Index().
+	// Variables initialized from array literals use jsvalue.NewArray,
+	// so indexing uses .Index().
 	ts := `function f(x) { const args = [x, x]; return args[0]; }`
 	out := compile(t, ts)
-	assertContains(t, out, "args[0]")
-	assertNotContains(t, out, "args.Index(")
+	assertContains(t, out, "args.Index(0)")
 }
 
 func TestNegationOnSubscriptUsesNilCheck(t *testing.T) {
 	// !arr[i] where arr is []*jsvalue.JSValue should use .Bool() for truthiness.
 	ts := `function f(x) { const args = [x]; if (!args[0]) { return x; } }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.Not(args[0]).Bool()")
+	assertContains(t, out, "jsvalue.Not(args.Index(0)).Bool()")
 }
 
 func TestSliceIndexWrapsFloat64WithInt(t *testing.T) {
 	// JS number vars are float64; Go slice indices must be int.
 	ts := `function f(x) { const args = [x]; let i = 0; return args[i]; }`
 	out := compile(t, ts)
-	assertContains(t, out, "args[int(i)]")
+	assertContains(t, out, "args.Get(fmt.Sprint(i))")
 }
 
 func TestJSValueSliceElementAssignmentWrapped(t *testing.T) {
@@ -320,7 +319,7 @@ func TestJSValueSliceElementPlusString(t *testing.T) {
 	// JSValue slice element + "" should coerce the element to string.
 	ts := `function f(x) { const args = [x]; return args[0] + ""; }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.Add(jsvalue.From(args[0]), jsvalue.NewString(\"\"))")
+	assertContains(t, out, "jsvalue.Add(args.Index(0), jsvalue.NewString(\"\"))")
 	assertNotContains(t, out, `args[int(0)] + ""`)
 }
 

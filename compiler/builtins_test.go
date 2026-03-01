@@ -360,7 +360,7 @@ func TestPushOnSliceLocalWrapsLiteralArgs(t *testing.T) {
 	ts := `function f() { const arr = []; arr.push(true); }`
 	out := compile(t, ts)
 	assertContains(t, out, "jsvalue.Push(")
-	assertContains(t, out, "jsvalue.NewBool(true)")
+	assertContains(t, out, "jsvalue.From(true)")
 }
 
 func TestCodePointAtOnJSValueCoerces(t *testing.T) {

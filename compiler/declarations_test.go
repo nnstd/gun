@@ -456,9 +456,8 @@ func TestJSValueSliceLocalAssignedFromSlice(t *testing.T) {
 	notFlags = args.slice(1);
 }`
 	out := compile(t, ts)
-	assertContains(t, out, ".Array()")
-	assertNotContains(t, out, "int(")
-	assertNotContains(t, out, ".Number()")
+	assertContains(t, out, "jsvalue.NewArray()")
+	assertContains(t, out, "jsvalue.Slice(args,")
 }
 
 func TestSplitOnJSValueReturnsJSValue(t *testing.T) {

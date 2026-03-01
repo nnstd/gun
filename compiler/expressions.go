@@ -900,49 +900,14 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 }
 
 func (t *Transformer) transformArrayLiteral(node *sitter.Node) ast.Expr {
+	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 	var elts []ast.Expr
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		if e := t.transformExpr(node.NamedChild(i)); e != nil {
-			elts = append(elts, e)
+			elts = append(elts, jsvalueWrapLit(e))
 		}
 	}
-
-	var elemType ast.Expr = t.jsValueType()
-	hasFloat, hasInt, hasString, hasBool := false, false, false, false
-
-	for _, e := range elts {
-		switch lit := e.(type) {
-		case *ast.BasicLit:
-			switch lit.Kind {
-			case token.INT:
-				hasInt = true
-			case token.FLOAT:
-				hasFloat = true
-			case token.STRING:
-				hasString = true
-			}
-		case *ast.Ident:
-			if lit.Name == "true" || lit.Name == "false" {
-				hasBool = true
-			}
-		}
-	}
-
-	switch {
-	case hasFloat || (hasInt && !hasString && !hasBool):
-		elemType = ident("float64")
-		for i, e := range elts {
-			if lit, ok := e.(*ast.BasicLit); ok && lit.Kind == token.INT {
-				elts[i] = basicLit(token.FLOAT, lit.Value)
-			}
-		}
-	case hasString:
-		elemType = ident("string")
-	case hasBool:
-		elemType = ident("bool")
-	}
-
-	return compositeLit(sliceType(elemType), elts...)
+	return callExpr(selectorExpr(ident("jsvalue"), "NewArray"), elts...)
 }
 
 func (t *Transformer) transformObjectLiteral(node *sitter.Node) ast.Expr {

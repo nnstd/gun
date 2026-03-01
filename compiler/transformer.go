@@ -245,6 +245,10 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 				if objText == "Array" && propText == "isArray" {
 					return true
 				}
+				// Math.* calls return *jsvalue.JSValue via runtime/jsmath
+				if objText == "Math" {
+					return true
+				}
 				// Check if this is a call to an imported package function
 				// By default, imported functions return *jsvalue.JSValue
 				if objNode.Kind() == "identifier" {

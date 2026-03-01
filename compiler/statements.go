@@ -112,6 +112,8 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 							lname := leftNode.Utf8Text(t.source)
 							if t.jsvalueSliceLocals[lname] {
 								rhs = callExpr(selectorExpr(rhs, "Array"))
+							} else if t.typedLocalTypes[lname] == "bool" {
+								rhs = callExpr(selectorExpr(rhs, "Bool"))
 							} else {
 								rhs = callExpr(ident("int"), callExpr(selectorExpr(rhs, "Number")))
 							}
@@ -157,6 +159,21 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 								rhs = callExpr(selectorExpr(ident("fmt"), "Sprint"), rhs)
 							}
 						}
+						// Subscript augmented assignment on JSValue: rows[i] += x
+						// → rows.Set(key, jsvalue.Add(rows.Get(key), x))
+						if leftNode.Kind() == "subscript_expression" && opText == "+=" {
+							subObj := leftNode.ChildByFieldName("object")
+							subIdx := leftNode.ChildByFieldName("index")
+							if subObj != nil && t.nodeReturnsJSValue(subObj) && subIdx != nil {
+								t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+								t.addImport("fmt")
+								obj := t.transformExpr(subObj)
+								key := callExpr(selectorExpr(ident("fmt"), "Sprint"), t.transformExpr(subIdx))
+								newVal := callExpr(selectorExpr(ident("jsvalue"), "Add"),
+									callExpr(selectorExpr(obj, "Get"), key), jsvalueWrapLit(rhs))
+								return exprStmt(callExpr(selectorExpr(obj, "Set"), key, newVal))
+							}
+						}
 						// When the LHS is a JSValue expression (subscript on JSValue slice,
 						// untyped local), convert += to regular assignment with string concat:
 						// lhs += rhs → lhs = jsvalue.From(fmt.Sprint(lhs) + fmt.Sprint(rhs))
@@ -191,6 +208,17 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 						opText = opNode.Utf8Text(t.source)
 					}
 					if arg != nil {
+						// JSValue variables use jsvalue.Inc/Dec instead of Go ++/--
+						if t.nodeReturnsJSValue(argNode) || t.isPkgLevelVar(argNode) {
+							t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+							helperName := "Inc"
+							if opText == "--" {
+								helperName = "Dec"
+							}
+							return assignStmt([]ast.Expr{arg}, []ast.Expr{
+								callExpr(selectorExpr(ident("jsvalue"), helperName), arg),
+							})
+						}
 						tok := token.INC
 						if opText == "--" {
 							tok = token.DEC

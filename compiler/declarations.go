@@ -234,8 +234,7 @@ func (t *Transformer) isNonJSValueInit(node *sitter.Node) bool {
 		return false
 	}
 	switch node.Kind() {
-	case "number", "string", "template_string", "true", "false",
-		"array":
+	case "number", "string", "template_string", "true", "false":
 		return true
 	case "ternary_expression":
 		// If either branch returns JSValue, the ternary is JSValue
