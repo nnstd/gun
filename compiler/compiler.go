@@ -1,6 +1,10 @@
 package compiler
 
-import "fmt"
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+)
 
 // PackageExport describes a symbol exported from a file within the same package.
 type PackageExport struct {
@@ -39,16 +43,8 @@ func CompileWithExports(source []byte, pkgName, moduleName, currentFile string, 
 			continue
 		}
 		for _, exp := range fileExports {
-			switch exp.Kind {
-			case "var", "enum":
-				transformer.pkgVarTyped[exp.GoName] = !exp.IsJSValue
-			case "function":
-				// Cross-file functions are known to exist; track param count as 0
-				// so they're recognized as hoisted functions (not JSValue variables).
-				if _, exists := transformer.funcParamCounts[exp.GoName]; !exists {
-					transformer.funcParamCounts[exp.GoName] = 0
-				}
-			}
+			// All cross-file exports are JSValue in all-JSValue architecture
+			transformer.pkgVarTyped[exp.GoName] = false
 		}
 	}
 
@@ -65,7 +61,7 @@ func CompileWithExports(source []byte, pkgName, moduleName, currentFile string, 
 // CompilePackage transpiles multiple TypeScript files that belong to the
 // same Go package. It scans all files for exports first, then compiles
 // each file with cross-file export knowledge.
-func CompilePackage(files map[string][]byte, pkgName, moduleName string) (map[string][]byte, error) {
+func CompilePackage(files map[string][]byte, pkgName, moduleName, entryFile string) (map[string][]byte, error) {
 	// Phase 1: Scan all files for exports
 	exports := make(PackageExports)
 	for name, source := range files {
@@ -76,6 +72,25 @@ func CompilePackage(files map[string][]byte, pkgName, moduleName string) (map[st
 		exports[name] = exps
 	}
 
+	// Check for conflicting Default exports across files.
+	// Only the entry file's Default is kept; others are renamed to file-specific names.
+	defaultFiles := []string{}
+	for name, fileExports := range exports {
+		for _, exp := range fileExports {
+			if exp.GoName == "Default" {
+				defaultFiles = append(defaultFiles, name)
+			}
+		}
+	}
+	renameDefault := make(map[string]bool)
+	if len(defaultFiles) > 1 {
+		for _, name := range defaultFiles {
+			if name != entryFile {
+				renameDefault[name] = true
+			}
+		}
+	}
+
 	// Phase 2: Compile each file with cross-file knowledge
 	results := make(map[string][]byte)
 	for name, source := range files {
@@ -83,7 +98,38 @@ func CompilePackage(files map[string][]byte, pkgName, moduleName string) (map[st
 		if err != nil {
 			return nil, fmt.Errorf("compile %s: %w", name, err)
 		}
+		// Rename Default in non-entry files to avoid conflicts
+		if renameDefault[name] {
+			out = renameDefaultExport(out, name)
+		}
 		results[name] = out
 	}
 	return results, nil
+}
+
+// renameDefaultExport replaces "Default" declarations in compiled output
+// with a file-specific name to avoid conflicts between multiple files.
+func renameDefaultExport(source []byte, fileName string) []byte {
+	// Generate a file-specific name from the filename
+	base := filepath.Base(fileName)
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	// Sanitize: replace non-alphanumeric with underscore, capitalize
+	name := ""
+	for _, r := range base {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			name += string(r)
+		} else {
+			name += "_"
+		}
+	}
+	if name == "" {
+		name = "FileDefault"
+	}
+	name = strings.ToUpper(name[:1]) + name[1:] + "Default"
+
+	// Replace "var Default " and "Default =" at line starts
+	s := string(source)
+	s = strings.ReplaceAll(s, "var Default ", "var "+name+" ")
+	s = strings.ReplaceAll(s, "var Default\n", "var "+name+"\n")
+	return []byte(s)
 }

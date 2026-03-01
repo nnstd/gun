@@ -857,7 +857,7 @@ func transpileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string,
 	}
 
 	// Phase 2: Compile all files together
-	results, err := compiler.CompilePackage(files, pkgName, moduleName)
+	results, err := compiler.CompilePackage(files, pkgName, moduleName, absEntry)
 	if err != nil {
 		return nil, err
 	}
