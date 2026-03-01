@@ -861,3 +861,58 @@ const all = colors;`
 	out := compile(t, ts)
 	assertContains(t, out, "var all = Colors")
 }
+
+func TestForwardReferenceToVarUsesJSValueOps(t *testing.T) {
+	// Variables declared after their use site should still be recognized
+	// as JSValue for binary expression dispatch (prescan handles this).
+	ts := `function main() {
+	if (count > 0) { return count; }
+}
+let count;`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Gt(")
+	assertNotContains(t, out, "count > 0")
+}
+
+func TestForwardReferenceFuncCallUsesCall(t *testing.T) {
+	// Functions declared after their call site should use .Call()
+	ts := `function main() { helper(); }
+function helper() { return 1; }`
+	out := compile(t, ts)
+	assertContains(t, out, "helper.Call()")
+}
+
+func TestRegexTestReturnsJSValue(t *testing.T) {
+	// regex.test() should return *jsvalue.JSValue (wrapped in NewBool)
+	// so it can be used in jsvalue.And/Or expressions.
+	ts := `function f(s) {
+	const ok = s.length > 0 && /hello/.test(s);
+	return ok;
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewBool(jsvalue.MatchString(")
+	assertContains(t, out, "jsvalue.And(")
+}
+
+func TestNestedFuncDeclIsJSValue(t *testing.T) {
+	// Nested function declarations are JSValue vars, called via .Call()
+	ts := `function outer() {
+	function inner(x) { return x; }
+	return inner(1);
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "var inner *jsvalue.JSValue")
+	assertContains(t, out, "inner = jsvalue.NewFunction(")
+	assertContains(t, out, "inner.Call(")
+}
+
+func TestBareReturnInJSValueFunc(t *testing.T) {
+	// Bare return statements in functions with JSValue return type
+	// should become return nil.
+	ts := `function f(x) {
+	if (x) { return; }
+	return x;
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "return nil")
+}
