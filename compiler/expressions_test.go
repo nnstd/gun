@@ -254,14 +254,13 @@ func TestNullComparisonNoStringCoercion(t *testing.T) {
 }
 
 func TestRegexTestBoolResult(t *testing.T) {
-	// regex.test() returns bool; ensureBool should not wrap with != nil.
+	// Inline regex.test() uses jsvalue.MatchString which returns bool.
 	ts := `function f(s) {
 	if (/^hello/.test(s)) { return true; }
 	return false;
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "MatchString(fmt.Sprint(s))")
-	assertNotContains(t, out, "!= nil")
+	assertContains(t, out, "jsvalue.MatchString(jsvalue.NewRegex(")
 }
 
 func TestNegationOnJSValueUsesNilCheck(t *testing.T) {

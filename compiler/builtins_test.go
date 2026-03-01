@@ -137,8 +137,8 @@ func TestRegexTest(t *testing.T) {
 	ts := `const re = /hello/;
 function check(s: string): boolean { return re.test(s); }`
 	out := compile(t, ts)
-	assertContains(t, out, ".MatchString(")
-	assertNotContains(t, out, ".Test(")
+	assertContains(t, out, "jsvalue.NewRegex(regexp.MustCompile(")
+	assertContains(t, out, "jsvalue.MatchString(re,")
 }
 
 func TestArrayConcat(t *testing.T) {
@@ -371,14 +371,15 @@ func TestCodePointAtOnJSValueCoerces(t *testing.T) {
 	assertContains(t, out, "[]rune(")
 }
 
-func TestRegexTestOnTypedRegexCoercesJSValueArg(t *testing.T) {
-	// regex.test(jsValueArg) should coerce arg to string.
+func TestRegexTestOnJSValueRegex(t *testing.T) {
+	// regex.test(str) on JSValue regex uses jsvalue.MatchString
 	ts := `function f(str) {
 	const re = /hello/;
 	return re.test(str);
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "MatchString(fmt.Sprint(str))")
+	assertContains(t, out, "jsvalue.NewRegex(")
+	assertContains(t, out, "jsvalue.MatchString(re,")
 }
 
 func TestObjectPrototypeHasOwnPropertyCall(t *testing.T) {

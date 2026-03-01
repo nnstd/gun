@@ -331,6 +331,9 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 	case "new_expression":
 		// new X() transforms to X.Call() which returns *jsvalue.JSValue
 		return true
+	case "regex":
+		// Regex literals are now jsvalue.NewRegex(...) — returns *jsvalue.JSValue
+		return true
 	case "member_expression":
 		objNode := node.ChildByFieldName("object")
 		propNode := node.ChildByFieldName("property")

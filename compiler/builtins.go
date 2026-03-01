@@ -86,24 +86,8 @@ func transformBuiltinMethod(obj ast.Expr, prop string, args []ast.Expr, addImpor
 	}
 	// For typed regex values (not JSValue), use method form directly
 	// JSValue regex is handled separately in expressions.go
-	if prop == "test" && len(args) > 0 {
-		// regex.test(str) → regex.MatchString(str)
-		arg := args[0]
-		if isJSValueMethodCall(arg) {
-			addImport("fmt")
-			arg = callExpr(selectorExpr(ident("fmt"), "Sprint"), arg)
-		}
-		return callExpr(selectorExpr(obj, "MatchString"), arg)
-	}
-	if prop == "exec" && len(args) > 0 {
-		// regex.exec(str) → regex.FindStringSubmatch(str)
-		arg := args[0]
-		if isJSValueMethodCall(arg) {
-			addImport("fmt")
-			arg = callExpr(selectorExpr(ident("fmt"), "Sprint"), arg)
-		}
-		return callExpr(selectorExpr(obj, "FindStringSubmatch"), arg)
-	}
+	// regex.test() and regex.exec() are now handled by the JSValue dispatch
+	// path since regex literals are *jsvalue.JSValue with test/exec methods.
 	return nil
 }
 
@@ -129,6 +113,7 @@ func transformBuiltinNew(name string, args []ast.Expr, t *Transformer) ast.Expr 
 		return callExpr(selectorExpr(ident("time"), "Now"))
 	case "RegExp":
 		t.addImport("regexp")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		pattern := ast.Expr(stringLit(""))
 		if len(args) > 0 {
 			pattern = args[0]
@@ -138,11 +123,9 @@ func transformBuiltinNew(name string, args []ast.Expr, t *Transformer) ast.Expr 
 			}
 		}
 		compiled := callExpr(selectorExpr(ident("regexp"), "MustCompile"), pattern)
-		// When flags argument is present, wrap in IIFE to preserve the reference
-		// (Go rejects unused variables). JS regex flags like "g" have no direct
-		// Go equivalent — global matching is handled at the call site.
+		// Flags argument: consume but ignore (Go regex doesn't support JS flags like "g")
 		if len(args) > 1 {
-			return &ast.CallExpr{
+			compiled = &ast.CallExpr{
 				Fun: &ast.FuncLit{
 					Type: &ast.FuncType{
 						Params:  fieldList(),
@@ -159,7 +142,7 @@ func transformBuiltinNew(name string, args []ast.Expr, t *Transformer) ast.Expr 
 				},
 			}
 		}
-		return compiled
+		return callExpr(selectorExpr(ident("jsvalue"), "NewRegex"), compiled)
 	case "Hono":
 		t.addImport("github.com/nnstd/gun/runtime/hono")
 		return callExpr(selectorExpr(ident("hono"), "New"))

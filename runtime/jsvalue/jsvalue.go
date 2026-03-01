@@ -118,13 +118,38 @@ func NewFunction(fn func(...*JSValue) *JSValue) *JSValue {
 
 // NewRegex creates a regex JSValue from a compiled regexp.
 // The regex parameter should be *regexp.Regexp but is typed as interface{}
-// to avoid import cycles.
+// to avoid import cycles. The returned JSValue has test() and exec() methods.
 func NewRegex(regex interface{}) *JSValue {
-	return &JSValue{
+	v := &JSValue{
 		typ:        TypeRegex,
 		properties: make(map[string]*PropertyDescriptor),
 		regexVal:   regex,
 	}
+	// Add test() method: regex.test(str) → boolean
+	v.Set("test", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) < 1 {
+			return NewBool(false)
+		}
+		return NewBool(v.MatchString(args[0]))
+	}))
+	// Add exec() method: regex.exec(str) → array of matches or null
+	v.Set("exec", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || v.regexVal == nil {
+			return NewNull()
+		}
+		str := fmt.Sprint(args[0])
+		if re, ok := v.regexVal.(interface {
+			FindStringSubmatch(string) []string
+		}); ok {
+			matches := re.FindStringSubmatch(str)
+			if matches == nil {
+				return NewNull()
+			}
+			return FromStrings(matches)
+		}
+		return NewNull()
+	}))
+	return v
 }
 
 // Type returns the pre-computed type tag.

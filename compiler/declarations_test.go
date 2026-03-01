@@ -537,16 +537,15 @@ func TestLogicalAndWithComparisonsIsTyped(t *testing.T) {
 	assertContains(t, out, "jsvalue.Not(check).Bool()")
 }
 
-func TestRegexLiteralIsTyped(t *testing.T) {
-	// Variables initialized from regex literals should be *regexp.Regexp, not JSValue.
+func TestRegexLiteralIsJSValue(t *testing.T) {
+	// Regex literals produce jsvalue.NewRegex wrapping regexp.MustCompile.
 	ts := `function f(s: string) {
 	const re = /^hello/;
 	return re.test(s);
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "regexp.MustCompile")
-	assertContains(t, out, "re.MatchString")
-	assertNotContains(t, out, "fmt.Sprint(re)")
+	assertContains(t, out, "jsvalue.NewRegex(regexp.MustCompile(")
+	assertContains(t, out, "jsvalue.MatchString(re,")
 }
 
 func TestMathCallResultIsTyped(t *testing.T) {

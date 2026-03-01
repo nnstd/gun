@@ -134,6 +134,7 @@ func (t *Transformer) transformExpr(node *sitter.Node) ast.Expr {
 
 	case "regex":
 		t.addImport("regexp")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		pattern := node.Utf8Text(t.source)
 		// Strip JS regex delimiters: /pattern/flags → pattern
 		if len(pattern) >= 2 && pattern[0] == '/' {
@@ -142,11 +143,12 @@ func (t *Transformer) transformExpr(node *sitter.Node) ast.Expr {
 				pattern = pattern[1:end]
 			}
 		}
-		// Use raw string literal (backtick) so backslashes are literal
-		return callExpr(
+		// Wrap in jsvalue.NewRegex for all-JSValue consistency
+		compiled := callExpr(
 			selectorExpr(ident("regexp"), "MustCompile"),
 			basicLit(token.STRING, "`"+pattern+"`"),
 		)
+		return callExpr(selectorExpr(ident("jsvalue"), "NewRegex"), compiled)
 
 	case "conditional_type", "intersection_type", "union_type":
 		return t.mapTypeNode(node)
