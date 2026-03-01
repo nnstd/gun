@@ -748,6 +748,33 @@ func MatchString(regex *JSValue, value any) bool {
 	return false
 }
 
+// RegexExec executes a regex match and returns an array of matches or null.
+// This implements JavaScript's regex.exec(s) method.
+func RegexExec(regex *JSValue, value any) *JSValue {
+	if regex == nil || regex.typ != TypeRegex || regex.regexVal == nil {
+		return NewNull()
+	}
+	var str string
+	switch val := value.(type) {
+	case string:
+		str = val
+	case *JSValue:
+		str = val.String()
+	default:
+		str = fmt.Sprint(val)
+	}
+	if re, ok := regex.regexVal.(interface {
+		FindStringSubmatch(string) []string
+	}); ok {
+		matches := re.FindStringSubmatch(str)
+		if matches == nil {
+			return NewNull()
+		}
+		return FromStrings(matches)
+	}
+	return NewNull()
+}
+
 // IsTruthy returns true if the JSValue is truthy in JavaScript semantics.
 // This is a method version of the Truthy function.
 func (v *JSValue) IsTruthy() bool {

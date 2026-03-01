@@ -390,7 +390,8 @@ func (t *Transformer) jsValueType() ast.Expr {
 func (t *Transformer) prescanTopLevelFuncs(root *sitter.Node) {
 	for i := uint(0); i < root.NamedChildCount(); i++ {
 		child := root.NamedChild(i)
-		if child.Kind() == "function_declaration" {
+		switch child.Kind() {
+		case "function_declaration":
 			nameNode := child.ChildByFieldName("name")
 			paramsNode := child.ChildByFieldName("parameters")
 			if nameNode == nil || paramsNode == nil {
@@ -415,6 +416,52 @@ func (t *Transformer) prescanTopLevelFuncs(root *sitter.Node) {
 			// Register as untyped pkg var so forward references use .Call()
 			if name != "main" && name != "init" {
 				t.pkgVarTyped[name] = false
+			}
+		case "lexical_declaration", "variable_declaration":
+			// Pre-register package-level variables so forward references work.
+			for j := uint(0); j < child.NamedChildCount(); j++ {
+				decl := child.NamedChild(j)
+				if decl.Kind() != "variable_declarator" {
+					continue
+				}
+				nameNode := decl.ChildByFieldName("name")
+				if nameNode == nil || nameNode.Kind() != "identifier" {
+					continue
+				}
+				name := nameNode.Utf8Text(t.source)
+				valueNode := decl.ChildByFieldName("value")
+				typed := t.isNonJSValueInit(valueNode)
+				t.pkgVarTyped[name] = typed
+			}
+		case "export_statement":
+			// Prescan exported declarations too
+			for j := uint(0); j < child.NamedChildCount(); j++ {
+				inner := child.NamedChild(j)
+				switch inner.Kind() {
+				case "function_declaration":
+					nameNode := inner.ChildByFieldName("name")
+					if nameNode != nil {
+						name := nameNode.Utf8Text(t.source)
+						t.pkgVarTyped[name] = false
+						t.exportedNames[name] = true
+					}
+				case "lexical_declaration", "variable_declaration":
+					for k := uint(0); k < inner.NamedChildCount(); k++ {
+						decl := inner.NamedChild(k)
+						if decl.Kind() != "variable_declarator" {
+							continue
+						}
+						nameNode := decl.ChildByFieldName("name")
+						if nameNode == nil || nameNode.Kind() != "identifier" {
+							continue
+						}
+						name := nameNode.Utf8Text(t.source)
+						valueNode := decl.ChildByFieldName("value")
+						typed := t.isNonJSValueInit(valueNode)
+						t.pkgVarTyped[name] = typed
+						t.exportedNames[name] = true
+					}
+				}
 			}
 		}
 	}

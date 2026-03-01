@@ -8,15 +8,19 @@ import "go/ast"
 func transformRegexpMethod(obj ast.Expr, prop string, args []ast.Expr, addImport func(string)) ast.Expr {
 	switch prop {
 	case "test":
-		// regex.test(str) → jsvalue.MatchString(regex, str)
+		// regex.test(str) → jsvalue.NewBool(jsvalue.MatchString(regex, str))
+		// Wrapped in NewBool so the result is *jsvalue.JSValue for all-JSValue consistency.
 		if len(args) > 0 {
 			addImport("github.com/nnstd/gun/runtime/jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "MatchString"), obj, args[0])
+			matchCall := callExpr(selectorExpr(ident("jsvalue"), "MatchString"), obj, args[0])
+			return callExpr(selectorExpr(ident("jsvalue"), "NewBool"), matchCall)
 		}
 	case "exec":
-		// For now, exec is not supported on JSValue regex
-		// Could be added as a package-level function if needed
-		return nil
+		// regex.exec(str) → jsvalue.RegexExec(regex, str)
+		if len(args) > 0 {
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "RegexExec"), obj, args[0])
+		}
 	}
 	return nil
 }
