@@ -5,7 +5,7 @@ import "testing"
 func TestExportDefaultNamedFunction(t *testing.T) {
 	ts := `export default function handler() { return 1; }`
 	out := compile(t, ts)
-	assertContains(t, out, "func Handler()")
+	assertContains(t, out, "var Handler = jsvalue.NewFunction(")
 }
 
 func TestExportDefaultAnonFunction(t *testing.T) {

@@ -405,8 +405,13 @@ func (t *Transformer) prescanTopLevelFuncs(root *sitter.Node) {
 					hasTyped = true
 				}
 			}
+			name := nameNode.Utf8Text(t.source)
 			if !hasTyped && count > 0 {
-				t.funcParamCounts[nameNode.Utf8Text(t.source)] = count
+				t.funcParamCounts[name] = count
+			}
+			// Register as untyped pkg var so forward references use .Call()
+			if name != "main" && name != "init" {
+				t.pkgVarTyped[name] = false
 			}
 		}
 	}

@@ -342,6 +342,10 @@ func wrapReturnStmts(stmts []ast.Stmt) {
 	for _, stmt := range stmts {
 		switch s := stmt.(type) {
 		case *ast.ReturnStmt:
+			if len(s.Results) == 0 {
+				// Bare return → return nil (for *jsvalue.JSValue return type)
+				s.Results = []ast.Expr{ident("nil")}
+			}
 			for i, r := range s.Results {
 				s.Results[i] = wrapExprWithJSValue(r)
 			}
@@ -352,6 +356,14 @@ func wrapReturnStmts(stmts []ast.Stmt) {
 			}
 		case *ast.BlockStmt:
 			wrapReturnStmts(s.List)
+		case *ast.ForStmt:
+			if s.Body != nil {
+				wrapReturnStmts(s.Body.List)
+			}
+		case *ast.RangeStmt:
+			if s.Body != nil {
+				wrapReturnStmts(s.Body.List)
+			}
 		}
 	}
 }

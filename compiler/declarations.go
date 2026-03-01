@@ -552,28 +552,24 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 			hoisted = append(hoisted, hoistedInfo{name: name, typ: funcType})
 			hoistedSet[name] = true
 
-			returnsNative := false
-			if results != nil && len(results.List) > 0 {
-				if !isJSValuePtrType(results.List[0].Type) {
-					returnsNative = true
-				}
-			}
-			t.addToCurrentScope(name, returnsNative)
+			// All hoisted functions are JSValue in the all-JSValue architecture
+			t.addToCurrentScope(name, false)
 			if params != nil {
 				t.funcParamCounts[name] = len(params.List)
 			}
 		}
 	}
 
-	// Emit forward declarations for hoisted functions.
+	// Emit forward declarations for hoisted functions as *jsvalue.JSValue.
 	for _, h := range hoisted {
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		stmts = append(stmts, &ast.DeclStmt{
 			Decl: &ast.GenDecl{
 				Tok: token.VAR,
 				Specs: []ast.Spec{
 					&ast.ValueSpec{
 						Names: []*ast.Ident{ident(h.name)},
-						Type:  h.typ,
+						Type:  jsValuePtrType(),
 					},
 				},
 			},
@@ -591,9 +587,12 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 				name := nameNode.Utf8Text(t.source)
 				if hoistedSet[name] {
 					if d := t.transformFuncDecl(child, false); d != nil {
+						paramNames := extractParamNames(child.ChildByFieldName("parameters"), t.source)
+						fnLit := &ast.FuncLit{Type: d.Type, Body: d.Body}
+						jsVal := t.wrapFuncLitAsJSValue(fnLit, paramNames)
 						stmts = append(stmts, assignStmt(
 							[]ast.Expr{ident(d.Name.Name)},
-							[]ast.Expr{&ast.FuncLit{Type: d.Type, Body: d.Body}},
+							[]ast.Expr{jsVal},
 						))
 					}
 				}

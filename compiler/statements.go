@@ -277,15 +277,16 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 
 	case "function_declaration":
 		// Nested function declarations (JS hoists these within their scope).
-		// Go doesn't allow named func decls inside function bodies, so emit
-		// as `name := func(...) ... { ... }` variable assignment.
+		// Wrap as jsvalue.NewFunction() for all-JSValue consistency.
 		if d := t.transformFuncDecl(node, false); d != nil {
-			funcLit := &ast.FuncLit{
+			paramNames := extractParamNames(node.ChildByFieldName("parameters"), t.source)
+			fnLit := &ast.FuncLit{
 				Type: d.Type,
 				Body: d.Body,
 			}
-			t.addToCurrentScope(d.Name.Name, true)
-			return assignDefine([]ast.Expr{ident(d.Name.Name)}, []ast.Expr{funcLit})
+			jsVal := t.wrapFuncLitAsJSValue(fnLit, paramNames)
+			t.addToCurrentScope(d.Name.Name, false)
+			return assignDefine([]ast.Expr{ident(d.Name.Name)}, []ast.Expr{jsVal})
 		}
 		return nil
 

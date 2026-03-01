@@ -390,8 +390,8 @@ function main() { increment(); }
 function increment(orig) { return orig; }
 `
 	out := compile(t, ts)
-	// main() calls increment which is a JSValue var — called directly from main (Go func)
-	assertContains(t, out, "increment()")
+	// main() calls increment which is a JSValue var — uses .Call()
+	assertContains(t, out, "increment.Call()")
 }
 
 func TestPkgVarMethodCallUsesGetCall(t *testing.T) {
