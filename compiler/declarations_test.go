@@ -176,6 +176,22 @@ class Foo {
 	assertNotContains(t, out, "[sym]")
 }
 
+func TestClassComputedPropertyWeakMapInit(t *testing.T) {
+	// TS private fields compiled as WeakMaps in computed property names
+	ts := `var _Foo_bar, _Foo_baz;
+class Foo {
+	constructor() {
+		_Foo_bar.set(this, void 0);
+		_Foo_baz.set(this, void 0);
+	}
+	[(_Foo_bar = new WeakMap(), _Foo_baz = new WeakMap(), Symbol("key"))]() { return 1; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewMap()")
+	assertContains(t, out, "_Foo_bar = jsvalue")
+	assertContains(t, out, "_Foo_baz = jsvalue")
+}
+
 func TestExportStringAliasDoubleQuote(t *testing.T) {
 	ts := `const X = 1;
 export {X as "default"}`

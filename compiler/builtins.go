@@ -141,10 +141,10 @@ func transformBuiltinNew(name string, args []ast.Expr, t *Transformer) ast.Expr 
 			args[i] = jsvalueWrapLit(arg)
 		}
 		return callExpr(selectorExpr(selectorExpr(ident("jserror"), name), "Call"), args...)
-	case "Map":
+	case "Map", "WeakMap":
 		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewMap"))
-	case "Set":
+	case "Set", "WeakSet":
 		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewSet"))
 	case "Array":

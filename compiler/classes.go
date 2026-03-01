@@ -83,6 +83,10 @@ func (t *Transformer) transformClassDecl(node *sitter.Node) []ast.Decl {
 					continue
 				}
 				if nameN.Kind() == "computed_property_name" {
+					// Extract side-effecting expressions from computed property names.
+					// TypeScript compiles private fields to: [(_field = new WeakMap(), ...)](argv) { }
+					// The assignment expressions inside the brackets init WeakMap backing stores.
+					t.extractComputedPropertySideEffects(nameN, &staticSetups)
 					continue
 				}
 				mName := nameN.Utf8Text(t.source)
@@ -175,9 +179,11 @@ func (t *Transformer) transformClassDecl(node *sitter.Node) []ast.Decl {
 	var decls []ast.Decl
 	decls = append(decls, classVarDecl)
 
-	// Add method and static setups as init statements
+	// Add method and static setups as init statements.
+	// Static setups (including WeakMap initializations) must come first
+	// since method bodies may reference the WeakMap backing variables.
 	if len(methodSetups) > 0 || len(staticSetups) > 0 {
-		allSetups := append(methodSetups, staticSetups...)
+		allSetups := append(staticSetups, methodSetups...)
 		initBody := &ast.BlockStmt{List: allSetups}
 		initFn := funcDecl("init", fieldList(), nil, initBody)
 		decls = append(decls, initFn)
@@ -386,4 +392,42 @@ func (t *Transformer) buildMethodSetup(className, methodName string, node *sitte
 	}
 
 	return exprStmt(callExpr(selectorExpr(target, "Set"), stringLit(methodName), fnVal))
+}
+
+// extractComputedPropertySideEffects processes computed property names in class bodies
+// that contain side-effecting assignment expressions. This is the TypeScript pattern for
+// private class fields: [(_field1 = new WeakMap(), _field2 = new WeakMap(), kName)](argv) { }
+// The assignment expressions initialize WeakMap backing stores for private fields.
+func (t *Transformer) extractComputedPropertySideEffects(nameNode *sitter.Node, stmts *[]ast.Stmt) {
+	// computed_property_name has one expression child inside the brackets
+	for i := uint(0); i < nameNode.NamedChildCount(); i++ {
+		child := nameNode.NamedChild(i)
+		t.extractAssignmentExprs(child, stmts)
+	}
+}
+
+// extractAssignmentExprs recursively finds assignment expressions in a tree-sitter
+// node and converts them to Go assignment statements.
+func (t *Transformer) extractAssignmentExprs(node *sitter.Node, stmts *[]ast.Stmt) {
+	if node == nil {
+		return
+	}
+	switch node.Kind() {
+	case "assignment_expression":
+		leftNode := node.ChildByFieldName("left")
+		rightNode := node.ChildByFieldName("right")
+		if leftNode != nil && rightNode != nil {
+			lhs := t.transformExpr(leftNode)
+			rhs := t.transformExpr(rightNode)
+			if lhs != nil && rhs != nil {
+				rhs = t.wrapAsJSValue(rhs)
+				*stmts = append(*stmts, assignStmt([]ast.Expr{lhs}, []ast.Expr{rhs}))
+			}
+		}
+	case "sequence_expression", "parenthesized_expression":
+		// Recurse into comma expressions and parenthesized groups
+		for i := uint(0); i < node.NamedChildCount(); i++ {
+			t.extractAssignmentExprs(node.NamedChild(i), stmts)
+		}
+	}
 }
