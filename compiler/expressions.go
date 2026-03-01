@@ -1473,10 +1473,14 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 
 	ensureTrailingReturn(body, results)
 
-	return &ast.FuncLit{
+	fnLit := &ast.FuncLit{
 		Type: &ast.FuncType{Params: params, Results: results},
 		Body: body,
 	}
+
+	// Wrap in jsvalue.NewFunction for all-JSValue consistency.
+	// Convert to variadic form: func(_args ...*jsvalue.JSValue) *jsvalue.JSValue
+	return t.wrapFuncLitAsJSValue(fnLit, paramNames)
 }
 
 func (t *Transformer) transformFuncExpr(node *sitter.Node) ast.Expr {
@@ -1517,10 +1521,13 @@ func (t *Transformer) transformFuncExpr(node *sitter.Node) ast.Expr {
 
 	ensureTrailingReturn(body, results)
 
-	return &ast.FuncLit{
+	fnLit := &ast.FuncLit{
 		Type: &ast.FuncType{Params: params, Results: results},
 		Body: body,
 	}
+
+	paramNames := extractParamNames(paramsNode, t.source)
+	return t.wrapFuncLitAsJSValue(fnLit, paramNames)
 }
 
 func (t *Transformer) transformNewExpr(node *sitter.Node) ast.Expr {

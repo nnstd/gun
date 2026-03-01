@@ -496,6 +496,60 @@ func wrapExprWithJSValue(expr ast.Expr) ast.Expr {
 	return callExpr(selectorExpr(ident("jsvalue"), "From"), expr)
 }
 
+// wrapFuncLitAsJSValue converts a Go function literal into a jsvalue.NewFunction call.
+// It rewrites the function to accept variadic _args, unpacks named params,
+// ensures *jsvalue.JSValue return type, and wraps with jsvalue.NewFunction().
+func (t *Transformer) wrapFuncLitAsJSValue(fnLit *ast.FuncLit, paramNames []string) ast.Expr {
+	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+
+	// Build param unpacking statements: var name *jsvalue.JSValue; if len(_args) > i { name = _args[i] }
+	var unpackStmts []ast.Stmt
+	for i, pName := range paramNames {
+		if pName == "" {
+			continue
+		}
+		pName = sanitizeIdent(pName)
+		unpackStmts = append(unpackStmts,
+			&ast.DeclStmt{Decl: varDecl(pName, jsValuePtrType(), nil)},
+			&ast.IfStmt{
+				Cond: &ast.BinaryExpr{
+					X:  callExpr(ident("len"), ident("_args")),
+					Op: token.GTR,
+					Y:  intLit(itoa(i)),
+				},
+				Body: blockStmt(
+					assignStmt([]ast.Expr{ident(pName)}, []ast.Expr{
+						&ast.IndexExpr{X: ident("_args"), Index: intLit(itoa(i))},
+					}),
+				),
+			},
+		)
+	}
+
+	// Rewrite: prepend unpacking, keep original body statements
+	body := fnLit.Body
+	body.List = append(unpackStmts, body.List...)
+
+	// Ensure return type is *jsvalue.JSValue and all returns are wrapped
+	results := fieldList(field("", jsValuePtrType()))
+	wrapReturnsWithJSValue(body)
+	ensureTrailingReturn(body, results)
+
+	// Build variadic function: func(_args ...*jsvalue.JSValue) *jsvalue.JSValue { ... }
+	variadicFn := &ast.FuncLit{
+		Type: &ast.FuncType{
+			Params: fieldList(&ast.Field{
+				Names: []*ast.Ident{ident("_args")},
+				Type:  &ast.Ellipsis{Elt: jsValuePtrType()},
+			}),
+			Results: results,
+		},
+		Body: body,
+	}
+
+	return callExpr(selectorExpr(ident("jsvalue"), "NewFunction"), variadicFn)
+}
+
 // collectUsedIdents walks the Go AST declarations and returns the set of
 // all identifier names that appear as the X in selector expressions (pkg.Symbol)
 // or as standalone identifiers. Used to prune unused imports.

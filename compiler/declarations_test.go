@@ -30,7 +30,8 @@ func TestFunctionDeclaration(t *testing.T) {
 
 func TestArrowFunction(t *testing.T) {
 	out := compile(t, `const double = (x: number): number => x * 2;`)
-	assertContains(t, out, "func(x *jsvalue.JSValue) *jsvalue.JSValue")
+	// Arrow functions are wrapped in jsvalue.NewFunction for all-JSValue consistency
+	assertContains(t, out, "jsvalue.NewFunction(func(_args ...*jsvalue.JSValue) *jsvalue.JSValue")
 	assertContains(t, out, "jsvalue.Mul(")
 }
 

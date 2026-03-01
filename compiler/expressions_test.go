@@ -215,17 +215,19 @@ func TestCharAtOnStringUsesBuiltin(t *testing.T) {
 }
 
 func TestArrowFuncTrailingReturn(t *testing.T) {
-	// Arrow functions with a return type but not all paths returning
-	// should get a trailing zero-value return to avoid "missing return".
+	// Arrow functions wrapped in NewFunction with not all paths returning
+	// should get a trailing return to avoid "missing return".
 	ts := `const f = (x: number): string => { if (x > 0) { return "pos"; } };`
 	out := compile(t, ts)
-	assertContains(t, out, `return ""`)
+	assertContains(t, out, `jsvalue.NewFunction(`)
+	assertContains(t, out, `jsvalue.NewString("pos")`)
 }
 
 func TestFuncExprTrailingReturn(t *testing.T) {
 	ts := `const f = function(x: number): string { if (x > 0) { return "pos"; } };`
 	out := compile(t, ts)
-	assertContains(t, out, `return ""`)
+	assertContains(t, out, `jsvalue.NewFunction(`)
+	assertContains(t, out, `jsvalue.NewString("pos")`)
 }
 
 func TestCharAtTypedVsJSValue(t *testing.T) {
