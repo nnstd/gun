@@ -514,5 +514,5 @@ func TestObjectEntriesUsesJsobjectAlias(t *testing.T) {
 func TestToStringOnJSValueReturnsJSValue(t *testing.T) {
 	ts := `function f(x: any) { return x.toString(); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.NewString(fmt.Sprint(")
+	assertContains(t, out, `.MethodCall("toString")`)
 }

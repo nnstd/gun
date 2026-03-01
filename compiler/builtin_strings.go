@@ -23,12 +23,12 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 
 	switch prop {
 	case "toString":
-		addImport("fmt")
 		if wasJSValue {
-			addImport("github.com/nnstd/gun/runtime/jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "NewString"),
-				callExpr(selectorExpr(ident("fmt"), "Sprint"), origObj))
+			// For JSValue receivers, call the actual toString method via MethodCall
+			// so custom toString implementations (like cliui) work correctly.
+			return callExpr(selectorExpr(origObj, "MethodCall"), stringLit("toString"))
 		}
+		addImport("fmt")
 		return callExpr(selectorExpr(ident("fmt"), "Sprint"), obj)
 	case "indexOf":
 		if wasJSValue {

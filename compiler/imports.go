@@ -166,7 +166,13 @@ func (t *Transformer) transformImport(node *sitter.Node) {
 			}
 			// For third-party/relative packages, default import maps to the Default symbol
 			if ri.goSymbol == "" && !isKnown {
-				ri.goSymbol = "Default"
+				if t.samePackageImports && isRelativeImport(modulePath) && !strings.HasPrefix(modulePath, "..") {
+					// Same-package imports (not parent-dir): non-entry files have their
+					// Default renamed to file-specific names (e.g. EsmDefault).
+					ri.goSymbol = fileSpecificDefaultName(modulePath)
+				} else {
+					ri.goSymbol = "Default"
+				}
 			}
 			t.importedNames[localName] = ri
 		}
@@ -228,6 +234,31 @@ func SanitizeGoPkgName(npmName string) string {
 	name = strings.ReplaceAll(name, "/", "_")
 	name = strings.ReplaceAll(name, "-", "_")
 	return name
+}
+
+// fileSpecificDefaultName generates the renamed default export name for a given
+// module path, matching the renameDefaultExport logic in compiler.go.
+// e.g. "./lib/platform-shims/esm.mjs" → "EsmDefault"
+func fileSpecificDefaultName(modulePath string) string {
+	base := path.Base(modulePath)
+	base = strings.TrimSuffix(base, path.Ext(base))
+	name := ""
+	for _, r := range base {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			name += string(r)
+		} else {
+			name += "_"
+		}
+	}
+	if name == "" {
+		name = "FileDefault"
+	}
+	return strings.ToUpper(name[:1]) + name[1:] + "Default"
+}
+
+// isRelativeImport returns true if the module path is a relative import.
+func isRelativeImport(modulePath string) bool {
+	return strings.HasPrefix(modulePath, ".")
 }
 
 // IsKnownModule reports whether the given module name is a built-in polyfilled module.
