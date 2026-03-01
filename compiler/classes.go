@@ -87,6 +87,34 @@ func (t *Transformer) transformClassDecl(node *sitter.Node) []ast.Decl {
 					// TypeScript compiles private fields to: [(_field = new WeakMap(), ...)](argv) { }
 					// The assignment expressions inside the brackets init WeakMap backing stores.
 					t.extractComputedPropertySideEffects(nameN, &staticSetups)
+
+					// If the computed property is a simple identifier like [kSymbol],
+					// transpile it as a method with a dynamic name using fmt.Sprint.
+					// Skip the WeakMap init pattern (which has sequence/assignment expressions).
+					if nameN.NamedChildCount() == 1 && nameN.NamedChild(0).Kind() == "identifier" {
+						symName := nameN.NamedChild(0).Utf8Text(t.source)
+						// Check if static
+						isStatic := false
+						for j := uint(0); j < member.ChildCount(); j++ {
+							child := member.Child(j)
+							if child.Kind() == "static" || (!child.IsNamed() && child.Utf8Text(t.source) == "static") {
+								isStatic = true
+								break
+							}
+						}
+						bodyNode := member.ChildByFieldName("body")
+						if bodyNode != nil {
+							t.addImport("fmt")
+							stmt := t.transformClassMethodWithDynamicName(className, member, symName, isStatic)
+							if stmt != nil {
+								if isStatic {
+									staticSetups = append(staticSetups, stmt)
+								} else {
+									methodSetups = append(methodSetups, stmt)
+								}
+							}
+						}
+					}
 					continue
 				}
 				mName := nameN.Utf8Text(t.source)
@@ -392,6 +420,105 @@ func (t *Transformer) buildMethodSetup(className, methodName string, node *sitte
 	}
 
 	return exprStmt(callExpr(selectorExpr(target, "Set"), stringLit(methodName), fnVal))
+}
+
+// transformClassMethodWithDynamicName transpiles a class method that has a computed
+// property name like [kSymbolName]. Uses fmt.Sprint(symbolVar) as the property key.
+func (t *Transformer) transformClassMethodWithDynamicName(className string, member *sitter.Node, symName string, isStatic bool) ast.Stmt {
+	paramsNode := member.ChildByFieldName("parameters")
+	bodyNode := member.ChildByFieldName("body")
+
+	paramInfo := extractParamInfo(paramsNode, t.source)
+	t.pushTypedScope(paramInfo)
+	defer t.popScope()
+
+	t.addToCurrentScope("this", false)
+	t.jsvalueLocals["this"] = true
+
+	prevInClassMethod := t.inClassMethod
+	t.inClassMethod = !isStatic
+	defer func() { t.inClassMethod = prevInClassMethod }()
+
+	// Pre-register rest params
+	if paramsNode != nil {
+		restFlags := extractRestFlags(paramsNode, t.source)
+		paramNames := extractParamNames(paramsNode, t.source)
+		for i, pName := range paramNames {
+			if i < len(restFlags) && restFlags[i] {
+				t.jsvalueLocals[sanitizeIdent(pName)] = true
+			}
+		}
+	}
+
+	var body *ast.BlockStmt
+	if bodyNode != nil {
+		body = t.transformBlock(bodyNode)
+	} else {
+		body = blockStmt()
+	}
+
+	// Build _args variadic wrapper with 'this' extraction + param unpacking
+	params := fieldList(&ast.Field{
+		Names: []*ast.Ident{ident("_args")},
+		Type:  &ast.Ellipsis{Elt: jsValuePtrType()},
+	})
+
+	var argUnpackStmts []ast.Stmt
+	if !isStatic {
+		argUnpackStmts = append(argUnpackStmts,
+			&ast.DeclStmt{Decl: varDecl("this", jsValuePtrType(), nil)},
+			&ast.IfStmt{
+				Cond: &ast.BinaryExpr{X: callExpr(ident("len"), ident("_args")), Op: token.GTR, Y: intLit("0")},
+				Body: blockStmt(assignStmt([]ast.Expr{ident("this")}, []ast.Expr{&ast.IndexExpr{X: ident("_args"), Index: intLit("0")}})),
+			},
+			assignStmt([]ast.Expr{ident("_")}, []ast.Expr{ident("this")}),
+		)
+	}
+	offset := 0
+	if !isStatic {
+		offset = 1
+	}
+	if paramsNode != nil {
+		paramNames := extractParamNames(paramsNode, t.source)
+		for i, pName := range paramNames {
+			if pName == "" {
+				continue
+			}
+			pName = sanitizeIdent(pName)
+			idx := i + offset
+			argUnpackStmts = append(argUnpackStmts,
+				&ast.DeclStmt{Decl: varDecl(pName, jsValuePtrType(), nil)},
+				&ast.IfStmt{
+					Cond: &ast.BinaryExpr{X: callExpr(ident("len"), ident("_args")), Op: token.GTR, Y: intLit(itoa(idx))},
+					Body: blockStmt(assignStmt([]ast.Expr{ident(pName)}, []ast.Expr{&ast.IndexExpr{X: ident("_args"), Index: intLit(itoa(idx))}})),
+				},
+				assignStmt([]ast.Expr{ident("_")}, []ast.Expr{ident(pName)}),
+			)
+		}
+	}
+	body.List = append(argUnpackStmts, body.List...)
+
+	results := fieldList(field("", jsValuePtrType()))
+	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	wrapReturnsWithJSValue(body)
+	ensureTrailingReturn(body, results)
+
+	fnLit := &ast.FuncLit{
+		Type: &ast.FuncType{Params: params, Results: results},
+		Body: body,
+	}
+	fnVal := callExpr(selectorExpr(ident("jsvalue"), "NewFunction"), fnLit)
+
+	// Build the .Set(fmt.Sprint(symName), fn) call
+	t.addImport("fmt")
+	var target ast.Expr
+	if isStatic {
+		target = ident(className)
+	} else {
+		target = callExpr(selectorExpr(ident(className), "Get"), stringLit("prototype"))
+	}
+	key := callExpr(selectorExpr(ident("fmt"), "Sprint"), ident(symName))
+	return exprStmt(callExpr(selectorExpr(target, "Set"), key, fnVal))
 }
 
 // extractComputedPropertySideEffects processes computed property names in class bodies

@@ -1440,7 +1440,8 @@ func CompileRegex(pattern string) *regexp.Regexp {
 	re, err := regexp.Compile(converted)
 	if err != nil {
 		// Fallback: return a regex that matches nothing rather than panicking
-		return regexp.MustCompile(`(?!.*)`)
+		// Use a pattern that's valid in Go RE2 and never matches
+		return regexp.MustCompile(`\A\z(?:never)`)
 	}
 	return re
 }

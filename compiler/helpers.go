@@ -631,11 +631,32 @@ func (t *Transformer) wrapFuncLitAsJSValue(fnLit *ast.FuncLit, paramNames []stri
 		}
 	}
 
+	// When called as a method via obj.Get("method").Call(obj, arg1, arg2),
+	// the first element of _args is 'this' (the receiver). Strip it when
+	// there are more args than expected params, so plain functions work correctly.
+	// This handles: method call (3 args, 2 params → strip this) vs
+	// direct call (2 args, 2 params → no strip).
+	var wrapperStmts []ast.Stmt
+	if paramIdx > 0 && !hasVariadicSpread {
+		// if len(_args) > expectedParams { _args = _args[1:] }
+		wrapperStmts = append(wrapperStmts, &ast.IfStmt{
+			Cond: &ast.BinaryExpr{
+				X:  callExpr(ident("len"), ident("_args")),
+				Op: token.GTR,
+				Y:  intLit(itoa(paramIdx)),
+			},
+			Body: blockStmt(assignStmt(
+				[]ast.Expr{ident("_args")},
+				[]ast.Expr{&ast.SliceExpr{X: ident("_args"), Low: intLit("1")}},
+			)),
+		})
+	}
+
 	innerCall := callExpr(fnLit, callArgs...)
 	if hasVariadicSpread {
 		innerCall.Ellipsis = 1 // non-zero triggers "args..." syntax
 	}
-	wrapperBody := blockStmt(returnStmt(innerCall))
+	wrapperStmts = append(wrapperStmts, returnStmt(innerCall))
 
 	variadicFn := &ast.FuncLit{
 		Type: &ast.FuncType{
@@ -645,7 +666,7 @@ func (t *Transformer) wrapFuncLitAsJSValue(fnLit *ast.FuncLit, paramNames []stri
 			}),
 			Results: results,
 		},
-		Body: wrapperBody,
+		Body: &ast.BlockStmt{List: wrapperStmts},
 	}
 
 	return callExpr(selectorExpr(ident("jsvalue"), "NewFunction"), variadicFn)

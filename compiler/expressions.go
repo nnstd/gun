@@ -369,7 +369,11 @@ func (t *Transformer) transformSequenceExpr(node *sitter.Node) ast.Expr {
 			// Side-effecting assignment: transform as statement
 			lhs := t.transformExpr(child.ChildByFieldName("left"))
 			rhs := t.transformExpr(child.ChildByFieldName("right"))
+			// Skip invalid assignments like nil = value (from unsupported destructuring)
 			if lhs != nil && rhs != nil {
+				if id, ok := lhs.(*ast.Ident); ok && id.Name == "nil" {
+					continue
+				}
 				stmts = append(stmts, assignStmt([]ast.Expr{lhs}, []ast.Expr{rhs}))
 			}
 		} else if e := t.transformExpr(child); e != nil {
@@ -476,6 +480,10 @@ func (t *Transformer) transformAssignmentExpr(node *sitter.Node) ast.Expr {
 	right := t.transformExpr(rightNode)
 	if left == nil || right == nil {
 		return ident("nil")
+	}
+	// Skip invalid assignments where LHS is nil (from unsupported destructuring patterns)
+	if isNilIdent(left) {
+		return right
 	}
 	// In JS, assignment is an expression that returns the assigned value.
 	// In Go, assignment is a statement. Wrap in an IIFE to preserve semantics.
@@ -721,14 +729,19 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 					}
 					coercedArgs := t.coerceJSValueArgs(args, argsNode)
 					// []*jsvalue.JSValue slice locals dispatch through package-level functions.
-					// Runtime accepts any for array param, handling []*JSValue internally.
+					// Wrap the Go slice in jsvalue.NewArray() so it becomes a *JSValue.
 					if objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objText] && t.builtins.IsArrayMethod(prop) {
 						t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 						for k, a := range coercedArgs {
 							coercedArgs[k] = jsvalueWrapLit(a)
 						}
 						funcName := capitalize(prop)
-						return callExpr(selectorExpr(ident("jsvalue"), funcName), append([]ast.Expr{obj}, coercedArgs...)...)
+						wrappedObj := &ast.CallExpr{
+							Fun:      selectorExpr(ident("jsvalue"), "NewArray"),
+							Args:     []ast.Expr{obj},
+							Ellipsis: 1,
+						}
+						return callExpr(selectorExpr(ident("jsvalue"), funcName), append([]ast.Expr{wrappedObj}, coercedArgs...)...)
 					}
 					if r := transformBuiltinMethod(obj, prop, coercedArgs, t.addImport); r != nil {
 						return r
@@ -833,6 +846,23 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 				args[i] = t.wrapAsJSValue(arg)
 			}
 			return callExpr(selectorExpr(fun, "Call"), args...)
+		}
+	}
+
+	// Subscript method call: this[kSym]() or obj[key]()
+	// The receiver (this/obj) must be passed as the first argument.
+	if fnNode.Kind() == "subscript_expression" {
+		subObj := fnNode.ChildByFieldName("object")
+		if subObj != nil && (subObj.Kind() == "this" || t.nodeReturnsJSValue(subObj)) {
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			obj := t.transformExpr(subObj)
+			fnExpr := t.transformExpr(fnNode) // this.Get(fmt.Sprint(key))
+			args := t.transformArgs(argsNode)
+			for i, arg := range args {
+				args[i] = t.wrapAsJSValue(arg)
+			}
+			allArgs := append([]ast.Expr{obj}, args...)
+			return callExpr(selectorExpr(fnExpr, "Call"), allArgs...)
 		}
 	}
 
