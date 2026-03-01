@@ -982,31 +982,6 @@ func (t *Transformer) transformObjectLiteral(node *sitter.Node) ast.Expr {
 	return callExpr(selectorExpr(ident("jsvalue"), "ObjectFrom"), args...)
 }
 
-// isJSValueGet returns true if the expression is a JSValue .Get() call.
-func isNumericLit(expr ast.Expr) bool {
-	lit, ok := expr.(*ast.BasicLit)
-	if !ok {
-		return false
-	}
-	return lit.Kind == token.INT || lit.Kind == token.FLOAT
-}
-
-// isNumericExpr returns true if the expression is a numeric value (literal or unary expression like -1).
-func isNumericExpr(expr ast.Expr) bool {
-	// Check for basic numeric literal
-	if isNumericLit(expr) {
-		return true
-	}
-	// Check for unary expression (e.g., -1, +5)
-	unary, ok := expr.(*ast.UnaryExpr)
-	if !ok {
-		return false
-	}
-	if unary.Op != token.SUB && unary.Op != token.ADD {
-		return false
-	}
-	return isNumericLit(unary.X)
-}
 
 // shouldCoerceArg returns true if the argument should be coerced to string for the given method.
 // Some methods expect specific argument types (regex, integer) that should not be coerced.
@@ -1036,17 +1011,7 @@ func shouldCoerceArg(method string, argIndex int, arg ast.Expr) bool {
 	return true
 }
 
-func isBoolLit(expr ast.Expr) bool {
-	id, ok := expr.(*ast.Ident)
-	return ok && (id.Name == "true" || id.Name == "false")
-}
 
-func isNilNode(node *sitter.Node) bool {
-	if node == nil {
-		return false
-	}
-	return node.Kind() == "null" || node.Kind() == "undefined"
-}
 
 // hasJSValueStringWrapper reports whether a string method has a dedicated jsvalue.* wrapper.
 func hasJSValueStringWrapper(prop string) bool {
@@ -1083,15 +1048,6 @@ func isBoolReturningMethod(name string) bool {
 	return false
 }
 
-// isGoBuiltin returns true if the name is a Go built-in function.
-func isGoBuiltin(name string) bool {
-	switch name {
-	case "append", "cap", "close", "complex", "copy", "delete", "imag",
-		"len", "make", "new", "panic", "print", "println", "real", "recover":
-		return true
-	}
-	return false
-}
 
 func isJSValueGet(expr ast.Expr) bool {
 	call, ok := expr.(*ast.CallExpr)

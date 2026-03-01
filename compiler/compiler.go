@@ -34,21 +34,19 @@ func CompileWithExports(source []byte, pkgName, moduleName, currentFile string, 
 
 	// Pre-populate transformer with cross-file export knowledge
 	// (exclude the current file's own exports to avoid self-conflicts)
-	if exports != nil {
-		for fileName, fileExports := range exports {
-			if fileName == currentFile {
-				continue
-			}
-			for _, exp := range fileExports {
-				switch exp.Kind {
-				case "var", "enum":
-					transformer.pkgVarTyped[exp.GoName] = !exp.IsJSValue
-				case "function":
-					// Cross-file functions are known to exist; track param count as 0
-					// so they're recognized as hoisted functions (not JSValue variables).
-					if _, exists := transformer.funcParamCounts[exp.GoName]; !exists {
-						transformer.funcParamCounts[exp.GoName] = 0
-					}
+	for fileName, fileExports := range exports {
+		if fileName == currentFile {
+			continue
+		}
+		for _, exp := range fileExports {
+			switch exp.Kind {
+			case "var", "enum":
+				transformer.pkgVarTyped[exp.GoName] = !exp.IsJSValue
+			case "function":
+				// Cross-file functions are known to exist; track param count as 0
+				// so they're recognized as hoisted functions (not JSValue variables).
+				if _, exists := transformer.funcParamCounts[exp.GoName]; !exists {
+					transformer.funcParamCounts[exp.GoName] = 0
 				}
 			}
 		}

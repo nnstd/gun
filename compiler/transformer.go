@@ -368,31 +368,6 @@ func (t *Transformer) isUntypedLocal(name string) bool {
 	return false
 }
 
-// isInCurrentScopeAsNonSlice returns true if the name is declared in a DEEPER
-// scope than where it was registered as a jsvalueSliceLocal. This prevents
-// wrapping when an inner function's regular *jsvalue.JSValue parameter
-// shadows an outer function's rest param with the same name.
-func (t *Transformer) isInCurrentScopeAsNonSlice(name string) bool {
-	if len(t.localScopes) < 2 {
-		return false
-	}
-	// If the variable appears in a newer/inner scope than the one where
-	// it was first registered, it's a shadowing parameter.
-	// Find the outermost scope where this name appears.
-	for i := 0; i < len(t.localScopes)-1; i++ {
-		if _, ok := t.localScopes[i][name]; ok {
-			// Found in an outer scope. Check if it also appears in an inner scope.
-			for j := i + 1; j < len(t.localScopes); j++ {
-				if _, ok2 := t.localScopes[j][name]; ok2 {
-					// Name is redeclared in a deeper scope — it's shadowed
-					return true
-				}
-			}
-			return false
-		}
-	}
-	return false
-}
 
 // isCrossFileFunction checks if goName is declared as a function in another
 // file of the same package (via cross-file exports from CompilePackage).
@@ -445,9 +420,7 @@ func (t *Transformer) transformTopLevel(node *sitter.Node) {
 		}
 	case "lexical_declaration", "variable_declaration":
 		decls := t.transformVarDecl(node)
-		for _, d := range decls {
-			t.decls = append(t.decls, d)
-		}
+		t.decls = append(t.decls, decls...)
 	case "class_declaration":
 		classDecls := t.transformClassDecl(node)
 		t.decls = append(t.decls, classDecls...)
@@ -576,48 +549,43 @@ func (t *Transformer) transformExport(node *sitter.Node) {
 // transformExportDefault handles `export default ...` statements.
 // Dispatches by the kind of the exported value.
 func (t *Transformer) transformExportDefault(node *sitter.Node) {
-	for i := uint(0); i < node.NamedChildCount(); i++ {
-		child := node.NamedChild(i)
-		switch child.Kind() {
-		case "function_declaration":
-			nameNode := child.ChildByFieldName("name")
-			if nameNode != nil {
-				if d := t.transformFuncDecl(child, true); d != nil {
-					t.decls = append(t.decls, d)
-					// Also create a Default alias so importers can find it
-					goName := capitalize(nameNode.Utf8Text(t.source))
-					t.decls = append(t.decls, varDecl("Default", nil, ident(goName)))
-				}
-			} else {
-				if d := t.transformAnonFuncAsDefault(child); d != nil {
-					t.decls = append(t.decls, d)
-				}
+	if node.NamedChildCount() == 0 {
+		return
+	}
+	child := node.NamedChild(0)
+	switch child.Kind() {
+	case "function_declaration":
+		nameNode := child.ChildByFieldName("name")
+		if nameNode != nil {
+			if d := t.transformFuncDecl(child, true); d != nil {
+				t.decls = append(t.decls, d)
+				// Also create a Default alias so importers can find it
+				goName := capitalize(nameNode.Utf8Text(t.source))
+				t.decls = append(t.decls, varDecl("Default", nil, ident(goName)))
 			}
-			return
-		case "function", "function_expression":
+		} else {
 			if d := t.transformAnonFuncAsDefault(child); d != nil {
 				t.decls = append(t.decls, d)
 			}
+		}
+	case "function", "function_expression":
+		if d := t.transformAnonFuncAsDefault(child); d != nil {
+			t.decls = append(t.decls, d)
+		}
+	case "class_declaration":
+		classDecls := t.transformClassDecl(child)
+		t.decls = append(t.decls, classDecls...)
+	case "object":
+		if t.transformExportDefaultObject(child) {
 			return
-		case "class_declaration":
-			classDecls := t.transformClassDecl(child)
-			t.decls = append(t.decls, classDecls...)
-			return
-		case "object":
-			if t.transformExportDefaultObject(child) {
-				return
-			}
-			t.decls = append(t.decls, varDecl("Default", nil, t.transformExpr(child)))
-			return
-		case "identifier":
-			name := child.Utf8Text(t.source)
-			t.decls = append(t.decls, varDecl("Default", nil, ident(name)))
-			return
-		default:
-			if expr := t.transformExpr(child); expr != nil {
-				t.decls = append(t.decls, varDecl("Default", nil, expr))
-			}
-			return
+		}
+		t.decls = append(t.decls, varDecl("Default", nil, t.transformExpr(child)))
+	case "identifier":
+		name := child.Utf8Text(t.source)
+		t.decls = append(t.decls, varDecl("Default", nil, ident(name)))
+	default:
+		if expr := t.transformExpr(child); expr != nil {
+			t.decls = append(t.decls, varDecl("Default", nil, expr))
 		}
 	}
 }
@@ -824,10 +792,3 @@ func (t *Transformer) getOrCreateMain() *ast.FuncDecl {
 	return fn
 }
 
-// nodeText returns the source text of a node.
-func (t *Transformer) nodeText(node *sitter.Node) string {
-	if node == nil {
-		return ""
-	}
-	return node.Utf8Text(t.source)
-}

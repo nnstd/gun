@@ -134,9 +134,6 @@ func exprStmt(x ast.Expr) *ast.ExprStmt {
 	return &ast.ExprStmt{X: x}
 }
 
-func importSpec(path string) *ast.ImportSpec {
-	return &ast.ImportSpec{Path: stringLit(path)}
-}
 
 func importSpecAlias(path, alias string) *ast.ImportSpec {
 	spec := &ast.ImportSpec{Path: stringLit(path)}
@@ -189,14 +186,6 @@ func funcDecl(name string, params, results *ast.FieldList, body *ast.BlockStmt) 
 	}
 }
 
-func methodDecl(recv, name string, recvType ast.Expr, params, results *ast.FieldList, body *ast.BlockStmt) *ast.FuncDecl {
-	return &ast.FuncDecl{
-		Recv: fieldList(field(recv, recvType)),
-		Name: ident(name),
-		Type: &ast.FuncType{Params: params, Results: results},
-		Body: body,
-	}
-}
 
 func ptrType(x ast.Expr) *ast.StarExpr {
 	return &ast.StarExpr{X: x}
@@ -225,9 +214,6 @@ func sliceType(elt ast.Expr) *ast.ArrayType {
 	return &ast.ArrayType{Elt: elt}
 }
 
-func addrOf(x ast.Expr) *ast.UnaryExpr {
-	return &ast.UnaryExpr{Op: token.AND, X: x}
-}
 
 func compositeLit(typ ast.Expr, elts ...ast.Expr) *ast.CompositeLit {
 	return &ast.CompositeLit{Type: typ, Elts: elts}
@@ -612,18 +598,6 @@ func isNilIdent(expr ast.Expr) bool {
 	return ok && id.Name == "nil"
 }
 
-// isAnyType returns true when a type_annotation node resolves to TS "any",
-// which maps to *jsvalue.JSValue in Go and should be treated as untyped.
-func isAnyType(typeNode *sitter.Node, source []byte) bool {
-	if typeNode == nil {
-		return false
-	}
-	text := strings.TrimSpace(typeNode.Utf8Text(source))
-	// type_annotation nodes include the leading ":", so strip it.
-	text = strings.TrimPrefix(text, ":")
-	text = strings.TrimSpace(text)
-	return text == "any"
-}
 
 // sanitizeIdent makes a JS identifier safe for use as a Go identifier by
 // replacing illegal characters and escaping reserved keywords.
@@ -647,20 +621,4 @@ func capitalize(s string) string {
 	return string(r)
 }
 
-// uncapitalize returns the string with the first letter lowercased.
-func uncapitalize(s string) string {
-	if s == "" {
-		return s
-	}
-	r := []rune(s)
-	r[0] = unicode.ToLower(r[0])
-	return string(r)
-}
 
-// receiverName returns a short receiver variable name from a type name.
-func receiverName(typeName string) string {
-	if typeName == "" {
-		return "v"
-	}
-	return strings.ToLower(typeName[:1])
-}

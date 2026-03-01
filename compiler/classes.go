@@ -90,7 +90,7 @@ func (t *Transformer) transformClassDecl(node *sitter.Node) []ast.Decl {
 				isStatic := false
 				for j := uint(0); j < member.ChildCount(); j++ {
 					child := member.Child(j)
-					if child.Kind() == "static" || (child.IsNamed() == false && child.Utf8Text(t.source) == "static") {
+					if child.Kind() == "static" || (!child.IsNamed() && child.Utf8Text(t.source) == "static") {
 						isStatic = true
 						break
 					}

@@ -72,30 +72,8 @@ func mapAugmentedOp(op string) token.Token {
 	}
 }
 
-func isComparisonOp(op token.Token) bool {
-	switch op {
-	case token.EQL, token.NEQ, token.LSS, token.GTR, token.LEQ, token.GEQ:
-		return true
-	}
-	return false
-}
 
-func isOrderingOp(op token.Token) bool {
-	switch op {
-	case token.LSS, token.GTR, token.LEQ, token.GEQ:
-		return true
-	}
-	return false
-}
 
-func isArithmeticOp(op token.Token) bool {
-	switch op {
-	case token.ADD, token.SUB, token.MUL, token.QUO, token.REM,
-		token.AND, token.OR, token.XOR, token.SHL, token.SHR:
-		return true
-	}
-	return false
-}
 
 // jsvalueOpName maps a Go token operator to the corresponding jsvalue helper function name.
 // Returns empty string if no mapping exists.
@@ -141,30 +119,3 @@ func jsvalueOpName(op token.Token) string {
 	}
 }
 
-// jsvalueAugmentedOpName maps an augmented assignment operator to jsvalue function name.
-func jsvalueAugmentedOpName(op string) string {
-	switch op {
-	case "+=":
-		return "Add"
-	case "-=":
-		return "Sub"
-	case "*=":
-		return "Mul"
-	case "/=":
-		return "Div"
-	case "%=":
-		return "Mod"
-	case "&=":
-		return "BitAnd"
-	case "|=":
-		return "BitOr"
-	case "^=":
-		return "BitXor"
-	case "<<=":
-		return "Shl"
-	case ">>=":
-		return "Shr"
-	default:
-		return ""
-	}
-}
