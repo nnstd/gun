@@ -51,6 +51,11 @@ func (t *Transformer) transformExpr(node *sitter.Node) ast.Expr {
 		return selectorExpr(ident("module"), "ImportMeta")
 
 	case "this":
+		// At package level (no scopes), this is undefined (ES modules)
+		if len(t.localScopes) == 0 {
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "NewUndefined"))
+		}
 		return ident("this")
 
 	case "binary_expression":
