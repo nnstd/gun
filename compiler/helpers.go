@@ -405,45 +405,78 @@ func (t *Transformer) funcDeclToJSValueVar(d *ast.FuncDecl) ast.Decl {
 }
 
 // wrapFuncLitAsJSValue converts a Go function literal into a jsvalue.NewFunction call.
-// It rewrites the function to accept variadic _args, unpacks named params,
-// ensures *jsvalue.JSValue return type, and wraps with jsvalue.NewFunction().
+// It wraps the original function in a variadic JSValue dispatcher that unpacks
+// _args and calls the original, preserving its param handling (including
+// destructuring params with defaults and variadic params).
 func (t *Transformer) wrapFuncLitAsJSValue(fnLit *ast.FuncLit, paramNames []string) ast.Expr {
 	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 
-	// Build param unpacking statements: var name *jsvalue.JSValue; if len(_args) > i { name = _args[i] }
-	var unpackStmts []ast.Stmt
-	for i, pName := range paramNames {
-		if pName == "" {
-			continue
+	// Ensure return type is *jsvalue.JSValue and all returns are wrapped
+	wrapReturnsWithJSValue(fnLit.Body)
+	results := fieldList(field("", jsValuePtrType()))
+	fnLit.Type.Results = results
+	ensureTrailingReturn(fnLit.Body, results)
+
+	// Build args to pass to the original function by unpacking _args.
+	// Each original param gets _args[i]; variadic params get _args[i:]...
+	var callArgs []ast.Expr
+	paramIdx := 0
+	if fnLit.Type.Params != nil {
+		for _, f := range fnLit.Type.Params.List {
+			_, isVariadic := f.Type.(*ast.Ellipsis)
+			for range f.Names {
+				if isVariadic {
+					// Variadic param: pass remaining _args as spread slice
+					callArgs = append(callArgs, &ast.SliceExpr{
+						X:      ident("_args"),
+						Low:    intLit(itoa(paramIdx)),
+						Slice3: false,
+					})
+				} else {
+					// Regular param: pass _args[i] or nil if missing
+					callArgs = append(callArgs, &ast.CallExpr{
+						Fun: &ast.FuncLit{
+							Type: &ast.FuncType{
+								Results: fieldList(field("", f.Type)),
+							},
+							Body: blockStmt(
+								&ast.IfStmt{
+									Cond: &ast.BinaryExpr{
+										X:  callExpr(ident("len"), ident("_args")),
+										Op: token.GTR,
+										Y:  intLit(itoa(paramIdx)),
+									},
+									Body: blockStmt(returnStmt(&ast.IndexExpr{
+										X: ident("_args"), Index: intLit(itoa(paramIdx)),
+									})),
+								},
+								returnStmt(ident("nil")),
+							),
+						},
+					})
+				}
+				paramIdx++
+			}
 		}
-		pName = sanitizeIdent(pName)
-		unpackStmts = append(unpackStmts,
-			&ast.DeclStmt{Decl: varDecl(pName, jsValuePtrType(), nil)},
-			&ast.IfStmt{
-				Cond: &ast.BinaryExpr{
-					X:  callExpr(ident("len"), ident("_args")),
-					Op: token.GTR,
-					Y:  intLit(itoa(i)),
-				},
-				Body: blockStmt(
-					assignStmt([]ast.Expr{ident(pName)}, []ast.Expr{
-						&ast.IndexExpr{X: ident("_args"), Index: intLit(itoa(i))},
-					}),
-				),
-			},
-		)
 	}
 
-	// Rewrite: prepend unpacking, keep original body statements
-	body := fnLit.Body
-	body.List = append(unpackStmts, body.List...)
+	// Build wrapper: func(_args ...*jsvalue.JSValue) *jsvalue.JSValue { return inner(args...) }
+	// If the last arg is a variadic spread, set Ellipsis on the CallExpr.
+	hasVariadicSpread := false
+	if fnLit.Type.Params != nil {
+		for _, f := range fnLit.Type.Params.List {
+			if _, ok := f.Type.(*ast.Ellipsis); ok {
+				hasVariadicSpread = true
+			}
+		}
+	}
 
-	// Ensure return type is *jsvalue.JSValue and all returns are wrapped
-	results := fieldList(field("", jsValuePtrType()))
-	wrapReturnsWithJSValue(body)
-	ensureTrailingReturn(body, results)
+	innerCall := callExpr(fnLit, callArgs...)
+	if hasVariadicSpread {
+		innerCall.Ellipsis = 1 // non-zero triggers "args..." syntax
+	}
+	wrapperBody := blockStmt(returnStmt(innerCall))
 
-	// Build variadic function: func(_args ...*jsvalue.JSValue) *jsvalue.JSValue { ... }
 	variadicFn := &ast.FuncLit{
 		Type: &ast.FuncType{
 			Params: fieldList(&ast.Field{
@@ -452,7 +485,7 @@ func (t *Transformer) wrapFuncLitAsJSValue(fnLit *ast.FuncLit, paramNames []stri
 			}),
 			Results: results,
 		},
-		Body: body,
+		Body: wrapperBody,
 	}
 
 	return callExpr(selectorExpr(ident("jsvalue"), "NewFunction"), variadicFn)

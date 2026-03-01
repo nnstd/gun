@@ -104,7 +104,9 @@ func TestParamGoKeywordEscaped(t *testing.T) {
 func TestRestParameter(t *testing.T) {
 	ts := `function sum(...nums: number[]): number { return 0; }`
 	out := compile(t, ts)
-	assertContains(t, out, "var nums *jsvalue.JSValue")
+	// Rest param passed as slice from _args to inner function
+	assertContains(t, out, "nums ...*jsvalue.JSValue")
+	assertContains(t, out, "_args[0:]")
 }
 
 func TestOptionalParameter(t *testing.T) {
@@ -301,10 +303,8 @@ func TestDestructuringParamWithDefault(t *testing.T) {
 func TestDestructuringParamWithoutDefault(t *testing.T) {
 	ts := `function f({name, age}) { return name; }`
 	out := compile(t, ts)
-	// Destructured param should extract from _args, not be variadic itself
-	assertContains(t, out, "var _param0 *jsvalue.JSValue")
-	assertContains(t, out, "_param0")
-	assertContains(t, out, "_param0.Get(\"name\")")
+	// Inner function receives destructured param, wrapper passes _args
+	assertContains(t, out, `_param0.Get("name")`)
 }
 
 func TestClassMethodLocalsUseGet(t *testing.T) {
