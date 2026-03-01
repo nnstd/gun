@@ -823,12 +823,26 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 				keyNode := child.ChildByFieldName("key")
 				valNode := child.ChildByFieldName("value")
 				if keyNode != nil && valNode != nil {
-					name := valNode.Utf8Text(t.source)
 					key := keyNode.Utf8Text(t.source)
+					rhs := callExpr(selectorExpr(valExpr, "Get"), stringLit(key))
+					// Handle member expression targets: {key: this.prop} = obj → this.Set("prop", obj.Get("key"))
+					if valNode.Kind() == "member_expression" {
+						lhs := t.transformExpr(valNode)
+						// Convert member access to .Set() call
+						if sel, ok := lhs.(*ast.CallExpr); ok {
+							// lhs is obj.Get("prop") — convert to obj.Set("prop", rhs)
+							if selExpr, ok := sel.Fun.(*ast.SelectorExpr); ok && selExpr.Sel.Name == "Get" {
+								stmts = append(stmts, exprStmt(callExpr(
+									selectorExpr(selExpr.X, "Set"), sel.Args[0], rhs)))
+								continue
+							}
+						}
+					}
+					name := valNode.Utf8Text(t.source)
 					stmts = append(stmts, &ast.AssignStmt{
 						Lhs: []ast.Expr{ident(name)},
 						Tok: token.DEFINE,
-						Rhs: []ast.Expr{callExpr(selectorExpr(valExpr, "Get"), stringLit(key))},
+						Rhs: []ast.Expr{rhs},
 					})
 					// All destructured fields are JSValue (properties from objects)
 					t.addToCurrentScope(name, false)

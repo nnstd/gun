@@ -32,6 +32,10 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 			if child.Kind() == "string" || child.Kind() == "string_literal" {
 				return nil
 			}
+			// Unwrap parenthesized expressions: (expr) → expr
+			for child.Kind() == "parenthesized_expression" && child.NamedChildCount() > 0 {
+				child = child.NamedChild(0)
+			}
 			// Assignment expressions should become assignment statements
 			if child.Kind() == "assignment_expression" {
 				leftNode := child.ChildByFieldName("left")
@@ -418,20 +422,56 @@ func (t *Transformer) transformForStmt(node *sitter.Node) ast.Stmt {
 	updateNode := node.ChildByFieldName("increment")
 	bodyNode := node.ChildByFieldName("body")
 
+	// For multi-variable init (let i=0, ii=len), extract extra vars as pre-loop stmts
+	var preLoopStmts []ast.Stmt
 	var init ast.Stmt
 	if initNode != nil {
-		init = t.transformStmt(initNode)
-		// for-loop init must be a simple statement; convert var decls to :=
-		if ds, ok := init.(*ast.DeclStmt); ok {
-			if gd, ok := ds.Decl.(*ast.GenDecl); ok && len(gd.Specs) == 1 {
-				if vs, ok := gd.Specs[0].(*ast.ValueSpec); ok && len(vs.Names) == 1 {
-					var rhs ast.Expr
-					if len(vs.Values) > 0 {
-						rhs = vs.Values[0]
-					} else {
-						rhs = intLit("0")
+		// Use transformVarDecl directly to get ALL declarations
+		if initNode.Kind() == "lexical_declaration" || initNode.Kind() == "variable_declaration" {
+			decls := t.transformVarDecl(initNode)
+			if len(decls) >= 1 {
+				// First decl becomes the loop init
+				if gd, ok := decls[0].(*ast.GenDecl); ok && len(gd.Specs) == 1 {
+					if vs, ok := gd.Specs[0].(*ast.ValueSpec); ok && len(vs.Names) == 1 {
+						var rhs ast.Expr
+						if len(vs.Values) > 0 {
+							rhs = vs.Values[0]
+						} else {
+							rhs = intLit("0")
+						}
+						init = assignDefine([]ast.Expr{ident(vs.Names[0].Name)}, []ast.Expr{rhs})
 					}
-					init = assignDefine([]ast.Expr{ident(vs.Names[0].Name)}, []ast.Expr{rhs})
+				}
+				// Extra decls become pre-loop variable declarations
+				for j := 1; j < len(decls); j++ {
+					if gd, ok := decls[j].(*ast.GenDecl); ok && len(gd.Specs) == 1 {
+						if vs, ok := gd.Specs[0].(*ast.ValueSpec); ok && len(vs.Names) == 1 {
+							var rhs ast.Expr
+							if len(vs.Values) > 0 {
+								rhs = vs.Values[0]
+							} else {
+								rhs = ident("nil")
+							}
+							preLoopStmts = append(preLoopStmts,
+								assignDefine([]ast.Expr{ident(vs.Names[0].Name)}, []ast.Expr{rhs}))
+						}
+					}
+				}
+			}
+		} else {
+			init = t.transformStmt(initNode)
+			// Non-var init: convert decl to :=
+			if ds, ok := init.(*ast.DeclStmt); ok {
+				if gd, ok := ds.Decl.(*ast.GenDecl); ok && len(gd.Specs) == 1 {
+					if vs, ok := gd.Specs[0].(*ast.ValueSpec); ok && len(vs.Names) == 1 {
+						var rhs ast.Expr
+						if len(vs.Values) > 0 {
+							rhs = vs.Values[0]
+						} else {
+							rhs = intLit("0")
+						}
+						init = assignDefine([]ast.Expr{ident(vs.Names[0].Name)}, []ast.Expr{rhs})
+					}
 				}
 			}
 		}
@@ -499,7 +539,13 @@ func (t *Transformer) transformForStmt(node *sitter.Node) ast.Stmt {
 		body = blockStmt()
 	}
 
-	return &ast.ForStmt{Init: init, Cond: cond, Post: post, Body: body}
+	forStmt := &ast.ForStmt{Init: init, Cond: cond, Post: post, Body: body}
+	// Wrap with pre-loop stmts for multi-variable for-init
+	if len(preLoopStmts) > 0 {
+		preLoopStmts = append(preLoopStmts, forStmt)
+		return &ast.BlockStmt{List: preLoopStmts}
+	}
+	return forStmt
 }
 
 func (t *Transformer) transformForInOrOfStmt(node *sitter.Node) ast.Stmt {

@@ -120,9 +120,9 @@ const s = templates.completionShTemplate;`
 		t.Fatal(err)
 	}
 	s := string(out)
-	// All-JSValue: namespace imports use .Get() for property access
+	// Same-package namespace: templates.foo → Foo (capitalized direct reference)
 	assertNotContains(t, s, `"mymod/completion-templates"`)
-	assertContains(t, s, `templates.Get("completionShTemplate")`)
+	assertContains(t, s, "CompletionShTemplate")
 }
 
 func TestShorthandPropertyResolvesImport(t *testing.T) {

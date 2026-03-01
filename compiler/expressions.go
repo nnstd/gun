@@ -799,14 +799,11 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 
 	prop := propNode.Utf8Text(t.source)
 
-	// Same-package namespace import: use .Get() for JSValue object property access.
-	// This handles cross-file variable references like DefaultValuesForTypeKey.BOOLEAN.
+	// Same-package namespace import: templates.foo → Foo (direct reference)
 	if objNode.Kind() == "identifier" {
 		name := objNode.Utf8Text(t.source)
 		if imp, ok := t.importedNames[name]; ok && imp.goSymbol == "" && imp.goPkgName == "" {
-			obj := t.transformExpr(objNode)
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-			return callExpr(selectorExpr(obj, "Get"), stringLit(prop))
+			return ident(capitalize(prop))
 		}
 	}
 
