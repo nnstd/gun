@@ -156,19 +156,6 @@ func varDecl(name string, typ ast.Expr, value ast.Expr) *ast.GenDecl {
 	return &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{spec}}
 }
 
-func constDecl(name string, typ ast.Expr, value ast.Expr) *ast.GenDecl {
-	spec := &ast.ValueSpec{
-		Names: []*ast.Ident{ident(name)},
-	}
-	if typ != nil {
-		spec.Type = typ
-	}
-	if value != nil {
-		spec.Values = []ast.Expr{value}
-	}
-	return &ast.GenDecl{Tok: token.CONST, Specs: []ast.Spec{spec}}
-}
-
 func typeDecl(name string, typ ast.Expr) *ast.GenDecl {
 	return &ast.GenDecl{
 		Tok: token.TYPE,
@@ -797,6 +784,28 @@ func extractParamInfo(node *sitter.Node, source []byte) map[string]bool {
 		}
 	}
 	return info
+}
+
+// nodeUsesThis checks if a tree-sitter node or any of its descendants reference 'this'.
+// It stops at nested function boundaries (function/arrow_function) since those have their own 'this'.
+func nodeUsesThis(node *sitter.Node) bool {
+	if node == nil {
+		return false
+	}
+	if node.Kind() == "this" {
+		return true
+	}
+	// Don't descend into nested arrow functions or function expressions
+	// (they have their own 'this' binding)
+	if node.Kind() == "arrow_function" || node.Kind() == "function" || node.Kind() == "function_expression" {
+		return false
+	}
+	for i := uint(0); i < node.ChildCount(); i++ {
+		if nodeUsesThis(node.Child(i)) {
+			return true
+		}
+	}
+	return false
 }
 
 // isBoolExpr reports whether a Go AST expression is known to produce a bool.

@@ -120,7 +120,7 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 					if lhs != nil && rhs != nil {
 						// Wrap RHS with jsvalue.From() when assigning to an untyped local,
 						// but keep nil as-is so pointer nil checks work.
-						if leftNode.Kind() == "identifier" && t.isUntypedLocal(leftNode.Utf8Text(t.source)) && !isNilIdent(rhs) {
+						if leftNode.Kind() == "identifier" && (t.isUntypedLocal(leftNode.Utf8Text(t.source)) || t.isUntypedLocal(sanitizeIdent(leftNode.Utf8Text(t.source)))) && !isNilIdent(rhs) {
 							rhs = t.wrapAsJSValue(rhs)
 						}
 						// Wrap RHS when assigning to a JSValue slice element (e.g. args[i] = "").
@@ -446,14 +446,14 @@ func (t *Transformer) transformForStmt(node *sitter.Node) ast.Stmt {
 				for j := 1; j < len(decls); j++ {
 					if gd, ok := decls[j].(*ast.GenDecl); ok && len(gd.Specs) == 1 {
 						if vs, ok := gd.Specs[0].(*ast.ValueSpec); ok && len(vs.Names) == 1 {
-							var rhs ast.Expr
 							if len(vs.Values) > 0 {
-								rhs = vs.Values[0]
+								preLoopStmts = append(preLoopStmts,
+									assignDefine([]ast.Expr{ident(vs.Names[0].Name)}, []ast.Expr{vs.Values[0]}))
 							} else {
-								rhs = ident("nil")
+								// No value: emit typed var declaration to avoid untyped nil
+								preLoopStmts = append(preLoopStmts,
+									&ast.DeclStmt{Decl: varDecl(vs.Names[0].Name, jsValuePtrType(), nil)})
 							}
-							preLoopStmts = append(preLoopStmts,
-								assignDefine([]ast.Expr{ident(vs.Names[0].Name)}, []ast.Expr{rhs}))
 						}
 					}
 				}
@@ -736,6 +736,20 @@ func (t *Transformer) transformSwitchStmt(node *sitter.Node) ast.Stmt {
 		tag = t.transformExpr(tagNode)
 		if paren, ok := tag.(*ast.ParenExpr); ok {
 			tag = paren.X
+		}
+		// typeof expressions return *jsvalue.JSValue but switch cases are string literals.
+		// Convert to Go string so the switch comparison works.
+		// Check both direct unary_expression and parenthesized wrapping.
+		typeofNode := tagNode
+		if typeofNode.Kind() == "parenthesized_expression" && typeofNode.NamedChildCount() > 0 {
+			typeofNode = typeofNode.NamedChild(0)
+		}
+		if typeofNode.Kind() == "unary_expression" {
+			opNode := typeofNode.ChildByFieldName("operator")
+			if opNode != nil && opNode.Utf8Text(t.source) == "typeof" {
+				t.addImport("fmt")
+				tag = callExpr(selectorExpr(ident("fmt"), "Sprint"), tag)
+			}
 		}
 	}
 

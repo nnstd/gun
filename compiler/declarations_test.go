@@ -4,7 +4,7 @@ import "testing"
 
 func TestConstDeclaration(t *testing.T) {
 	out := compile(t, `const x: number = 42;`)
-	assertContains(t, out, "const x float64 = 42")
+	assertContains(t, out, "var x float64 = 42")
 }
 
 func TestLetDeclaration(t *testing.T) {
@@ -19,7 +19,7 @@ func TestVarDeclarationInferred(t *testing.T) {
 
 func TestConstStringDeclaration(t *testing.T) {
 	out := compile(t, `const msg = "hi";`)
-	assertContains(t, out, `const msg = "hi"`)
+	assertContains(t, out, `var msg = jsvalue.NewString("hi")`)
 }
 
 func TestFunctionDeclaration(t *testing.T) {
@@ -1180,6 +1180,39 @@ func TestParenthesizedDestructuringAssignment(t *testing.T) {
 	assertContains(t, out, `.Set("a"`)
 	assertContains(t, out, `.Set("b"`)
 	assertNotContains(t, out, "nil =")
+}
+
+func TestConstStringUsesJSValue(t *testing.T) {
+	// Consts should use JSValue wrapping, not Go const
+	ts := `function f() {
+		const prefix = "hello";
+		return prefix.length;
+	}`
+	out := compile(t, ts)
+	assertContains(t, out, `jsvalue.NewString("hello")`)
+	assertNotContains(t, out, "const prefix")
+	// .length on JSValue should use .Len()
+	assertContains(t, out, ".Len()")
+}
+
+func TestConstNumberUsesJSValue(t *testing.T) {
+	ts := `const MAX = 100;`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewNumber(float64(100))")
+	assertNotContains(t, out, "const MAX")
+}
+
+func TestBareVarDeclHoisted(t *testing.T) {
+	// Bare variable declarations should be hoisted so closures can reference them
+	ts := `function factory() {
+		const fn = function() { return cached; };
+		let cached;
+		cached = "value";
+		return fn();
+	}`
+	out := compile(t, ts)
+	// The hoisted var should appear before the function that references it
+	assertContains(t, out, "var cached *jsvalue.JSValue")
 }
 
 func TestClassMethodDestructuredParam(t *testing.T) {

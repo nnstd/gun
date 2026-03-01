@@ -84,6 +84,23 @@ func transformGlobalCall(name string, args []ast.Expr, t *Transformer) ast.Expr 
 				callExpr(selectorExpr(ident("fmt"), "Sprint"), args[0]))
 		}
 		return callExpr(selectorExpr(ident("jsvalue"), "NewString"), stringLit(""))
+	case "parseInt":
+		// parseInt(str, radix?) → jsvalue.ParseInt(str, radix)
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		if len(args) >= 2 {
+			return callExpr(selectorExpr(ident("jsvalue"), "ParseInt"), jsvalueWrapLit(args[0]), jsvalueWrapLit(args[1]))
+		}
+		if len(args) == 1 {
+			return callExpr(selectorExpr(ident("jsvalue"), "ParseInt"), jsvalueWrapLit(args[0]), callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), floatLit("10")))
+		}
+		return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), floatLit("0"))
+	case "parseFloat":
+		// parseFloat(str) → jsvalue.ParseFloat(str)
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		if len(args) >= 1 {
+			return callExpr(selectorExpr(ident("jsvalue"), "ParseFloat"), jsvalueWrapLit(args[0]))
+		}
+		return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), floatLit("0"))
 	}
 	if isErrorType(name) {
 		// Error("msg") → jserror.Error.Call(msg) — JS spec: Error() without new also creates Error
@@ -272,6 +289,14 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 	switch name {
 	case "undefined", "null":
 		return ident("nil")
+	case "Infinity":
+		addImport("math")
+		addImport("github.com/nnstd/gun/runtime/jsvalue")
+		return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), callExpr(selectorExpr(ident("math"), "Inf"), intLit("1")))
+	case "NaN":
+		addImport("math")
+		addImport("github.com/nnstd/gun/runtime/jsvalue")
+		return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), callExpr(selectorExpr(ident("math"), "NaN")))
 	case "console":
 		addImport("github.com/nnstd/gun/runtime/console")
 		return ident("console")
@@ -286,7 +311,7 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 		return selectorExpr(ident("jserror"), name)
 	case "Object":
 		addImport("github.com/nnstd/gun/runtime/object")
-		return ident("object")
+		return ident("jsobject")
 	case "process":
 		// process as standalone value — return a JSValue object with process properties
 		// so process?.version, process?.versions etc. work through .Get()
@@ -308,6 +333,11 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 			},
 			Body: blockStmt(returnStmt(callExpr(selectorExpr(ident("jsvalue"), "NewString"), callExpr(selectorExpr(ident("fmt"), "Sprint"), &ast.IndexExpr{X: ident("_a"), Index: intLit("0")})))),
 		})
+	case "Promise":
+		// Promise as standalone value (e.g. Promise.all, Promise.resolve)
+		// Return a JSValue object with .Get() for method dispatch
+		addImport("github.com/nnstd/gun/runtime/jsvalue")
+		return callExpr(selectorExpr(ident("jsvalue"), "NewObject"))
 	case "Number":
 		// Number as standalone (used as Number(x) call) — identity for numeric values
 		return ident("float64")

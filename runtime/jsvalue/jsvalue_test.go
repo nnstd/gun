@@ -352,3 +352,52 @@ func TestLastIndexOfJSValue(t *testing.T) {
 		t.Errorf("LastIndexOf: got %v", r.Number())
 	}
 }
+
+func TestParseIntDecimal(t *testing.T) {
+	r := ParseInt(NewString("42"), NewNumber(10))
+	if int(r.Number()) != 42 {
+		t.Errorf("ParseInt(\"42\", 10): got %v, want 42", r.Number())
+	}
+}
+
+func TestParseIntHex(t *testing.T) {
+	r := ParseInt(NewString("0xff"), NewNumber(16))
+	if int(r.Number()) != 255 {
+		t.Errorf("ParseInt(\"0xff\", 16): got %v, want 255", r.Number())
+	}
+}
+
+func TestParseIntStopsAtInvalidChar(t *testing.T) {
+	r := ParseInt(NewString("123abc"), NewNumber(10))
+	if int(r.Number()) != 123 {
+		t.Errorf("ParseInt(\"123abc\", 10): got %v, want 123", r.Number())
+	}
+}
+
+func TestParseIntNegative(t *testing.T) {
+	r := ParseInt(NewString("-10"), NewNumber(10))
+	if int(r.Number()) != -10 {
+		t.Errorf("ParseInt(\"-10\", 10): got %v, want -10", r.Number())
+	}
+}
+
+func TestParseIntInvalidReturnsNaN(t *testing.T) {
+	r := ParseInt(NewString("abc"), NewNumber(10))
+	if !math.IsNaN(r.Number()) {
+		t.Errorf("ParseInt(\"abc\", 10): got %v, want NaN", r.Number())
+	}
+}
+
+func TestParseFloatBasic(t *testing.T) {
+	r := ParseFloat(NewString("3.14"))
+	if r.Number() != 3.14 {
+		t.Errorf("ParseFloat(\"3.14\"): got %v, want 3.14", r.Number())
+	}
+}
+
+func TestParseFloatInvalidReturnsNaN(t *testing.T) {
+	r := ParseFloat(NewString("abc"))
+	if !math.IsNaN(r.Number()) {
+		t.Errorf("ParseFloat(\"abc\"): got %v, want NaN", r.Number())
+	}
+}

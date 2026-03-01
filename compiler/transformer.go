@@ -36,6 +36,7 @@ type Transformer struct {
 	crossFileExports   map[string]bool            // Go names registered from other files (cross-file knowledge)
 	goNameRegistry     map[string]bool            // all finalized Go names (after capitalization) for collision detection
 	goNameRemap        map[string]string          // TS name → final Go name (when collisions require suffix)
+	immutableLocals    map[string]bool            // local variables declared with const (value is immutable)
 	inClassMethod      bool                       // true when transforming a class method body (arguments offset by 1 for this)
 	currentClassParent ast.Expr                   // parent class expression for super() calls in constructors
 	builtins           *BuiltinRegistry           // registry of built-in methods and their metadata
@@ -62,6 +63,7 @@ func newTransformer(source []byte, pkgName, moduleName string, samePackageImport
 		crossFileExports:   make(map[string]bool),
 		goNameRegistry:     make(map[string]bool),
 		goNameRemap:        make(map[string]string),
+		immutableLocals:    make(map[string]bool),
 		builtins:           NewBuiltinRegistry(),
 	}
 }
@@ -118,6 +120,11 @@ func (t *Transformer) transform(root *sitter.Node) *ast.File {
 }
 
 func (t *Transformer) addImport(pkg string) {
+	// Auto-alias the object package to avoid collision with common "object" variable names
+	if pkg == "github.com/nnstd/gun/runtime/object" {
+		t.imports[pkg] = "jsobject"
+		return
+	}
 	if _, ok := t.imports[pkg]; !ok {
 		t.imports[pkg] = ""
 	}
@@ -234,6 +241,18 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		return false
 	case "call_expression":
 		fnNode := node.ChildByFieldName("function")
+		// Object.prototype.hasOwnProperty.call() → jsvalue.NewBool(...)
+		if fnNode != nil && fnNode.Kind() == "member_expression" {
+			propNode := fnNode.ChildByFieldName("property")
+			objNode := fnNode.ChildByFieldName("object")
+			if propNode != nil && propNode.Utf8Text(t.source) == "call" && isObjectPrototypeHasOwnProperty(objNode, t.source) {
+				return true
+			}
+		}
+		// Call via subscript on JSValue (e.g. this[key]()) → returns *jsvalue.JSValue
+		if fnNode != nil && fnNode.Kind() == "subscript_expression" && t.nodeReturnsJSValue(fnNode) {
+			return true
+		}
 		// Plain function call to untyped local → returns *jsvalue.JSValue
 		if fnNode != nil && fnNode.Kind() == "identifier" && t.isUntypedLocal(fnNode.Utf8Text(t.source)) {
 			return true
@@ -339,6 +358,11 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		}
 		return false
 	case "binary_expression":
+		// 'in' operator always produces JSValue (jsvalue.NewBool)
+		opNode := node.ChildByFieldName("operator")
+		if opNode != nil && opNode.Utf8Text(t.source) == "in" {
+			return true
+		}
 		// All binary operations where either operand is JSValue now produce
 		// JSValue results (via jsvalue.Add, jsvalue.Eq, jsvalue.Or, etc.)
 		leftNode := node.ChildByFieldName("left")

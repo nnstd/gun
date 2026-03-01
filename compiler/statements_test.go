@@ -338,6 +338,40 @@ func TestModuleExportsFunctionTrailingReturn(t *testing.T) {
 	assertContains(t, out, "return nil")
 }
 
+func TestForLoopExtraVarNilUsesVarDecl(t *testing.T) {
+	// Extra uninitialized vars in for-loop init should use typed var decl, not := nil
+	ts := `function f(arr: any) {
+		for (let i = 0, item; (item = arr[i]) !== undefined; i++) {}
+	}`
+	out := compile(t, ts)
+	assertNotContains(t, out, ":= nil")
+	assertContains(t, out, "var item *jsvalue.JSValue")
+}
+
+func TestSwitchTypeofUsesStringComparison(t *testing.T) {
+	// switch (typeof x) should convert JSValue typeof to string for comparison
+	ts := `function f(x: any) {
+		switch (typeof x) {
+			case "string": return "s";
+			case "number": return "n";
+		}
+	}`
+	out := compile(t, ts)
+	assertContains(t, out, "fmt.Sprint(jsvalue.TypeOf(")
+}
+
+func TestSwitchTypeofCasesAreStrings(t *testing.T) {
+	// switch cases for typeof should be plain string literals
+	ts := `function check(val: any) {
+		switch (typeof val) {
+			case "object": return true;
+			default: return false;
+		}
+	}`
+	out := compile(t, ts)
+	assertContains(t, out, `case "object"`)
+}
+
 func TestModuleExportsFunctionParamIsLocal(t *testing.T) {
 	// Parameters should be tracked as locals so member access uses .Get().
 	ts := `module.exports = function f(opts) {

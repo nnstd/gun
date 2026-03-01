@@ -205,18 +205,17 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 			}
 		}
 
-		// If const with simple literal value, use Go const
-		if isConst && value != nil && isConstCompatible(value) && (typ == nil || isConstType(typ)) {
-			decls = append(decls, constDecl(name, typ, value))
-		} else {
-			// In all-JSValue mode, wrap literal values with jsvalueWrapLit
-			// so `let x = 0` → `var x = jsvalue.NewNumber(float64(0))`
-			if !typed && value != nil && typ == nil {
-				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-				value = jsvalueWrapLit(value)
-			}
-			decls = append(decls, varDecl(name, typ, value))
+		// In all-JSValue mode, wrap literal values with jsvalueWrapLit
+		// so `let x = 0` → `var x = jsvalue.NewNumber(float64(0))`
+		// Consts also use JSValue (not Go const) so .Len(), .Get() etc. work.
+		if !typed && value != nil && typ == nil {
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			value = jsvalueWrapLit(value)
 		}
+		if isConst {
+			t.immutableLocals[name] = true
+		}
+		decls = append(decls, varDecl(name, typ, value))
 	}
 
 	return decls
@@ -228,30 +227,6 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 func (t *Transformer) isNonJSValueInit(node *sitter.Node) bool {
 	// In all-JSValue architecture, all variables are *jsvalue.JSValue.
 	return false
-}
-
-func isConstCompatible(expr ast.Expr) bool {
-	switch expr.(type) {
-	case *ast.BasicLit:
-		return true
-	case *ast.UnaryExpr:
-		return true
-	default:
-		return false
-	}
-}
-
-func isConstType(expr ast.Expr) bool {
-	id, ok := expr.(*ast.Ident)
-	if !ok {
-		return false
-	}
-	switch id.Name {
-	case "string", "float64", "int", "int64", "bool":
-		return true
-	default:
-		return false
-	}
 }
 
 func (t *Transformer) transformFuncDecl(node *sitter.Node, exported bool) *ast.FuncDecl {
@@ -428,20 +403,42 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 
 	var stmts []ast.Stmt
 
-	// First pass: pre-scan function declarations for hoisting.
-	// Extract signatures and register names in scope/funcParamCounts,
-	// but do NOT transform bodies yet — surrounding variables and sibling
-	// hoisted functions must be registered first so that cross-references
-	// between hoisted functions (and references to outer variables like argv)
-	// resolve correctly when bodies are transformed in the second pass.
+	// First pass: pre-scan function and variable declarations for hoisting.
+	// JavaScript hoists `let`/`var` names so closures defined before a variable
+	// declaration can still reference it. Go requires declarations before use,
+	// so we forward-declare bare (uninitialized) variables at the top of the block.
 	type hoistedInfo struct {
 		name string
 		typ  *ast.FuncType
 	}
 	var hoisted []hoistedInfo
 	hoistedSet := map[string]bool{}
+	var hoistedVarNames []string
+	hoistedVarSet := map[string]bool{}
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
+		// Hoist bare variable declarations (let x; / var x;) so closures
+		// defined earlier in the same block can reference them.
+		if child.Kind() == "lexical_declaration" || child.Kind() == "variable_declaration" {
+			for j := uint(0); j < child.NamedChildCount(); j++ {
+				decl := child.NamedChild(j)
+				if decl.Kind() != "variable_declarator" {
+					continue
+				}
+				nameNode := decl.ChildByFieldName("name")
+				valueNode := decl.ChildByFieldName("value")
+				if nameNode != nil && nameNode.Kind() == "identifier" && valueNode == nil {
+					name := sanitizeIdent(nameNode.Utf8Text(t.source))
+					if !hoistedVarSet[name] {
+						hoistedVarNames = append(hoistedVarNames, name)
+						hoistedVarSet[name] = true
+						t.addToCurrentScope(name, false)
+						t.jsvalueLocals[name] = true
+					}
+				}
+			}
+			continue
+		}
 		if child.Kind() == "function_declaration" {
 			nameNode := child.ChildByFieldName("name")
 			if nameNode == nil {
@@ -480,6 +477,15 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 				t.funcParamCounts[name] = len(params.List)
 			}
 		}
+	}
+
+	// Emit forward declarations for hoisted variables as *jsvalue.JSValue.
+	for _, name := range hoistedVarNames {
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		stmts = append(stmts, &ast.DeclStmt{
+			Decl: varDecl(name, jsValuePtrType(), nil),
+		})
+		stmts = append(stmts, assignStmt([]ast.Expr{ident("_")}, []ast.Expr{ident(name)}))
 	}
 
 	// Emit forward declarations for hoisted functions as *jsvalue.JSValue.
@@ -526,6 +532,14 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 		if child.Kind() == "lexical_declaration" || child.Kind() == "variable_declaration" {
 			decls := t.transformVarDecl(child)
 			for _, d := range decls {
+				// Skip bare declarations that were already forward-declared via hoisting.
+				if gd, ok := d.(*ast.GenDecl); ok && gd.Tok == token.VAR && len(gd.Specs) == 1 {
+					if vs, ok := gd.Specs[0].(*ast.ValueSpec); ok && len(vs.Names) == 1 && len(vs.Values) == 0 {
+						if hoistedVarSet[vs.Names[0].Name] {
+							continue
+						}
+					}
+				}
 				stmts = append(stmts, &ast.DeclStmt{Decl: d})
 				// Suppress "declared and not used" for local vars
 				if gd, ok := d.(*ast.GenDecl); ok && gd.Tok == token.VAR {

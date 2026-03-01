@@ -1393,6 +1393,66 @@ func TypeOf(a *JSValue) *JSValue {
 	return NewString(a.TypeString())
 }
 
+// ParseInt parses a string as an integer with the given radix, matching JS parseInt().
+func ParseInt(s, radix *JSValue) *JSValue {
+	str := strings.TrimSpace(fmt.Sprint(s))
+	base := int(radix.Number())
+	if base == 0 {
+		base = 10
+	}
+	// Handle 0x prefix for hex
+	if base == 16 && len(str) > 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X') {
+		str = str[2:]
+	}
+	// Parse digit by digit (JS parseInt stops at first invalid char)
+	result := 0
+	found := false
+	neg := false
+	i := 0
+	if i < len(str) && (str[i] == '-' || str[i] == '+') {
+		if str[i] == '-' {
+			neg = true
+		}
+		i++
+	}
+	for ; i < len(str); i++ {
+		c := str[i]
+		digit := -1
+		switch {
+		case c >= '0' && c <= '9':
+			digit = int(c - '0')
+		case c >= 'a' && c <= 'z':
+			digit = int(c-'a') + 10
+		case c >= 'A' && c <= 'Z':
+			digit = int(c-'A') + 10
+		}
+		if digit < 0 || digit >= base {
+			break
+		}
+		result = result*base + digit
+		found = true
+	}
+	if !found {
+		return NewNumber(math.NaN())
+	}
+	if neg {
+		result = -result
+	}
+	return NewNumber(float64(result))
+}
+
+// ParseFloat parses a string as a floating-point number, matching JS parseFloat().
+func ParseFloat(s *JSValue) *JSValue {
+	str := strings.TrimSpace(fmt.Sprint(s))
+	// Parse manually to handle JS-style stopping at invalid chars
+	var num float64
+	n, _ := fmt.Sscanf(str, "%f", &num)
+	if n == 0 {
+		return NewNumber(math.NaN())
+	}
+	return NewNumber(num)
+}
+
 // ---------------------------------------------------------------------------
 // Class construction
 // ---------------------------------------------------------------------------

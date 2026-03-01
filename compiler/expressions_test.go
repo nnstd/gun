@@ -590,6 +590,76 @@ const re = emojiRegex();`
 	assertContains(t, out, "emoji_regex.Default.Call(")
 }
 
+func TestInOperatorUsesHasOwnProperty(t *testing.T) {
+	ts := `function check(key: string, obj: any): boolean {
+		return key in obj;
+	}`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewBool(")
+	assertContains(t, out, ".HasOwnProperty(")
+}
+
+func TestNegatedInOperatorUsesJSValueNot(t *testing.T) {
+	ts := `function missing(key: string, obj: any): boolean {
+		return !(key in obj);
+	}`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Not(jsvalue.NewBool(")
+}
+
+func TestNegatedHasOwnPropertyCallUsesJSValueNot(t *testing.T) {
+	// Object.prototype.hasOwnProperty.call(obj, key) is treated as JSValue
+	ts := `function check(obj: any, key: string) {
+		if (!Object.prototype.hasOwnProperty.call(obj, key)) { return; }
+	}`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Not(jsvalue.NewBool(")
+}
+
+func TestTernaryNegativeLiteralNoNumberCall(t *testing.T) {
+	// -1 in a ternary should not get .Number() called on it
+	ts := `function cmp(a: boolean): number {
+		return a ? 1 : -1;
+	}`
+	out := compile(t, ts)
+	assertNotContains(t, out, "(-1).Number()")
+	assertNotContains(t, out, ".Number()")
+}
+
+func TestTernaryNestedInfersType(t *testing.T) {
+	// Nested ternary with int branches should infer int type
+	ts := `function f(a: boolean, b: boolean): number {
+		return a ? 0 : b ? 1 : -1;
+	}`
+	out := compile(t, ts)
+	assertNotContains(t, out, ".Number()")
+}
+
+func TestAssignmentExprSubscriptOnJSValueUsesSet(t *testing.T) {
+	// Assignment expression with subscript LHS on JSValue should use .Set()
+	ts := `function f(obj: any, key: string) {
+		let x = (obj[key] = true);
+	}`
+	out := compile(t, ts)
+	assertContains(t, out, `.Set(`)
+	assertNotContains(t, out, `.Get(fmt.Sprint(key)) =`)
+}
+
+func TestFuncExprWithThisExtractsFromArgs(t *testing.T) {
+	// Function expressions that use 'this' should extract it from _args
+	ts := `let obj = { greet: function() { return this.name; } };`
+	out := compile(t, ts)
+	assertContains(t, out, `this`)
+	assertContains(t, out, `.Get("name")`)
+}
+
+func TestTemplateLiteralAssignedToJSValueParamWrapped(t *testing.T) {
+	// Template literal assigned to a JSValue variable should be wrapped
+	ts := "function f($0: string) { $0 = `./${$0}`; return $0; }"
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.From(fmt.Sprintf")
+}
+
 func TestSamePackageTranspiledCallUsesCall(t *testing.T) {
 	// Same-package transpiled imports also use .Call()
 	ts := `import { helper } from "./utils";

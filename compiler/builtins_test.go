@@ -452,3 +452,67 @@ func TestErrorMemberAccess(t *testing.T) {
 	out := compile(t, ts)
 	assertContains(t, out, `jserror.Error.Get("stackTraceLimit")`)
 }
+
+func TestParseIntGlobal(t *testing.T) {
+	ts := `const n = parseInt("42", 10);`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.ParseInt(")
+}
+
+func TestParseIntWithoutRadix(t *testing.T) {
+	ts := `const n = parseInt("42");`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.ParseInt(")
+}
+
+func TestParseFloatGlobal(t *testing.T) {
+	ts := `const n = parseFloat("3.14");`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.ParseFloat(")
+}
+
+func TestInfinityGlobal(t *testing.T) {
+	ts := `const x = Infinity;`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewNumber(math.Inf(1))")
+	assertContains(t, out, `"math"`)
+}
+
+func TestNaNGlobal(t *testing.T) {
+	ts := `const x = NaN;`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewNumber(math.NaN())")
+	assertContains(t, out, `"math"`)
+}
+
+func TestPromiseGlobal(t *testing.T) {
+	ts := `const p = Promise.resolve(42);`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewObject()")
+	assertNotContains(t, out, "undefined: Promise")
+}
+
+func TestObjectKeysUsesJsobjectAlias(t *testing.T) {
+	ts := `const keys = Object.keys({});`
+	out := compile(t, ts)
+	assertContains(t, out, "jsobject.Keys(")
+	assertContains(t, out, `jsobject "github.com/nnstd/gun/runtime/object"`)
+}
+
+func TestObjectValuesUsesJsobjectAlias(t *testing.T) {
+	ts := `const vals = Object.values({});`
+	out := compile(t, ts)
+	assertContains(t, out, "jsobject.Values(")
+}
+
+func TestObjectEntriesUsesJsobjectAlias(t *testing.T) {
+	ts := `const entries = Object.entries({});`
+	out := compile(t, ts)
+	assertContains(t, out, "jsobject.Entries(")
+}
+
+func TestToStringOnJSValueReturnsJSValue(t *testing.T) {
+	ts := `function f(x: any) { return x.toString(); }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewString(fmt.Sprint(")
+}

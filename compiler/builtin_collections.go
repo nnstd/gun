@@ -257,41 +257,41 @@ func transformObjectCall(prop string, args []ast.Expr, addImport func(string)) a
 	switch prop {
 	case "keys":
 		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("object"), "Keys"), args[0])
+			return callExpr(selectorExpr(ident("jsobject"), "Keys"), args[0])
 		}
 	case "values":
 		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("object"), "Values"), args[0])
+			return callExpr(selectorExpr(ident("jsobject"), "Values"), args[0])
 		}
 	case "entries":
 		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("object"), "Entries"), args[0])
+			return callExpr(selectorExpr(ident("jsobject"), "Entries"), args[0])
 		}
 	case "assign":
 		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("object"), "Assign"), args...)
+			return callExpr(selectorExpr(ident("jsobject"), "Assign"), args...)
 		}
 	case "create":
 		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("object"), "Create"), args[0])
+			return callExpr(selectorExpr(ident("jsobject"), "Create"), args[0])
 		}
-		return callExpr(selectorExpr(ident("object"), "Create"), ident("nil"))
+		return callExpr(selectorExpr(ident("jsobject"), "Create"), ident("nil"))
 	case "defineProperty":
 		if len(args) >= 3 {
-			return callExpr(selectorExpr(ident("object"), "DefineProperty"), args[0], args[1], args[2])
+			return callExpr(selectorExpr(ident("jsobject"), "DefineProperty"), args[0], args[1], args[2])
 		}
 		return ident("nil")
 	case "setPrototypeOf":
 		if len(args) >= 2 {
-			return callExpr(selectorExpr(ident("object"), "SetPrototypeOf"), args[0], args[1])
+			return callExpr(selectorExpr(ident("jsobject"), "SetPrototypeOf"), args[0], args[1])
 		}
 	case "getPrototypeOf":
 		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("object"), "GetPrototypeOf"), args[0])
+			return callExpr(selectorExpr(ident("jsobject"), "GetPrototypeOf"), args[0])
 		}
 	case "freeze":
 		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("object"), "Freeze"), args[0])
+			return callExpr(selectorExpr(ident("jsobject"), "Freeze"), args[0])
 		}
 	}
 	return nil

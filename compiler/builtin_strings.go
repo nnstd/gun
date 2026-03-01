@@ -24,6 +24,11 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 	switch prop {
 	case "toString":
 		addImport("fmt")
+		if wasJSValue {
+			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "NewString"),
+				callExpr(selectorExpr(ident("fmt"), "Sprint"), origObj))
+		}
 		return callExpr(selectorExpr(ident("fmt"), "Sprint"), obj)
 	case "indexOf":
 		if wasJSValue {

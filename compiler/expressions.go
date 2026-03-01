@@ -206,6 +206,14 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 		return &ast.BinaryExpr{X: left, Op: token.NEQ, Y: ident("nil")}
 	}
 
+	// in → obj.HasOwnProperty(key) wrapped as JSValue bool
+	if opText == "in" {
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addImport("fmt")
+		return callExpr(selectorExpr(ident("jsvalue"), "NewBool"),
+			callExpr(selectorExpr(right, "HasOwnProperty"), callExpr(selectorExpr(ident("fmt"), "Sprint"), left)))
+	}
+
 	// When either operand is JSValue, use jsvalue operation helpers.
 	// This eliminates complex type coercion — the helpers handle type semantics internally.
 	if eitherJSValue {
@@ -338,8 +346,47 @@ func (t *Transformer) transformUpdateExpr(node *sitter.Node) ast.Expr {
 }
 
 func (t *Transformer) transformAssignmentExpr(node *sitter.Node) ast.Expr {
-	left := t.transformExpr(node.ChildByFieldName("left"))
-	right := t.transformExpr(node.ChildByFieldName("right"))
+	leftNode := node.ChildByFieldName("left")
+	rightNode := node.ChildByFieldName("right")
+
+	// Handle subscript assignment on JSValue: seen[key] = value → seen.Set(key, value)
+	if leftNode != nil && leftNode.Kind() == "subscript_expression" {
+		subObj := leftNode.ChildByFieldName("object")
+		subIdx := leftNode.ChildByFieldName("index")
+		isJSValueObj := subObj != nil && subObj.Kind() == "identifier" && (t.isUntypedLocal(subObj.Utf8Text(t.source)) || t.isUntypedLocal(sanitizeIdent(subObj.Utf8Text(t.source))))
+		if !isJSValueObj && subObj != nil && t.nodeReturnsJSValue(subObj) {
+			isJSValueObj = true
+		}
+		if isJSValueObj && subIdx != nil {
+			obj := t.transformExpr(subObj)
+			key := t.transformExpr(subIdx)
+			rhs := t.transformExpr(rightNode)
+			if obj != nil && key != nil && rhs != nil {
+				if subIdx.Kind() != "string" && subIdx.Kind() != "string_literal" {
+					t.addImport("fmt")
+					key = callExpr(selectorExpr(ident("fmt"), "Sprint"), key)
+				}
+				rhs = t.wrapAsJSValue(rhs)
+				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+				// IIFE: func() *jsvalue.JSValue { obj.Set(key, rhs); return rhs }()
+				return &ast.CallExpr{
+					Fun: &ast.FuncLit{
+						Type: &ast.FuncType{
+							Params:  fieldList(),
+							Results: fieldList(field("", jsValuePtrType())),
+						},
+						Body: blockStmt(
+							exprStmt(callExpr(selectorExpr(obj, "Set"), key, rhs)),
+							returnStmt(rhs),
+						),
+					},
+				}
+			}
+		}
+	}
+
+	left := t.transformExpr(leftNode)
+	right := t.transformExpr(rightNode)
 	if left == nil || right == nil {
 		return ident("nil")
 	}
@@ -350,9 +397,9 @@ func (t *Transformer) transformAssignmentExpr(node *sitter.Node) ast.Expr {
 	var retType ast.Expr = ident("any")
 	assignRHS := right
 	retExpr := right
-	if leftNode := node.ChildByFieldName("left"); leftNode != nil && leftNode.Kind() == "identifier" {
+	if leftNode != nil && leftNode.Kind() == "identifier" {
 		name := leftNode.Utf8Text(t.source)
-		if t.isUntypedLocal(name) || !t.isLocalName(name) {
+		if t.isUntypedLocal(name) || t.isUntypedLocal(sanitizeIdent(name)) || !t.isLocalName(name) {
 			retType = jsValuePtrType()
 			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 			// Wrap RHS with jsvalue.From() so any-typed expressions
@@ -1420,6 +1467,35 @@ func (t *Transformer) inferNodeResultType(node *sitter.Node) string {
 		return "bool"
 	case "array":
 		return "array"
+	case "unary_expression":
+		// -1, +1 etc. are numeric
+		op := node.ChildByFieldName("operator")
+		arg := node.ChildByFieldName("argument")
+		if op != nil && arg != nil {
+			opText := op.Utf8Text(t.source)
+			if (opText == "-" || opText == "+") && arg.Kind() == "number" {
+				return "int"
+			}
+		}
+	case "ternary_expression":
+		// Infer from branches of nested ternary
+		cons := node.ChildByFieldName("consequence")
+		alt := node.ChildByFieldName("alternative")
+		a := t.inferNodeResultType(cons)
+		b := t.inferNodeResultType(alt)
+		if a != "" && a == b {
+			return a
+		}
+		if a != "" {
+			return a
+		}
+		if b != "" {
+			return b
+		}
+	case "parenthesized_expression":
+		if node.NamedChildCount() > 0 {
+			return t.inferNodeResultType(node.NamedChild(0))
+		}
 	case "binary_expression":
 		if isStringLitNode(node) {
 			return "string"
@@ -1507,6 +1583,15 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 
 func (t *Transformer) transformFuncExpr(node *sitter.Node) ast.Expr {
 	paramsNode := node.ChildByFieldName("parameters")
+	bodyNode := node.ChildByFieldName("body")
+
+	// Check if the function body uses 'this' (not arrow functions — they don't bind 'this')
+	usesThis := nodeUsesThis(bodyNode)
+	if usesThis {
+		t.addToCurrentScope("this", false)
+		t.jsvalueLocals["this"] = true
+	}
+
 	params, paramStmts := t.transformParams(paramsNode)
 
 	// Push a typed scope so isUntypedLocal works correctly inside the body.
@@ -1521,8 +1606,8 @@ func (t *Transformer) transformFuncExpr(node *sitter.Node) ast.Expr {
 	}
 
 	var body *ast.BlockStmt
-	if bn := node.ChildByFieldName("body"); bn != nil {
-		body = t.transformBlock(bn)
+	if bodyNode != nil {
+		body = t.transformBlock(bodyNode)
 	} else {
 		body = blockStmt()
 	}
@@ -1541,12 +1626,26 @@ func (t *Transformer) transformFuncExpr(node *sitter.Node) ast.Expr {
 
 	ensureTrailingReturn(body, results)
 
+	// If the function uses 'this', add it as the first parameter so the
+	// wrapper extracts it from _args[0] (matching .Call(receiver, args...) convention)
+	if usesThis {
+		thisField := field("this", ptrType(selectorExpr(ident("jsvalue"), "JSValue")))
+		if params == nil {
+			params = fieldList(thisField)
+		} else {
+			params.List = append([]*ast.Field{thisField}, params.List...)
+		}
+	}
+
 	fnLit := &ast.FuncLit{
 		Type: &ast.FuncType{Params: params, Results: results},
 		Body: body,
 	}
 
 	paramNames := extractParamNames(paramsNode, t.source)
+	if usesThis {
+		paramNames = append([]string{"this"}, paramNames...)
+	}
 	return t.wrapFuncLitAsJSValue(fnLit, paramNames)
 }
 
