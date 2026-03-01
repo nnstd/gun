@@ -559,7 +559,7 @@ func extractParamNames(node *sitter.Node, source []byte) []string {
 		case "required_parameter", "optional_parameter":
 			nameNode := param.ChildByFieldName("pattern")
 			if nameNode != nil && nameNode.Kind() == "identifier" {
-				names = append(names, nameNode.Utf8Text(source))
+				names = append(names, sanitizeIdent(nameNode.Utf8Text(source)))
 			} else if nameNode != nil && nameNode.Kind() == "rest_pattern" {
 				// ...args inside required_parameter
 				for j := uint(0); j < nameNode.NamedChildCount(); j++ {
@@ -620,7 +620,7 @@ func extractParamInfo(node *sitter.Node, source []byte) map[string]bool {
 		case "required_parameter", "optional_parameter":
 			nameNode := param.ChildByFieldName("pattern")
 			if nameNode != nil && nameNode.Kind() == "identifier" {
-				info[nameNode.Utf8Text(source)] = false // all-JSValue: always untyped
+				info[sanitizeIdent(nameNode.Utf8Text(source))] = false // all-JSValue: always untyped
 			}
 			if nameNode != nil && (nameNode.Kind() == "object_pattern" || nameNode.Kind() == "array_pattern") {
 				info[fmt.Sprintf("_param%d", i)] = false
@@ -628,7 +628,7 @@ func extractParamInfo(node *sitter.Node, source []byte) map[string]bool {
 		case "rest_parameter":
 			nameNode := param.ChildByFieldName("pattern")
 			if nameNode != nil {
-				info[nameNode.Utf8Text(source)] = false
+				info[sanitizeIdent(nameNode.Utf8Text(source))] = false
 			}
 		case "identifier":
 			info[param.Utf8Text(source)] = false

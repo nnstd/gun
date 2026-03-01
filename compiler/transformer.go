@@ -184,11 +184,15 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 	switch node.Kind() {
 	case "identifier":
 		name := node.Utf8Text(t.source)
-		if t.isUntypedLocal(name) || t.jsvalueLocals[name] {
+		sanitized := sanitizeIdent(name)
+		if t.isUntypedLocal(name) || t.isUntypedLocal(sanitized) || t.jsvalueLocals[name] || t.jsvalueLocals[sanitized] {
 			return true
 		}
 		// Package-level untyped variables are also JSValue
 		if typed, ok := t.pkgVarTyped[name]; ok && !typed {
+			return true
+		}
+		if typed, ok := t.pkgVarTyped[sanitized]; ok && !typed {
 			return true
 		}
 		return false

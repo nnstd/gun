@@ -275,9 +275,11 @@ func (t *Transformer) resolveModulePath(modulePath string) moduleMapping {
 // resolveIdentifier checks if a name was imported from a TS module and returns
 // the appropriate Go expression. Falls back to builtin identifier mapping.
 func (t *Transformer) resolveIdentifier(name string) ast.Expr {
-	// Local parameters/variables shadow imports
-	if t.isLocalName(name) {
-		return ident(sanitizeIdent(name))
+	// Local parameters/variables shadow imports.
+	// Check both raw name and sanitized name (e.g. "string" → "string_").
+	sanitized := sanitizeIdent(name)
+	if t.isLocalName(name) || t.isLocalName(sanitized) {
+		return ident(sanitized)
 	}
 	// Exported package-level variables are capitalized in Go declarations.
 	// Reference them with the capitalized name.
