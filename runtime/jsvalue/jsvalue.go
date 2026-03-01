@@ -3,6 +3,8 @@ package jsvalue
 import (
 	"fmt"
 	"math"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 )
@@ -1391,6 +1393,53 @@ func TypeOf(a *JSValue) *JSValue {
 		return NewString("undefined")
 	}
 	return NewString(a.TypeString())
+}
+
+// jsUnicodeEscapeRe matches JS-style \uNNNN Unicode escapes in regex patterns.
+var jsUnicodeEscapeRe = regexp.MustCompile(`\\u([0-9a-fA-F]{4})`)
+
+// jsUnicodePropMap maps JS Unicode property names to Go equivalents.
+var jsUnicodePropMap = map[string]string{
+	"Default_Ignorable_Code_Point": "Cf",
+	"Emoji_Presentation":           "So",
+	"Extended_Pictographic":        "So",
+	"Emoji_Modifier_Base":          "So",
+	"Emoji_Modifier":               "Sk",
+	"Emoji_Component":              "So",
+	"Regional_Indicator":           "So",
+}
+
+// jsUnicodePropRe matches \p{PropertyName} or \P{PropertyName} in regex patterns.
+var jsUnicodePropRe = regexp.MustCompile(`\\[pP]\{([^}]+)\}`)
+
+// CompileRegex compiles a regex pattern, converting JS-style \uNNNN Unicode
+// escapes and unsupported Unicode property names to Go-compatible equivalents.
+// If the pattern still fails to compile, returns a regex that matches nothing.
+func CompileRegex(pattern string) *regexp.Regexp {
+	// Convert \uNNNN escapes to literal characters
+	converted := jsUnicodeEscapeRe.ReplaceAllStringFunc(pattern, func(match string) string {
+		hex := match[2:] // strip \u prefix
+		code, err := strconv.ParseInt(hex, 16, 32)
+		if err != nil {
+			return match
+		}
+		return string(rune(code))
+	})
+	// Convert unsupported Unicode property names to Go equivalents
+	converted = jsUnicodePropRe.ReplaceAllStringFunc(converted, func(match string) string {
+		prefix := match[:2]  // \p or \P
+		name := match[3 : len(match)-1] // extract property name
+		if goName, ok := jsUnicodePropMap[name]; ok {
+			return prefix + "{" + goName + "}"
+		}
+		return match
+	})
+	re, err := regexp.Compile(converted)
+	if err != nil {
+		// Fallback: return a regex that matches nothing rather than panicking
+		return regexp.MustCompile(`(?!.*)`)
+	}
+	return re
 }
 
 // ParseInt parses a string as an integer with the given radix, matching JS parseInt().

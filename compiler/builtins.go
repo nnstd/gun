@@ -163,7 +163,8 @@ func transformBuiltinNew(name string, args []ast.Expr, t *Transformer) ast.Expr 
 			t.addImport("fmt")
 			pattern = callExpr(selectorExpr(ident("fmt"), "Sprint"), args[0])
 		}
-		compiled := callExpr(selectorExpr(ident("regexp"), "MustCompile"), pattern)
+		// Use jsvalue.CompileRegex to handle JS-style \uNNNN escapes
+		compiled := callExpr(selectorExpr(ident("jsvalue"), "CompileRegex"), pattern)
 		// Flags argument: consume but ignore (Go regex doesn't support JS flags like "g")
 		if len(args) > 1 {
 			compiled = &ast.CallExpr{

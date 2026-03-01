@@ -537,13 +537,13 @@ func TestLogicalAndWithComparisonsIsTyped(t *testing.T) {
 }
 
 func TestRegexLiteralIsJSValue(t *testing.T) {
-	// Regex literals produce jsvalue.NewRegex wrapping regexp.MustCompile.
+	// Regex literals produce jsvalue.NewRegex wrapping jsvalue.CompileRegex.
 	ts := `function f(s: string) {
 	const re = /^hello/;
 	return re.test(s);
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.NewRegex(regexp.MustCompile(")
+	assertContains(t, out, "jsvalue.NewRegex(jsvalue.CompileRegex(")
 	assertContains(t, out, "jsvalue.MatchString(re,")
 }
 

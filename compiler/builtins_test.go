@@ -137,7 +137,7 @@ func TestRegexTest(t *testing.T) {
 	ts := `const re = /hello/;
 function check(s: string): boolean { return re.test(s); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.NewRegex(regexp.MustCompile(")
+	assertContains(t, out, "jsvalue.NewRegex(jsvalue.CompileRegex(")
 	assertContains(t, out, "jsvalue.MatchString(re,")
 }
 
@@ -307,7 +307,7 @@ func TestMatchOnJSValueUsesRegexpCompile(t *testing.T) {
 	// arg.match(pattern) where both are JSValue compiles regex from pattern.
 	ts := `function f(arg, pattern) { return arg.match(pattern); }`
 	out := compile(t, ts)
-	assertContains(t, out, "regexp.MustCompile(")
+	assertContains(t, out, "jsvalue.CompileRegex(")
 	assertContains(t, out, "FindStringSubmatch")
 	assertNotContains(t, out, "pattern.FindStringSubmatch")
 }
@@ -330,7 +330,7 @@ func TestRegExpPatternUnwrapsJSValue(t *testing.T) {
 	// new RegExp(jsValueExpr) coerces arg to string via fmt.Sprint.
 	ts := `function f(prefix) { return new RegExp("^" + prefix + "$"); }`
 	out := compile(t, ts)
-	assertContains(t, out, "regexp.MustCompile(fmt.Sprint(")
+	assertContains(t, out, "jsvalue.CompileRegex(fmt.Sprint(")
 }
 
 func TestProcessVersionMember(t *testing.T) {

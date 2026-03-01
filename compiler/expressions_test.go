@@ -58,7 +58,7 @@ func TestNewExpression(t *testing.T) {
 func TestRegexLiteral(t *testing.T) {
 	ts := `const re = /^file:\/\//;`
 	out := compile(t, ts)
-	assertContains(t, out, "regexp.MustCompile")
+	assertContains(t, out, "jsvalue.CompileRegex")
 	assertContains(t, out, "`^file:\\/\\/`")
 }
 

@@ -149,8 +149,9 @@ func (t *Transformer) transformExpr(node *sitter.Node) ast.Expr {
 			}
 		}
 		// Wrap in jsvalue.NewRegex for all-JSValue consistency
+		// Use jsvalue.CompileRegex to handle JS-style \uNNNN escapes
 		compiled := callExpr(
-			selectorExpr(ident("regexp"), "MustCompile"),
+			selectorExpr(ident("jsvalue"), "CompileRegex"),
 			basicLit(token.STRING, "`"+pattern+"`"),
 		)
 		return callExpr(selectorExpr(ident("jsvalue"), "NewRegex"), compiled)

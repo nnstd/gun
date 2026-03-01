@@ -217,12 +217,11 @@ func transformStringMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 				// JSValue receiver: use MatchString for the match check.
 				// For full match result, use fmt.Sprint coercion on the regex arg.
 				addImport("fmt")
-				addImport("regexp")
 				addImport("github.com/nnstd/gun/runtime/jsvalue")
 				// Convert JSValue regex pattern to *regexp.Regexp and use FindStringSubmatch
 				return callExpr(
 					selectorExpr(
-						callExpr(selectorExpr(ident("regexp"), "MustCompile"),
+						callExpr(selectorExpr(ident("jsvalue"), "CompileRegex"),
 							callExpr(selectorExpr(ident("fmt"), "Sprint"), args[0])),
 						"FindStringSubmatch"),
 					callExpr(selectorExpr(ident("fmt"), "Sprint"), origObj))
