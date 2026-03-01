@@ -62,6 +62,10 @@ func transformGlobalCall(name string, args []ast.Expr, t *Transformer) ast.Expr 
 			return callExpr(selectorExpr(args[0], "Number"))
 		}
 		return basicLit(token.FLOAT, "0")
+	case "Array":
+		// Array(n) → jsvalue.NewArray() — creates empty array (length handled at runtime)
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		return callExpr(selectorExpr(ident("jsvalue"), "NewArray"))
 	}
 	if isErrorType(name) {
 		// Error("msg") → jserror.Error.Call(msg) — JS spec: Error() without new also creates Error
@@ -116,11 +120,9 @@ func transformBuiltinNew(name string, args []ast.Expr, t *Transformer) ast.Expr 
 		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		pattern := ast.Expr(stringLit(""))
 		if len(args) > 0 {
-			pattern = args[0]
-			// If pattern is a JSValue expression, unwrap to string for regexp.MustCompile
-			if isAlreadyJSValue(pattern) {
-				pattern = callExpr(selectorExpr(pattern, "String"))
-			}
+			// Always coerce to string — in all-JSValue mode all args are *jsvalue.JSValue
+			t.addImport("fmt")
+			pattern = callExpr(selectorExpr(ident("fmt"), "Sprint"), args[0])
 		}
 		compiled := callExpr(selectorExpr(ident("regexp"), "MustCompile"), pattern)
 		// Flags argument: consume but ignore (Go regex doesn't support JS flags like "g")

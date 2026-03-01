@@ -174,19 +174,14 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 								return exprStmt(callExpr(selectorExpr(obj, "Set"), key, newVal))
 							}
 						}
-						// When the LHS is a JSValue expression (subscript on JSValue slice,
-						// untyped local), convert += to regular assignment with string concat:
-						// lhs += rhs → lhs = jsvalue.From(fmt.Sprint(lhs) + fmt.Sprint(rhs))
-						if t.nodeReturnsJSValue(leftNode) && opText == "+=" {
-							t.addImport("fmt")
+						// Augmented assignment on JSValue: lhs += rhs → lhs = jsvalue.Add(lhs, rhs)
+						// Handles +=, -=, *=, /=, %=, etc.
+						if (t.nodeReturnsJSValue(leftNode) || t.isPkgLevelVar(leftNode)) && isAugmentedAssignOp(opText) {
 							t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-							concat := &ast.BinaryExpr{
-								X:  callExpr(selectorExpr(ident("fmt"), "Sprint"), lhs),
-								Op: token.ADD,
-								Y:  callExpr(selectorExpr(ident("fmt"), "Sprint"), rhs),
-							}
+							helperName := augmentedOpToJSValueHelper(opText)
+							wrappedRhs := jsvalueWrapLit(rhs)
 							return assignStmt([]ast.Expr{lhs}, []ast.Expr{
-								callExpr(selectorExpr(ident("jsvalue"), "From"), concat),
+								callExpr(selectorExpr(ident("jsvalue"), helperName), lhs, wrappedRhs),
 							})
 						}
 						return &ast.AssignStmt{

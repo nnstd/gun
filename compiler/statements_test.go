@@ -184,14 +184,14 @@ func TestForLoopUpdateExpression(t *testing.T) {
 }
 
 func TestAugmentedAssignJSValueToString(t *testing.T) {
-	// In all-JSValue mode, += on string-initialized var uses jsvalue.From with string concat
+	// In all-JSValue mode, += on JSValue var uses jsvalue.Add
 	ts := `function f(item) {
 	let result = "";
 	result += item;
 	return result;
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "result = jsvalue.From(fmt.Sprint(result) + fmt.Sprint(item))")
+	assertContains(t, out, "result = jsvalue.Add(result,")
 }
 
 func TestAugmentedAssignJSValueToNumber(t *testing.T) {

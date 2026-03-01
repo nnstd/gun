@@ -119,3 +119,41 @@ func jsvalueOpName(op token.Token) string {
 	}
 }
 
+// isAugmentedAssignOp returns true if the operator is an augmented assignment.
+func isAugmentedAssignOp(op string) bool {
+	switch op {
+	case "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", ">>>=":
+		return true
+	}
+	return false
+}
+
+// augmentedOpToJSValueHelper maps augmented assignment operators to jsvalue helper names.
+func augmentedOpToJSValueHelper(op string) string {
+	switch op {
+	case "+=":
+		return "Add"
+	case "-=":
+		return "Sub"
+	case "*=":
+		return "Mul"
+	case "/=":
+		return "Div"
+	case "%=":
+		return "Mod"
+	case "&=":
+		return "BitAnd"
+	case "|=":
+		return "BitOr"
+	case "^=":
+		return "BitXor"
+	case "<<=":
+		return "Shl"
+	case ">>=":
+		return "Shr"
+	case ">>>=":
+		return "UShr"
+	}
+	return "Add"
+}
+

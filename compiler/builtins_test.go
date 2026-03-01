@@ -327,11 +327,10 @@ func TestIndexOfOnComplexReceiverReturnsJSValue(t *testing.T) {
 }
 
 func TestRegExpPatternUnwrapsJSValue(t *testing.T) {
-	// new RegExp(jsValueExpr) where arg is jsvalue.Add → .String() unwrap.
+	// new RegExp(jsValueExpr) coerces arg to string via fmt.Sprint.
 	ts := `function f(prefix) { return new RegExp("^" + prefix + "$"); }`
 	out := compile(t, ts)
-	assertContains(t, out, "regexp.MustCompile(")
-	assertContains(t, out, ".String()")
+	assertContains(t, out, "regexp.MustCompile(fmt.Sprint(")
 }
 
 func TestProcessVersionMember(t *testing.T) {
