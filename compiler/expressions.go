@@ -873,7 +873,7 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 	}
 	// JSValue arrays can't be indexed directly; use .Index() for numeric
 	// keys and .Get() for string keys.
-	isJSValueObj := objNode != nil && objNode.Kind() == "identifier" && t.isUntypedLocal(objNode.Utf8Text(t.source))
+	isJSValueObj := objNode != nil && objNode.Kind() == "identifier" && (t.isUntypedLocal(objNode.Utf8Text(t.source)) || t.jsvalueLocals[objNode.Utf8Text(t.source)])
 	// Also catch call expressions that return JSValue (e.g. arg.Slice(-1)[0]).
 	if !isJSValueObj && objNode != nil && t.nodeReturnsJSValue(objNode) {
 		isJSValueObj = true

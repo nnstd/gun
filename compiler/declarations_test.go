@@ -760,12 +760,12 @@ func TestClassMethodReceivesThis(t *testing.T) {
 }
 
 func TestClassMethodRestParams(t *testing.T) {
-	// Class methods with rest params should extract them as a slice from _args.
+	// Class methods with rest params wrapped as JSValue array from _args.
 	ts := `class Foo {
 	add(...items) { return items; }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "items := _args[1:]")
+	assertContains(t, out, "jsvalue.NewArray(_args[1:]...)")
 }
 
 func TestClassMethodThisCallUsesGetCall(t *testing.T) {

@@ -30,7 +30,8 @@ func TestForInLoop(t *testing.T) {
 		for (const k in obj) { console.log(k); }
 	}`
 	out := compile(t, ts)
-	assertContains(t, out, "for k := range obj")
+	// for-in on JSValue uses .OwnKeys() for property enumeration
+	assertContains(t, out, "for _, k := range obj.OwnKeys()")
 }
 
 func TestWhileLoop(t *testing.T) {

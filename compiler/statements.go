@@ -576,12 +576,17 @@ func (t *Transformer) transformForInOrOfStmt(node *sitter.Node) ast.Stmt {
 		}
 	}
 
-	// for (const k in obj) → for k := range obj
+	// for (const k in obj) → for _, k := range obj.OwnKeys()
+	// JSValue objects can't be ranged over directly; use OwnKeys() for property names.
+	if t.nodeReturnsJSValue(rightNode) || t.isPkgLevelVar(rightNode) {
+		x = callExpr(selectorExpr(x, "OwnKeys"))
+	}
 	return &ast.RangeStmt{
-		Key:  ident(varName),
-		Tok:  token.DEFINE,
-		X:    x,
-		Body: body,
+		Key:   ident("_"),
+		Value: ident(varName),
+		Tok:   token.DEFINE,
+		X:     x,
+		Body:  body,
 	}
 }
 

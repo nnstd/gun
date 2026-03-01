@@ -231,6 +231,18 @@ func (t *Transformer) buildMethodSetup(className, methodName string, node *sitte
 	t.inClassMethod = !isStatic
 	defer func() { t.inClassMethod = prevInClassMethod }()
 
+	// Pre-register rest params as JSValue locals BEFORE body transformation
+	// so subscript access (args[0]) uses .Index() instead of Go bracket indexing.
+	if paramsNode != nil {
+		restFlags := extractRestFlags(paramsNode, t.source)
+		paramNames := extractParamNames(paramsNode, t.source)
+		for i, pName := range paramNames {
+			if i < len(restFlags) && restFlags[i] {
+				t.jsvalueLocals[sanitizeIdent(pName)] = true
+			}
+		}
+	}
+
 	// Build the function body
 	var body *ast.BlockStmt
 	if bodyNode != nil {
@@ -280,16 +292,17 @@ func (t *Transformer) buildMethodSetup(className, methodName string, node *sitte
 			pName = sanitizeIdent(pName)
 			idx := i + offset
 			if i < len(isRest) && isRest[i] {
-				// Rest param: args = _args[idx:]
-				t.jsvalueSliceLocals[pName] = true
+				// Rest param: args = jsvalue.NewArray(_args[idx:]...)
+				// Wrapped as JSValue array so .Get(), .Len() etc. work.
+				t.jsvalueLocals[pName] = true
+				newArrayCall := callExpr(selectorExpr(ident("jsvalue"), "NewArray"),
+					&ast.SliceExpr{X: ident("_args"), Low: intLit(itoa(idx))})
+				newArrayCall.Ellipsis = 1 // spread: NewArray(_args[idx:]...)
 				argUnpackStmts = append(argUnpackStmts,
 					&ast.AssignStmt{
 						Lhs: []ast.Expr{ident(pName)},
 						Tok: token.DEFINE,
-						Rhs: []ast.Expr{&ast.SliceExpr{
-							X:   ident("_args"),
-							Low: intLit(itoa(idx)),
-						}},
+						Rhs: []ast.Expr{newArrayCall},
 					},
 				)
 			} else {
