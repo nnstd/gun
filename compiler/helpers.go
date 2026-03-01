@@ -395,6 +395,98 @@ func wrapExprWithJSValue(expr ast.Expr) ast.Expr {
 	return callExpr(selectorExpr(ident("jsvalue"), "From"), expr)
 }
 
+// exprReferencesName checks if a Go AST expression references a standalone
+// identifier with the given name (not as a selector field like pkg.Name).
+// Used to detect self-referencing variables that would cause initialization cycles.
+func exprReferencesName(expr ast.Expr, name string) bool {
+	// Collect all idents that are selector Sel fields — these are NOT references
+	selectorFields := make(map[*ast.Ident]bool)
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if sel, ok := n.(*ast.SelectorExpr); ok {
+			selectorFields[sel.Sel] = true
+		}
+		return true
+	})
+
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		if id, ok := n.(*ast.Ident); ok && id.Name == name && !selectorFields[id] {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+// fixInitCycles splits self-referencing package-level var declarations into
+// forward declarations + init() assignments to avoid Go initialization cycles.
+// e.g. var f = jsvalue.NewFunction(... f.Call() ...) → var f *jsvalue.JSValue + init() { f = ... }
+func (t *Transformer) fixInitCycles(decls []ast.Decl) []ast.Decl {
+	var result []ast.Decl
+	var initStmts []ast.Stmt
+
+	for _, d := range decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || gd.Tok != token.VAR {
+			result = append(result, d)
+			continue
+		}
+		hasCycle := false
+		for _, spec := range gd.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok || len(vs.Names) == 0 || len(vs.Values) == 0 {
+				continue
+			}
+			name := vs.Names[0].Name
+			if exprReferencesName(vs.Values[0], name) {
+				hasCycle = true
+				break
+			}
+		}
+		if !hasCycle {
+			result = append(result, d)
+			continue
+		}
+		// Split: forward declare with type, assign in init()
+		for _, spec := range gd.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok || len(vs.Names) == 0 {
+				continue
+			}
+			name := vs.Names[0].Name
+			if len(vs.Values) > 0 && exprReferencesName(vs.Values[0], name) {
+				// Forward declare with explicit type
+				typ := vs.Type
+				if typ == nil {
+					typ = jsValuePtrType()
+					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+				}
+				result = append(result, varDecl(name, typ, nil))
+				initStmts = append(initStmts, assignStmt(
+					[]ast.Expr{ident(name)}, []ast.Expr{vs.Values[0]},
+				))
+			} else {
+				// No cycle — keep as-is
+				result = append(result, &ast.GenDecl{
+					Tok:   token.VAR,
+					Specs: []ast.Spec{vs},
+				})
+			}
+		}
+	}
+
+	if len(initStmts) > 0 {
+		initFn := funcDecl("init", fieldList(), nil, &ast.BlockStmt{List: initStmts})
+		result = append(result, initFn)
+	}
+
+	return result
+}
+
 // funcDeclToJSValueVar converts a Go func declaration into a var declaration
 // with jsvalue.NewFunction wrapping: func Foo(a, b) R { body } →
 // var Foo = jsvalue.NewFunction(func(_args ...*jsvalue.JSValue) *jsvalue.JSValue { ... })

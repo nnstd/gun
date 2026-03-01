@@ -73,6 +73,10 @@ func (t *Transformer) transform(root *sitter.Node) *ast.File {
 		t.getOrCreateMain()
 	}
 
+	// Fix initialization cycles: split self-referencing var declarations into
+	// forward declaration + init() assignment.
+	t.decls = t.fixInitCycles(t.decls)
+
 	file := &ast.File{
 		Name:  ident(t.pkgName),
 		Decls: t.decls,
