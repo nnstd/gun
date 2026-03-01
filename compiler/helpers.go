@@ -727,6 +727,9 @@ func extractParamNames(node *sitter.Node, source []byte) []string {
 						break
 					}
 				}
+			} else if nameNode != nil && (nameNode.Kind() == "object_pattern" || nameNode.Kind() == "array_pattern") {
+				// Destructured param: {a, b} or [a, b] → synthetic _param{i}
+				names = append(names, fmt.Sprintf("_param%d", i))
 			}
 		case "rest_parameter":
 			nameNode := param.ChildByFieldName("pattern")

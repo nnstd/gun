@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
 
@@ -328,6 +329,27 @@ func (t *Transformer) buildMethodSetup(className, methodName string, node *sitte
 			}
 		}
 	}
+
+	// Handle destructured params: { a, b } or [a, b] patterns
+	// After extracting _param0 from _args, destructure it into individual vars
+	if paramsNode != nil {
+		paramIdx := 0
+		for i := uint(0); i < paramsNode.NamedChildCount(); i++ {
+			param := paramsNode.NamedChild(i)
+			var nameNode *sitter.Node
+			switch param.Kind() {
+			case "required_parameter", "optional_parameter":
+				nameNode = param.ChildByFieldName("pattern")
+			}
+			if nameNode != nil && (nameNode.Kind() == "object_pattern" || nameNode.Kind() == "array_pattern") {
+				syntheticName := fmt.Sprintf("_param%d", paramIdx)
+				stmts := t.transformDestructuringFromExpr(nameNode, ident(syntheticName))
+				argUnpackStmts = append(argUnpackStmts, stmts...)
+			}
+			paramIdx++
+		}
+	}
+
 	body.List = append(argUnpackStmts, body.List...)
 
 	params := fieldList(&ast.Field{
