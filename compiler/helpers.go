@@ -353,6 +353,8 @@ func wrapReturnStmts(stmts []ast.Stmt) {
 			wrapReturnStmts(s.Body.List)
 			if es, ok := s.Else.(*ast.BlockStmt); ok {
 				wrapReturnStmts(es.List)
+			} else if ei, ok := s.Else.(*ast.IfStmt); ok {
+				wrapReturnStmts([]ast.Stmt{ei})
 			}
 		case *ast.BlockStmt:
 			wrapReturnStmts(s.List)

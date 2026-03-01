@@ -255,6 +255,8 @@ func (t *Transformer) buildMethodSetup(className, methodName string, node *sitte
 					}),
 				),
 			},
+			// Suppress "declared and not used" if body doesn't reference this
+			assignStmt([]ast.Expr{ident("_")}, []ast.Expr{ident("this")}),
 		)
 	}
 
