@@ -1203,6 +1203,32 @@ func (t *Transformer) transformTemplateString(node *sitter.Node) ast.Expr {
 			}
 		case "`":
 			// skip backticks
+		case "escape_sequence":
+			// Template string escape sequences → their literal values
+			text := child.Utf8Text(t.source)
+			switch text {
+			case `\$`:
+				formatParts = append(formatParts, "$")
+			case `\n`:
+				formatParts = append(formatParts, "\n")
+			case `\t`:
+				formatParts = append(formatParts, "\t")
+			case `\\`:
+				formatParts = append(formatParts, `\`)
+			case `\"`:
+				formatParts = append(formatParts, `"`)
+			case `\'`:
+				formatParts = append(formatParts, `'`)
+			case "\\`":
+				formatParts = append(formatParts, "`")
+			default:
+				// Strip the leading backslash for unknown escapes
+				if len(text) > 1 && text[0] == '\\' {
+					formatParts = append(formatParts, text[1:])
+				} else {
+					formatParts = append(formatParts, text)
+				}
+			}
 		default:
 			if child.IsNamed() {
 				formatParts = append(formatParts, "%v")
@@ -1216,6 +1242,52 @@ func (t *Transformer) transformTemplateString(node *sitter.Node) ast.Expr {
 	format := strings.Join(formatParts, "")
 	// Escape double quotes so the format string is a valid Go string literal
 	format = strings.ReplaceAll(format, `"`, `\"`)
+
+	// No interpolations — return plain string literal
+	if len(args) == 0 {
+		// Use backtick raw string if it contains newlines (Go "" can't have newlines)
+		if strings.Contains(format, "\n") && !strings.Contains(format, "`") {
+			// Undo the \" escaping for raw strings (backtick strings are raw)
+			raw := strings.ReplaceAll(format, `\"`, `"`)
+			return basicLit(token.STRING, "`"+raw+"`")
+		}
+		return basicLit(token.STRING, `"`+format+`"`)
+	}
+
+	t.addImport("fmt")
+	// Escape real newlines/tabs as Go escape sequences.
+	// Also escape literal backslashes that aren't already part of Go escapes.
+	var escaped strings.Builder
+	for i := 0; i < len(format); i++ {
+		ch := format[i]
+		switch ch {
+		case '\n':
+			escaped.WriteString(`\n`)
+		case '\t':
+			escaped.WriteString(`\t`)
+		case '\r':
+			escaped.WriteString(`\r`)
+		case '\\':
+			// Check if already a valid Go escape sequence
+			if i+1 < len(format) {
+				next := format[i+1]
+				if next == 'n' || next == 't' || next == 'r' || next == '"' || next == '\\' || next == 'u' || next == 'x' {
+					escaped.WriteByte(ch)
+					continue
+				}
+			}
+			escaped.WriteString(`\\`)
+		default:
+			escaped.WriteByte(ch)
+		}
+	}
+	format = escaped.String()
+	// Escape literal % signs so they don't get interpreted by Sprintf
+	format = strings.ReplaceAll(format, "%", "%%")
+	// Restore %v placeholders (they were added as "%v" but we escaped all %)
+	for range args {
+		format = strings.Replace(format, "%%v", "%v", 1)
+	}
 	allArgs := append([]ast.Expr{stringLit(format)}, args...)
 	return callExpr(selectorExpr(ident("fmt"), "Sprintf"), allArgs...)
 }
