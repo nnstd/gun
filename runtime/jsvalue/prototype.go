@@ -56,6 +56,73 @@ func init() {
 		prototype:  ObjectPrototype,
 	}
 
+	// Built-in methods on FunctionPrototype.
+	FunctionPrototype.DefineProperty("bind", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			// bind(thisArg, ...boundArgs) → returns a new function
+			// args[0] = the original function (this), args[1] = thisArg, args[2:] = bound args
+			if len(args) < 2 {
+				return NewUndefined()
+			}
+			origFn := args[0]
+			thisArg := args[1]
+			boundArgs := args[2:]
+			if origFn == nil || origFn.funcVal == nil {
+				return NewUndefined()
+			}
+			return NewFunction(func(callArgs ...*JSValue) *JSValue {
+				// Prepend thisArg and boundArgs before callArgs
+				all := make([]*JSValue, 0, 1+len(boundArgs)+len(callArgs))
+				all = append(all, thisArg)
+				all = append(all, boundArgs...)
+				all = append(all, callArgs...)
+				return origFn.funcVal(all...)
+			})
+		}),
+		Writable:     true,
+		Enumerable:   false,
+		Configurable: true,
+	})
+	FunctionPrototype.DefineProperty("call", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			// call(thisArg, ...callArgs) → calls the function
+			if len(args) < 1 {
+				return NewUndefined()
+			}
+			origFn := args[0]
+			if origFn == nil || origFn.funcVal == nil {
+				return NewUndefined()
+			}
+			return origFn.funcVal(args[1:]...)
+		}),
+		Writable:     true,
+		Enumerable:   false,
+		Configurable: true,
+	})
+	FunctionPrototype.DefineProperty("apply", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			// apply(thisArg, argsArray) → calls the function
+			if len(args) < 1 {
+				return NewUndefined()
+			}
+			origFn := args[0]
+			if origFn == nil || origFn.funcVal == nil {
+				return NewUndefined()
+			}
+			callArgs := []*JSValue{}
+			if len(args) >= 2 {
+				callArgs = append(callArgs, args[1]) // thisArg
+			}
+			if len(args) >= 3 && args[2] != nil && args[2].arrayVal != nil {
+				callArgs = append(callArgs, args[2].arrayVal...)
+			}
+			return origFn.funcVal(callArgs...)
+		}),
+		Writable:     true,
+		Enumerable:   false,
+		Configurable: true,
+	})
+
 	// Built-in methods on ObjectPrototype.
 	ObjectPrototype.DefineProperty("toString", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {

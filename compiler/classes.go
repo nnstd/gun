@@ -509,15 +509,14 @@ func (t *Transformer) transformClassMethodWithDynamicName(className string, memb
 	}
 	fnVal := callExpr(selectorExpr(ident("jsvalue"), "NewFunction"), fnLit)
 
-	// Build the .Set(fmt.Sprint(symName), fn) call
-	t.addImport("fmt")
+	// Build the .Set(jsvalue.PropertyKey(symName), fn) call
 	var target ast.Expr
 	if isStatic {
 		target = ident(className)
 	} else {
 		target = callExpr(selectorExpr(ident(className), "Get"), stringLit("prototype"))
 	}
-	key := callExpr(selectorExpr(ident("fmt"), "Sprint"), ident(symName))
+	key := callExpr(selectorExpr(ident("jsvalue"), "PropertyKey"), ident(symName))
 	return exprStmt(callExpr(selectorExpr(target, "Set"), key, fnVal))
 }
 

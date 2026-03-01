@@ -1095,11 +1095,11 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 		if indexNode != nil && (indexNode.Kind() == "string" || indexNode.Kind() == "string_literal") {
 			return callExpr(selectorExpr(obj, "Get"), index)
 		}
-		// If the index is itself a JSValue (untyped local), use .Get() with string coercion
-		// since .Index() expects int.
+		// If the index is itself a JSValue (untyped local), use .Get() with PropertyKey
+		// to correctly handle Symbol keys.
 		if indexNode != nil && indexNode.Kind() == "identifier" && t.isUntypedLocal(indexNode.Utf8Text(t.source)) {
-			t.addImport("fmt")
-			return callExpr(selectorExpr(obj, "Get"), callExpr(selectorExpr(ident("fmt"), "Sprint"), index))
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			return callExpr(selectorExpr(obj, "Get"), callExpr(selectorExpr(ident("jsvalue"), "PropertyKey"), index))
 		}
 		// Typed locals could be strings (e.g. notFlagsArgv); use .Get() with fmt.Sprint.
 		if indexNode != nil && indexNode.Kind() == "identifier" && t.isTypedLocal(indexNode.Utf8Text(t.source)) {
@@ -1110,10 +1110,10 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 		if indexNode != nil && indexNode.Kind() == "number" {
 			return callExpr(selectorExpr(obj, "Index"), index)
 		}
-		// Everything else (call expressions, etc.) — use .Get() with fmt.Sprint
-		// since the result may be a string, not an int.
-		t.addImport("fmt")
-		return callExpr(selectorExpr(obj, "Get"), callExpr(selectorExpr(ident("fmt"), "Sprint"), index))
+		// Everything else (call expressions, etc.) — use .Get() with PropertyKey
+		// in case the value is a Symbol.
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		return callExpr(selectorExpr(obj, "Get"), callExpr(selectorExpr(ident("jsvalue"), "PropertyKey"), index))
 	}
 	// Go slice indices must be integers; wrap float64 vars with int().
 	indexNode := node.ChildByFieldName("index")

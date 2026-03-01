@@ -371,8 +371,8 @@ func TestNestedSubscriptOnObjectAssign(t *testing.T) {
 	const v = flags[assignment][key];
 }`
 	out := compile(t, ts)
-	assertContains(t, out, `.Get(fmt.Sprint(assignment))`)
-	assertContains(t, out, `.Get(fmt.Sprint(key))`)
+	assertContains(t, out, `.Get(jsvalue.PropertyKey(assignment))`)
+	assertContains(t, out, `.Get(jsvalue.PropertyKey(key))`)
 	assertNotContains(t, out, `[int(key)]`)
 }
 
@@ -384,7 +384,7 @@ func TestNestedMemberSubscriptOnMapLocal(t *testing.T) {
 }`
 	out := compile(t, ts)
 	assertContains(t, out, `.Set(fmt.Sprint(key)`)
-	assertContains(t, out, `.Get(fmt.Sprint(key))`)
+	assertContains(t, out, `.Get(jsvalue.PropertyKey(key))`)
 	assertNotContains(t, out, `[int(key)]`)
 }
 
@@ -404,7 +404,7 @@ func TestNestedFunctionDeclaration(t *testing.T) {
 func TestJSValueSubscriptWithJSValueIndex(t *testing.T) {
 	ts := `function f(obj, key) { return obj[key]; }`
 	out := compile(t, ts)
-	assertContains(t, out, `obj.Get(fmt.Sprint(key))`)
+	assertContains(t, out, `obj.Get(jsvalue.PropertyKey(key))`)
 	assertNotContains(t, out, "obj.Index(key)")
 }
 
@@ -517,7 +517,7 @@ func TestTypedLocalIndexOnJSValueUsesGet(t *testing.T) {
 	return obj[key];
 }`
 	out := compile(t, ts)
-	assertContains(t, out, `.Get(fmt.Sprint(key))`)
+	assertContains(t, out, `.Get(jsvalue.PropertyKey(key))`)
 	assertNotContains(t, out, ".Index(key)")
 }
 

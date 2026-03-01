@@ -79,6 +79,17 @@ func NewSymbol(description string) *JSValue {
 	return &JSValue{typ: TypeSymbol, symbolDesc: description, symbolID: id, prototype: SymbolPrototype}
 }
 
+// PropertyKey returns a string suitable for use as a property key on JSValue objects.
+// For Symbols, includes the internal ID to guarantee uniqueness (since Symbol('a') !== Symbol('a')).
+// For all other types, returns the standard string representation.
+// Accepts any type for convenience — non-JSValue values use fmt.Sprint.
+func PropertyKey(v any) string {
+	if jsv, ok := v.(*JSValue); ok && jsv != nil && jsv.typ == TypeSymbol {
+		return fmt.Sprintf("@@sym%d:%s", jsv.symbolID, jsv.symbolDesc)
+	}
+	return fmt.Sprint(v)
+}
+
 // NewNull creates a null JSValue.
 func NewNull() *JSValue {
 	return &JSValue{typ: TypeNull}
@@ -516,6 +527,12 @@ func Map(arrAny any, fn any) *JSValue {
 		for i, elem := range arr.arrayVal {
 			results[i] = f(elem, NewNumber(float64(i)))
 		}
+	case *JSValue:
+		if f != nil && f.funcVal != nil {
+			for i, elem := range arr.arrayVal {
+				results[i] = f.funcVal(elem, NewNumber(float64(i)))
+			}
+		}
 	}
 	return NewArray(results...)
 }
@@ -545,6 +562,15 @@ func Filter(arrAny any, fn any) *JSValue {
 		for i, elem := range arr.arrayVal {
 			if f(elem, NewNumber(float64(i))).Bool() {
 				results = append(results, elem)
+			}
+		}
+	case *JSValue:
+		if f != nil && f.funcVal != nil {
+			for i, elem := range arr.arrayVal {
+				r := f.funcVal(elem, NewNumber(float64(i)))
+				if r != nil && r.Bool() {
+					results = append(results, elem)
+				}
 			}
 		}
 	}
@@ -683,6 +709,14 @@ func Every(arrAny any, fn any) *JSValue {
 				return NewBool(false)
 			}
 		}
+	case *JSValue:
+		if f != nil && f.funcVal != nil {
+			for _, elem := range arr.arrayVal {
+				if !Truthy(f.funcVal(elem)) {
+					return NewBool(false)
+				}
+			}
+		}
 	}
 	return NewBool(true)
 }
@@ -797,13 +831,12 @@ func normalizeIndex(idx int, length int) int {
 
 // Pop returns the last element of an array, or undefined if empty.
 func Pop(arr *JSValue) *JSValue {
-	if arr == nil || arr.arrayVal == nil {
+	if arr == nil || arr.arrayVal == nil || len(arr.arrayVal) == 0 {
 		return NewUndefined()
 	}
-	if len(arr.arrayVal) == 0 {
-		return NewUndefined()
-	}
-	return arr.arrayVal[len(arr.arrayVal)-1]
+	last := arr.arrayVal[len(arr.arrayVal)-1]
+	arr.arrayVal = arr.arrayVal[:len(arr.arrayVal)-1]
+	return last
 }
 
 // Join joins array elements into a string with separator.
@@ -930,30 +963,31 @@ func Concat(arr *JSValue, items ...*JSValue) *JSValue {
 // arr accepts *JSValue or []*JSValue (from rest params).
 func Push(arrAny any, items ...*JSValue) *JSValue {
 	arr := asArray(arrAny)
-	if arr == nil || arr.arrayVal == nil {
-		return NewArray(items...)
+	if arr == nil {
+		return NewNumber(float64(len(items)))
 	}
-	result := append(arr.arrayVal, items...)
-	return NewArray(result...)
+	// Mutate in place — JS Array.push modifies the array
+	arr.arrayVal = append(arr.arrayVal, items...)
+	return NewNumber(float64(len(arr.arrayVal)))
 }
 
-// Shift returns first element, or undefined if empty.
+// Shift removes and returns first element, or undefined if empty. Mutates in place.
 func Shift(arr *JSValue) *JSValue {
 	if arr == nil || arr.arrayVal == nil || len(arr.arrayVal) == 0 {
 		return NewUndefined()
 	}
-	return arr.arrayVal[0]
+	first := arr.arrayVal[0]
+	arr.arrayVal = arr.arrayVal[1:]
+	return first
 }
 
-// Unshift prepends items to array.
+// Unshift prepends items to array. Mutates in place. Returns new length.
 func Unshift(arr *JSValue, items ...*JSValue) *JSValue {
-	if arr == nil || arr.arrayVal == nil {
-		return NewArray(items...)
+	if arr == nil {
+		return NewNumber(float64(len(items)))
 	}
-	result := make([]*JSValue, 0, len(items)+len(arr.arrayVal))
-	result = append(result, items...)
-	result = append(result, arr.arrayVal...)
-	return NewArray(result...)
+	arr.arrayVal = append(items, arr.arrayVal...)
+	return NewNumber(float64(len(arr.arrayVal)))
 }
 
 // ToLowerCase converts a JSValue to lowercase string and wraps it.
