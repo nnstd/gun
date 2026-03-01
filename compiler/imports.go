@@ -294,9 +294,9 @@ func (t *Transformer) resolveIdentifier(name string) ast.Expr {
 		return ident(sanitized)
 	}
 	// Exported package-level variables are capitalized in Go declarations.
-	// Reference them with the capitalized name.
+	// Use goNameRemap for collision-safe names.
 	if t.exportedNames[name] {
-		return ident(capitalize(name))
+		return ident(t.resolveGoName(name))
 	}
 	if imp, ok := t.importedNames[name]; ok {
 		if imp.goImportPath != "" {

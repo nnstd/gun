@@ -34,6 +34,8 @@ type Transformer struct {
 	funcParamCounts    map[string]int             // hoisted function name → parameter count (for padding missing args)
 	funcReturnTypes    map[string]string          // function name → Go return type (e.g. "bool", "*jsvalue.JSValue")
 	crossFileExports   map[string]bool            // Go names registered from other files (cross-file knowledge)
+	goNameRegistry     map[string]bool            // all finalized Go names (after capitalization) for collision detection
+	goNameRemap        map[string]string          // TS name → final Go name (when collisions require suffix)
 	inClassMethod      bool                       // true when transforming a class method body (arguments offset by 1 for this)
 	currentClassParent ast.Expr                   // parent class expression for super() calls in constructors
 	builtins           *BuiltinRegistry           // registry of built-in methods and their metadata
@@ -58,6 +60,8 @@ func newTransformer(source []byte, pkgName, moduleName string, samePackageImport
 		funcParamCounts:    make(map[string]int),
 		funcReturnTypes:    make(map[string]string),
 		crossFileExports:   make(map[string]bool),
+		goNameRegistry:     make(map[string]bool),
+		goNameRemap:        make(map[string]string),
 		builtins:           NewBuiltinRegistry(),
 	}
 }
@@ -436,6 +440,33 @@ func (t *Transformer) isCrossFileFunction(goName string) bool {
 	return false
 }
 
+// registerGoName registers a finalized Go name and returns it.
+// If the name collides with an already-registered name, appends a numeric suffix.
+func (t *Transformer) registerGoName(tsName, goName string) string {
+	if !t.goNameRegistry[goName] {
+		t.goNameRegistry[goName] = true
+		t.goNameRemap[tsName] = goName
+		return goName
+	}
+	// Collision — append numeric suffix
+	for i := 2; ; i++ {
+		candidate := goName + itoa(i)
+		if !t.goNameRegistry[candidate] {
+			t.goNameRegistry[candidate] = true
+			t.goNameRemap[tsName] = candidate
+			return candidate
+		}
+	}
+}
+
+// resolveGoName returns the finalized Go name for a TS name, or capitalize(name) if not remapped.
+func (t *Transformer) resolveGoName(tsName string) string {
+	if remap, ok := t.goNameRemap[tsName]; ok {
+		return remap
+	}
+	return capitalize(tsName)
+}
+
 // jsValueType returns *jsvalue.JSValue and registers the import.
 func (t *Transformer) jsValueType() ast.Expr {
 	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
@@ -443,6 +474,29 @@ func (t *Transformer) jsValueType() ast.Expr {
 }
 
 func (t *Transformer) prescanTopLevelFuncs(root *sitter.Node) {
+	// Pass 1: Collect exportedNames from export clauses (so we know which
+	// functions/vars need capitalization before registering Go names)
+	for i := uint(0); i < root.NamedChildCount(); i++ {
+		child := root.NamedChild(i)
+		if child.Kind() == "export_statement" {
+			for j := uint(0); j < child.NamedChildCount(); j++ {
+				inner := child.NamedChild(j)
+				if inner.Kind() == "export_clause" {
+					for k := uint(0); k < inner.NamedChildCount(); k++ {
+						spec := inner.NamedChild(k)
+						if spec.Kind() == "export_specifier" {
+							nameNode := spec.ChildByFieldName("name")
+							if nameNode != nil {
+								t.exportedNames[nameNode.Utf8Text(t.source)] = true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Pass 2: Register all Go names with collision detection
 	for i := uint(0); i < root.NamedChildCount(); i++ {
 		child := root.NamedChild(i)
 		switch child.Kind() {
@@ -468,15 +522,19 @@ func (t *Transformer) prescanTopLevelFuncs(root *sitter.Node) {
 			if !hasTyped && count > 0 {
 				t.funcParamCounts[name] = count
 			}
-			// Register as untyped pkg var so forward references use .Call()
+			// Register Go name with collision detection
 			if name != "main" && name != "init" {
+				if t.exportedNames[name] {
+					t.registerGoName(name, capitalize(name))
+				}
 				t.pkgVarTyped[name] = false
 			}
 		case "class_declaration":
 			nameNode := child.ChildByFieldName("name")
 			if nameNode != nil {
-				name := capitalize(nameNode.Utf8Text(t.source))
-				t.pkgVarTyped[name] = false
+				tsName := nameNode.Utf8Text(t.source)
+				goName := t.registerGoName(tsName, capitalize(tsName))
+				t.pkgVarTyped[goName] = false
 			}
 		case "lexical_declaration", "variable_declaration":
 			// Pre-register package-level variables so forward references work.
@@ -502,15 +560,18 @@ func (t *Transformer) prescanTopLevelFuncs(root *sitter.Node) {
 				case "function_declaration":
 					nameNode := inner.ChildByFieldName("name")
 					if nameNode != nil {
-						name := nameNode.Utf8Text(t.source)
-						t.pkgVarTyped[name] = false
-						t.exportedNames[name] = true
+						tsName := nameNode.Utf8Text(t.source)
+						goName := t.registerGoName(tsName, capitalize(tsName))
+						t.pkgVarTyped[tsName] = false
+						t.exportedNames[tsName] = true
+						_ = goName // registered for collision detection
 					}
 				case "class_declaration":
 					nameNode := inner.ChildByFieldName("name")
 					if nameNode != nil {
-						name := capitalize(nameNode.Utf8Text(t.source))
-						t.pkgVarTyped[name] = false
+						tsName := nameNode.Utf8Text(t.source)
+						goName := t.registerGoName(tsName, capitalize(tsName))
+						t.pkgVarTyped[goName] = false
 					}
 				case "lexical_declaration", "variable_declaration":
 					for k := uint(0); k < inner.NamedChildCount(); k++ {

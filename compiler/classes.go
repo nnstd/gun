@@ -40,7 +40,7 @@ func (t *Transformer) transformClassDecl(node *sitter.Node) []ast.Decl {
 		return nil
 	}
 
-	className := capitalize(nameNode.Utf8Text(t.source))
+	className := t.resolveGoName(nameNode.Utf8Text(t.source))
 	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 
 	// Check for extends (inside class_heritage → extends_clause)

@@ -266,7 +266,7 @@ func (t *Transformer) transformFuncDecl(node *sitter.Node, exported bool) *ast.F
 
 	name := nameNode.Utf8Text(t.source)
 	if exported {
-		name = capitalize(name)
+		name = t.resolveGoName(name)
 	}
 
 	// Push a typed scope so isUntypedLocal/isLocalName work inside the body
