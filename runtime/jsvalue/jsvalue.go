@@ -227,6 +227,11 @@ func (v *JSValue) String() string {
 		return "[object Object]"
 	case TypeFunction:
 		return "function"
+	case TypeRegex:
+		if re, ok := v.regexVal.(interface{ String() string }); ok {
+			return re.String()
+		}
+		return ""
 	case TypeMap:
 		return "[object Map]"
 	case TypeSet:
@@ -530,7 +535,8 @@ func Map(arrAny any, fn any) *JSValue {
 	case *JSValue:
 		if f != nil && f.funcVal != nil {
 			for i, elem := range arr.arrayVal {
-				results[i] = f.funcVal(elem, NewNumber(float64(i)))
+				results[i] = f.funcVal(elem)
+				_ = i
 			}
 		}
 	}
@@ -566,8 +572,8 @@ func Filter(arrAny any, fn any) *JSValue {
 		}
 	case *JSValue:
 		if f != nil && f.funcVal != nil {
-			for i, elem := range arr.arrayVal {
-				r := f.funcVal(elem, NewNumber(float64(i)))
+			for _, elem := range arr.arrayVal {
+				r := f.funcVal(elem)
 				if r != nil && r.Bool() {
 					results = append(results, elem)
 				}

@@ -304,7 +304,7 @@ func TestSliceIndexWrapsFloat64WithInt(t *testing.T) {
 	// JS number vars are float64; Go slice indices must be int.
 	ts := `function f(x) { const args = [x]; let i = 0; return args[i]; }`
 	out := compile(t, ts)
-	assertContains(t, out, "args.Get(fmt.Sprint(i))")
+	assertContains(t, out, "args.Get(jsvalue.PropertyKey(i))")
 }
 
 func TestJSValueSliceElementAssignmentWrapped(t *testing.T) {
@@ -642,7 +642,7 @@ func TestAssignmentExprSubscriptOnJSValueUsesSet(t *testing.T) {
 	}`
 	out := compile(t, ts)
 	assertContains(t, out, `.Set(`)
-	assertNotContains(t, out, `.Get(fmt.Sprint(key)) =`)
+	assertNotContains(t, out, `.Get(jsvalue.PropertyKey(key)) =`)
 }
 
 func TestFuncExprWithThisExtractsFromArgs(t *testing.T) {

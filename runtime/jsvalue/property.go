@@ -39,7 +39,11 @@ func (v *JSValue) Get(name string) *JSValue {
 
 // Set sets an own property. If an accessor (getter/setter) descriptor already exists
 // on this object or its prototype chain, the setter is invoked instead of overwriting.
+// Nil-safe: does nothing for nil receiver.
 func (v *JSValue) Set(name string, value *JSValue) {
+	if v == nil {
+		return
+	}
 	// Check own properties first for an accessor descriptor
 	if v.properties != nil {
 		if desc, ok := v.properties[name]; ok && desc.Set != nil {
