@@ -384,6 +384,22 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 		return ident("nil")
 	}
 
+	// super(args) in class constructor → call parent constructor on this
+	if fnNode.Kind() == "super" && t.currentClassParent != nil {
+		args := t.transformArgs(argsNode)
+		for i, arg := range args {
+			args[i] = jsvalueWrapLit(arg)
+		}
+		// Parent.Call(this, args...) — NewClass constructors receive (this, args...)
+		// But parent is a JSValue function, so we use parent.funcVal(this, args...)
+		// which is what NewClass's inner constructor does.
+		// Simplest: just call parent as a function that initializes this.
+		allArgs := append([]ast.Expr{ident("this")}, args...)
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		// Get parent's internal constructor and call it with this
+		return callExpr(selectorExpr(t.currentClassParent, "Call"), allArgs...)
+	}
+
 	// Check for builtin call patterns on member expressions
 	if fnNode.Kind() == "member_expression" {
 		objNode := fnNode.ChildByFieldName("object")

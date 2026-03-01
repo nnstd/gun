@@ -98,7 +98,11 @@ func (t *Transformer) transformClassDecl(node *sitter.Node) []ast.Decl {
 
 				if mName == "constructor" {
 					ctorParamsNode = member.ChildByFieldName("parameters")
+					// Set parent for super() calls in the constructor
+					prevParent := t.currentClassParent
+					t.currentClassParent = parentExpr
 					ctorStmts = t.transformClassConstructorBody(member)
+					t.currentClassParent = prevParent
 				} else if isStatic {
 					stmt := t.buildMethodSetup(className, mName, member, true)
 					if stmt != nil {

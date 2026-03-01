@@ -35,6 +35,7 @@ type Transformer struct {
 	funcReturnTypes    map[string]string          // function name → Go return type (e.g. "bool", "*jsvalue.JSValue")
 	crossFileExports   map[string]bool            // Go names registered from other files (cross-file knowledge)
 	inClassMethod      bool                       // true when transforming a class method body (arguments offset by 1 for this)
+	currentClassParent ast.Expr                   // parent class expression for super() calls in constructors
 	builtins           *BuiltinRegistry           // registry of built-in methods and their metadata
 }
 
