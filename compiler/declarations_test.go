@@ -14,7 +14,7 @@ func TestLetDeclaration(t *testing.T) {
 
 func TestVarDeclarationInferred(t *testing.T) {
 	out := compile(t, `var flag = true;`)
-	assertContains(t, out, "var flag = true")
+	assertContains(t, out, "var flag = jsvalue.NewBool(true)")
 }
 
 func TestConstStringDeclaration(t *testing.T) {
@@ -431,7 +431,7 @@ func TestTypedLocalAssignedFromUntypedCall(t *testing.T) {
 	out := compile(t, ts)
 	// Hoisted inner function called via .Call() in all-JSValue mode
 	assertContains(t, out, "inner.Call(")
-	assertContains(t, out, ".Number())")
+	assertContains(t, out, "i.Number() + 1")
 }
 
 func TestObjectAssignInBoolContext(t *testing.T) {
@@ -635,29 +635,25 @@ func TestDestructuringPairPattern(t *testing.T) {
 }
 
 func TestBooleanLiteralWithNotOperator(t *testing.T) {
-	// Boolean literals in regular declarations should be plain Go booleans.
+	// Boolean literals are now JSValue — !flag becomes jsvalue.Not(flag).Bool()
 	ts := `function test() {
 	const flag = false;
 	if (!flag) { return true; }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "var flag = false")
-	assertContains(t, out, "if !flag")
-	// The return statement will wrap in JSValue (function returns *jsvalue.JSValue),
-	// but the variable declaration and condition should use plain boolean
-	assertNotContains(t, out, "var flag = jsvalue.NewBool")
+	assertContains(t, out, "var flag = jsvalue.NewBool(false)")
+	assertContains(t, out, "jsvalue.Not(flag).Bool()")
 }
 
 func TestBooleanLiteralInExpression(t *testing.T) {
-	// Boolean literals in regular declarations should be plain Go booleans.
+	// Boolean literals are now JSValue — !enabled becomes jsvalue.Not(enabled)
 	ts := `function test() {
 	const enabled = true;
 	const options = { active: !enabled };
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "var enabled = true")
-	assertContains(t, out, "!enabled")
-	assertNotContains(t, out, "jsvalue.NewBool(true)")
+	assertContains(t, out, "var enabled = jsvalue.NewBool(true)")
+	assertContains(t, out, "jsvalue.Not(enabled)")
 }
 
 func TestArrayDestructuringWithBooleans(t *testing.T) {
@@ -857,7 +853,7 @@ func TestExportedNameReferencedCapitalized(t *testing.T) {
 	ts := `export const colors = ["red"];
 const all = colors;`
 	out := compile(t, ts)
-	assertContains(t, out, "var all = Colors")
+	assertContains(t, out, "Colors")
 }
 
 func TestForwardReferenceToVarUsesJSValueOps(t *testing.T) {

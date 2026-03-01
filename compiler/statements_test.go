@@ -105,8 +105,8 @@ func TestForLoopInitUsesShortVarDecl(t *testing.T) {
 		for (let i = 0; i < 10; i++) { console.log(i); }
 	}`
 	out := compile(t, ts)
-	assertContains(t, out, "for i := 0;")
-	assertNotContains(t, out, "var i")
+	// For loop init wraps literal in JSValue
+	assertContains(t, out, "for i := jsvalue.NewNumber(float64(0));")
 }
 
 func TestThrowStatement(t *testing.T) {
@@ -175,25 +175,23 @@ myFunc.extra = "hello";`
 }
 
 func TestForLoopUpdateExpression(t *testing.T) {
-	// i++ in for-loop post should compile as IncDecStmt, not i + 1.
+	// i++ where i is JSValue becomes i = jsvalue.NewNumber(i.Number() + 1)
 	ts := `function f(): void {
 	for (let i = 0; i < 10; i++) { console.log(i); }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "i++")
-	assertNotContains(t, out, "i + 1")
+	assertContains(t, out, "i = jsvalue.NewNumber(i.Number() + 1)")
 }
 
 func TestAugmentedAssignJSValueToString(t *testing.T) {
-	// When a typed string local is combined with a JSValue via +=,
-	// the RHS should be coerced with fmt.Sprint().
+	// In all-JSValue mode, += on string-initialized var uses jsvalue.From with string concat
 	ts := `function f(item) {
 	let result = "";
 	result += item;
 	return result;
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "result += fmt.Sprint(item)")
+	assertContains(t, out, "result = jsvalue.From(fmt.Sprint(result) + fmt.Sprint(item))")
 }
 
 func TestAugmentedAssignJSValueToNumber(t *testing.T) {

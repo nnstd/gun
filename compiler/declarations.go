@@ -140,16 +140,6 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		}
 
-		// JS numbers are always float64. When a non-const variable is
-		// initialized with an integer literal and has no type annotation,
-		// explicitly set the type to float64 so it matches JS semantics
-		// and is compatible with float64 return types.
-		if !isConst && typ == nil && value != nil {
-			if lit, ok := value.(*ast.BasicLit); ok && lit.Kind == token.INT {
-				typ = ident("float64")
-			}
-		}
-
 		// Register the variable in the current scope so property access
 		// on it uses .Get() when appropriate.
 		// Variables with explicit types, or initialized from non-JSValue
@@ -219,6 +209,12 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 		if isConst && value != nil && isConstCompatible(value) && (typ == nil || isConstType(typ)) {
 			decls = append(decls, constDecl(name, typ, value))
 		} else {
+			// In all-JSValue mode, wrap literal values with jsvalueWrapLit
+			// so `let x = 0` → `var x = jsvalue.NewNumber(float64(0))`
+			if !typed && value != nil && typ == nil {
+				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+				value = jsvalueWrapLit(value)
+			}
 			decls = append(decls, varDecl(name, typ, value))
 		}
 	}
@@ -230,80 +226,7 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 // produce a *jsvalue.JSValue (e.g. literals, ternaries, binary/unary ops,
 // calls to known string-returning methods like toLowerCase).
 func (t *Transformer) isNonJSValueInit(node *sitter.Node) bool {
-	if node == nil {
-		return false
-	}
-	switch node.Kind() {
-	case "number", "string", "template_string", "true", "false":
-		return true
-	case "ternary_expression":
-		// If either branch returns JSValue, the ternary is JSValue
-		consNode := node.ChildByFieldName("consequence")
-		altNode := node.ChildByFieldName("alternative")
-		if (consNode != nil && t.nodeReturnsJSValue(consNode)) ||
-			(altNode != nil && t.nodeReturnsJSValue(altNode)) {
-			return false
-		}
-		return true
-	case "new_expression":
-		// All new expressions produce *jsvalue.JSValue (classes are JSValue constructors)
-		return false
-	case "new_expression_UNUSED":
-		ctorNode := node.ChildByFieldName("constructor")
-		if ctorNode != nil {
-			name := ctorNode.Utf8Text(t.source)
-			if name == "Map" || name == "Set" {
-				return false
-			}
-		}
-		return true
-	case "binary_expression":
-		// When either operand returns JSValue, the binary expression now
-		// produces a JSValue result (via jsvalue.Add, jsvalue.Eq, jsvalue.And, etc.)
-		left := node.ChildByFieldName("left")
-		right := node.ChildByFieldName("right")
-		if (left != nil && t.nodeReturnsJSValue(left)) ||
-			(right != nil && t.nodeReturnsJSValue(right)) {
-			return false
-		}
-		return true
-	case "unary_expression":
-		// Unary operations on JSValue (!, -, ~, typeof) now return JSValue
-		argNode := node.ChildByFieldName("argument")
-		if argNode != nil && t.nodeReturnsJSValue(argNode) {
-			return false
-		}
-		return true
-	case "call_expression":
-		fnNode := node.ChildByFieldName("function")
-		if fnNode != nil && fnNode.Kind() == "member_expression" {
-			objNode := fnNode.ChildByFieldName("object")
-			propNode := fnNode.ChildByFieldName("property")
-			// Math.xxx() calls return *jsvalue.JSValue via runtime/jsmath.
-			if objNode != nil && objNode.Kind() == "identifier" && objNode.Utf8Text(t.source) == "Math" {
-				return false
-			}
-			if propNode != nil {
-				prop := propNode.Utf8Text(t.source)
-				// String methods: on typed receivers (native strings) they return native Go types;
-				// on JSValue receivers (untyped parameters or JSValue locals) they return *jsvalue.JSValue.
-				switch prop {
-				case "toLowerCase", "toUpperCase", "trim", "trimStart", "trimEnd",
-					"toString", "replace", "replaceAll", "join",
-					"codePointAt", "charCodeAt", "indexOf", "split", "charAt":
-					if objNode != nil {
-						// If receiver returns JSValue, the method call also returns JSValue
-						return !t.nodeReturnsJSValue(objNode)
-					}
-					return true
-				case "match", "exec":
-					// match/exec always return native Go types ([]string) regardless of receiver,
-					// because the transpiler transforms them to FindStringSubmatch which returns []string
-					return true
-				}
-			}
-		}
-	}
+	// In all-JSValue architecture, all variables are *jsvalue.JSValue.
 	return false
 }
 

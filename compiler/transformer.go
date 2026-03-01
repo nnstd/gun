@@ -336,6 +336,9 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 			return true
 		}
 		return false
+	case "this":
+		// 'this' in class methods is always *jsvalue.JSValue
+		return true
 	case "new_expression":
 		// new X() transforms to X.Call() which returns *jsvalue.JSValue
 		return true

@@ -166,14 +166,13 @@ function f(x: number): string { if (isOk(x)) { return "yes"; } return "no"; }`
 }
 
 func TestEnsureBoolTypedLocalNotNilChecked(t *testing.T) {
-	// Typed bool locals should not get != nil coercion.
+	// Variables initialized from false are now JSValue — uses != nil check
 	ts := `function f(s) {
 	let flag = false;
 	if (flag) { return s; }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "if flag")
-	assertNotContains(t, out, "flag != nil")
+	assertContains(t, out, "if flag != nil")
 }
 
 func TestLengthOnJSValueChain(t *testing.T) {
@@ -365,7 +364,7 @@ func TestMatchResultInBooleanContext(t *testing.T) {
 }
 
 func TestMatchResultNotTreatedAsJSValue(t *testing.T) {
-	// Match results return []string, not JSValue, so they shouldn't be coerced with .String()
+	// Match results — subscript access uses .Index() in all-JSValue mode
 	ts := `function f(s) {
 	const m = s.match(/^test/);
 	if (m) {
@@ -376,10 +375,9 @@ func TestMatchResultNotTreatedAsJSValue(t *testing.T) {
 	out := compile(t, ts)
 	assertContains(t, out, "FindStringSubmatch")
 	assertContains(t, out, "m != nil")
-	assertContains(t, out, "m[0]")
+	assertContains(t, out, "m.Index(0)")
 	// Should not treat match result as JSValue
 	assertNotContains(t, out, "m.String()")
-	assertNotContains(t, out, "m.Index(")
 }
 
 func TestTopLevelFuncCallFromMain(t *testing.T) {
@@ -455,7 +453,7 @@ func TestTypeofUsesJSValueHelper(t *testing.T) {
 func TestBitNotInBoolContext(t *testing.T) {
 	ts := `function f(s) { var i = "abc"; if (~i) { return true; } }`
 	out := compile(t, ts)
-	assertContains(t, out, "!= 0")
+	assertContains(t, out, "jsvalue.BitNot(i).Bool()")
 }
 
 func TestNullishCoalescingUsesJSValue(t *testing.T) {
