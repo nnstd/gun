@@ -280,9 +280,9 @@ func (t *Transformer) isNonJSValueInit(node *sitter.Node) bool {
 		if fnNode != nil && fnNode.Kind() == "member_expression" {
 			objNode := fnNode.ChildByFieldName("object")
 			propNode := fnNode.ChildByFieldName("property")
-			// Math.xxx() calls return native float64.
+			// Math.xxx() calls return *jsvalue.JSValue via runtime/jsmath.
 			if objNode != nil && objNode.Kind() == "identifier" && objNode.Utf8Text(t.source) == "Math" {
-				return true
+				return false
 			}
 			if propNode != nil {
 				prop := propNode.Utf8Text(t.source)

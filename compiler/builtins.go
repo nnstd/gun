@@ -252,8 +252,8 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 		addImport("github.com/nnstd/gun/runtime/console")
 		return ident("console")
 	case "Math":
-		addImport("math")
-		return ident("math")
+		addImport("github.com/nnstd/gun/runtime/jsmath")
+		return ident("jsmath")
 	case "JSON":
 		addImport("github.com/nnstd/gun/runtime/json")
 		return ident("json")

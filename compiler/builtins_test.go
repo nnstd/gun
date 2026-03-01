@@ -17,15 +17,15 @@ func TestConsoleError(t *testing.T) {
 func TestMathFloor(t *testing.T) {
 	ts := `function f(x: number): number { return Math.floor(x); }`
 	out := compile(t, ts)
-	assertContains(t, out, "math.Floor(")
-	assertContains(t, out, `"math"`)
+	assertContains(t, out, "jsmath.Floor(")
+	assertContains(t, out, "runtime/jsmath")
 }
 
 func TestMathRandom(t *testing.T) {
 	ts := `function r(): number { return Math.random(); }`
 	out := compile(t, ts)
-	assertContains(t, out, "rand.Float64()")
-	assertContains(t, out, `"math/rand"`)
+	assertContains(t, out, "jsmath.Random()")
+	assertContains(t, out, "runtime/jsmath")
 }
 
 func TestJSONStringify(t *testing.T) {

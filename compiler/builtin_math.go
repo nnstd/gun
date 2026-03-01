@@ -3,34 +3,61 @@ package compiler
 import "go/ast"
 
 func transformMathCall(prop string, args []ast.Expr, addImport func(string)) ast.Expr {
-	addImport("math")
+	addImport("github.com/nnstd/gun/runtime/jsmath")
+
+	// Wrap literal args since runtime/math accepts *jsvalue.JSValue
+	wrappedArgs := make([]ast.Expr, len(args))
+	for i, a := range args {
+		wrappedArgs[i] = jsvalueWrapLit(a)
+	}
+
 	switch prop {
 	case "floor":
-		return callExpr(selectorExpr(ident("math"), "Floor"), args...)
+		if len(wrappedArgs) > 0 {
+			return callExpr(selectorExpr(ident("jsmath"), "Floor"), wrappedArgs[0])
+		}
 	case "ceil":
-		return callExpr(selectorExpr(ident("math"), "Ceil"), args...)
+		if len(wrappedArgs) > 0 {
+			return callExpr(selectorExpr(ident("jsmath"), "Ceil"), wrappedArgs[0])
+		}
 	case "round":
-		return callExpr(selectorExpr(ident("math"), "Round"), args...)
+		if len(wrappedArgs) > 0 {
+			return callExpr(selectorExpr(ident("jsmath"), "Round"), wrappedArgs[0])
+		}
 	case "abs":
-		return callExpr(selectorExpr(ident("math"), "Abs"), args...)
-	case "max", "min":
-		// min/max commonly receive mixed types (int, JSValue); coerce to float64.
-		coerced := make([]ast.Expr, len(args))
-		for i, a := range args {
-			coerced[i] = callExpr(ident("float64"), a)
+		if len(wrappedArgs) > 0 {
+			return callExpr(selectorExpr(ident("jsmath"), "Abs"), wrappedArgs[0])
 		}
-		goName := "Max"
-		if prop == "min" {
-			goName = "Min"
-		}
-		return callExpr(selectorExpr(ident("math"), goName), coerced...)
+	case "max":
+		return callExpr(selectorExpr(ident("jsmath"), "Max"), wrappedArgs...)
+	case "min":
+		return callExpr(selectorExpr(ident("jsmath"), "Min"), wrappedArgs...)
 	case "sqrt":
-		return callExpr(selectorExpr(ident("math"), "Sqrt"), args...)
+		if len(wrappedArgs) > 0 {
+			return callExpr(selectorExpr(ident("jsmath"), "Sqrt"), wrappedArgs[0])
+		}
 	case "pow":
-		return callExpr(selectorExpr(ident("math"), "Pow"), args...)
+		if len(wrappedArgs) >= 2 {
+			return callExpr(selectorExpr(ident("jsmath"), "Pow"), wrappedArgs[0], wrappedArgs[1])
+		}
 	case "random":
-		addImport("math/rand")
-		return callExpr(selectorExpr(ident("rand"), "Float64"))
+		return callExpr(selectorExpr(ident("jsmath"), "Random"))
+	case "log":
+		if len(wrappedArgs) > 0 {
+			return callExpr(selectorExpr(ident("jsmath"), "Log"), wrappedArgs[0])
+		}
+	case "log2":
+		if len(wrappedArgs) > 0 {
+			return callExpr(selectorExpr(ident("jsmath"), "Log2"), wrappedArgs[0])
+		}
+	case "trunc":
+		if len(wrappedArgs) > 0 {
+			return callExpr(selectorExpr(ident("jsmath"), "Trunc"), wrappedArgs[0])
+		}
+	case "sign":
+		if len(wrappedArgs) > 0 {
+			return callExpr(selectorExpr(ident("jsmath"), "Sign"), wrappedArgs[0])
+		}
 	}
 	return nil
 }

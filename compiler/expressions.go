@@ -713,7 +713,7 @@ func isObjectPrototypeHasOwnProperty(node *sitter.Node, source []byte) bool {
 // isRuntimePackage returns true if the name is a known Gun runtime package alias.
 func isRuntimePackage(name string) bool {
 	switch name {
-	case "fs", "nodepath", "json", "process", "module", "jserror":
+	case "fs", "nodepath", "json", "process", "module", "jserror", "jsmath":
 		return true
 	}
 	return false

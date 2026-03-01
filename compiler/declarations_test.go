@@ -548,16 +548,15 @@ func TestRegexLiteralIsJSValue(t *testing.T) {
 	assertContains(t, out, "jsvalue.MatchString(re,")
 }
 
-func TestMathCallResultIsTyped(t *testing.T) {
-	// Variables initialized from Math.min/max should be typed (float64),
-	// not treated as JSValue.
+func TestMathCallResultIsJSValue(t *testing.T) {
+	// Math.min/max returns *jsvalue.JSValue, so comparisons use jsvalue.Gt.
 	ts := `function f(a: number, b: number) {
 	var m = Math.min(a, b);
 	if (m > 0) { return m; }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "m > 0")
-	assertNotContains(t, out, "m.Number()")
+	assertContains(t, out, "jsmath.Min(")
+	assertContains(t, out, "jsvalue.Gt(")
 }
 
 func TestSplitOnJSValueUsesLenAndIndex(t *testing.T) {
