@@ -201,7 +201,8 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		}
 		// Global functions that return JSValue
 		switch name {
-		case "String", "Array", "Error", "TypeError", "RangeError", "ReferenceError":
+		case "String", "Array", "Error", "TypeError", "RangeError", "ReferenceError",
+			"process":
 			return true
 		}
 		return false
@@ -555,7 +556,7 @@ func (t *Transformer) transformTopLevel(node *sitter.Node) {
 					switch rightNode.Kind() {
 					case "function_expression", "function":
 						if d := t.transformAnonFuncAsDefault(rightNode); d != nil {
-							t.decls = append(t.decls, d)
+							t.decls = append(t.decls, t.funcDeclToJSValueVar(d))
 						}
 					default:
 						if expr := t.transformExpr(rightNode); expr != nil {
@@ -681,7 +682,7 @@ func (t *Transformer) transformExportDefault(node *sitter.Node) {
 		}
 	case "function", "function_expression":
 		if d := t.transformAnonFuncAsDefault(child); d != nil {
-			t.decls = append(t.decls, d)
+			t.decls = append(t.decls, t.funcDeclToJSValueVar(d))
 		}
 	case "class_declaration":
 		classDecls := t.transformClassDecl(child)

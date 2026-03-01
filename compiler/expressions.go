@@ -788,7 +788,7 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 		return callExpr(selectorExpr(selectorExpr(ident("jserror"), errName), "Get"), stringLit(prop))
 	}
 
-	// process.env.X → process.Env["X"]
+	// process.env.X → process.Env.Get("X")
 	if objNode.Kind() == "member_expression" {
 		innerObj := objNode.ChildByFieldName("object")
 		innerProp := objNode.ChildByFieldName("property")
@@ -796,7 +796,7 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 			innerObj.Utf8Text(t.source) == "process" &&
 			innerProp.Utf8Text(t.source) == "env" {
 			t.addImport("github.com/nnstd/gun/runtime/process")
-			return &ast.IndexExpr{X: selectorExpr(ident("process"), "Env"), Index: stringLit(prop)}
+			return callExpr(selectorExpr(selectorExpr(ident("process"), "Env"), "Get"), stringLit(prop))
 		}
 	}
 

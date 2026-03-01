@@ -11,7 +11,7 @@ func TestExportDefaultNamedFunction(t *testing.T) {
 func TestExportDefaultAnonFunction(t *testing.T) {
 	ts := `export default function() { return 1; }`
 	out := compile(t, ts)
-	assertContains(t, out, "func Default()")
+	assertContains(t, out, "var Default = jsvalue.NewFunction(")
 }
 
 func TestExportDefaultClass(t *testing.T) {

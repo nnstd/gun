@@ -34,11 +34,11 @@ var Pid = jsvalue.NewNumber(float64(stdos.Getpid()))
 var Versions = jsvalue.NewObject()
 var Version = jsvalue.NewString(runtime.Version())
 
-var Env = func() map[string]*jsvalue.JSValue {
-	env := make(map[string]*jsvalue.JSValue)
+var Env = func() *jsvalue.JSValue {
+	env := jsvalue.NewObject()
 	for _, e := range stdos.Environ() {
 		if k, v, ok := strings.Cut(e, "="); ok {
-			env[k] = jsvalue.NewString(v)
+			env.Set(k, jsvalue.NewString(v))
 		}
 	}
 	return env
@@ -66,13 +66,7 @@ func AsJSValue() *jsvalue.JSValue {
 	obj.Set("platform", Platform)
 	obj.Set("pid", Pid)
 	obj.Set("argv", Argv)
-	obj.Set("env", jsvalue.ObjectFrom(func() []any {
-		var pairs []any
-		for k, v := range Env {
-			pairs = append(pairs, k, v)
-		}
-		return pairs
-	}()...))
+	obj.Set("env", Env)
 	obj.Set("cwd", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		return Cwd()
 	}))

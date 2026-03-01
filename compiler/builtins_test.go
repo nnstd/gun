@@ -104,7 +104,7 @@ func TestProcessArgv(t *testing.T) {
 func TestProcessEnvAccess(t *testing.T) {
 	ts := `const home = process.env.HOME;`
 	out := compile(t, ts)
-	assertContains(t, out, `process.Env["HOME"]`)
+	assertContains(t, out, `process.Env.Get("HOME")`)
 }
 
 func TestProcessExit(t *testing.T) {

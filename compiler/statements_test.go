@@ -160,7 +160,7 @@ func TestModuleExportsFunction(t *testing.T) {
 		return position;
 	}`
 	out := compile(t, ts)
-	assertContains(t, out, "func Default(")
+	assertContains(t, out, "var Default = jsvalue.NewFunction(")
 	assertNotContains(t, out, "module")
 }
 
@@ -321,7 +321,7 @@ func TestModuleExportsParamReassignWrapsLiteral(t *testing.T) {
 		return position;
 	}`
 	out := compile(t, ts)
-	assertContains(t, out, "func Default(")
+	assertContains(t, out, "var Default = jsvalue.NewFunction(")
 	assertNotContains(t, out, "position = 2")
 	assertContains(t, out, "jsvalue")
 }
@@ -333,7 +333,7 @@ func TestModuleExportsFunctionTrailingReturn(t *testing.T) {
 		if (x) { return x; }
 	}`
 	out := compile(t, ts)
-	assertContains(t, out, "func Default(")
+	assertContains(t, out, "var Default = jsvalue.NewFunction(")
 	assertContains(t, out, "return nil")
 }
 
