@@ -863,9 +863,17 @@ func transpileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string,
 	}
 
 	// Phase 3: Write results
+	// Use relative path from package dir for unique filenames when basenames collide.
+	pkgDir := filepath.Dir(absEntry)
 	for absPath, output := range results {
-		base := filepath.Base(absPath)
-		goName := strings.TrimSuffix(base, filepath.Ext(base)) + ".go"
+		rel, err := filepath.Rel(pkgDir, absPath)
+		if err != nil {
+			rel = filepath.Base(absPath)
+		}
+		// Flatten relative path: build/lib/index.js → build-lib-index.go
+		goName := strings.TrimSuffix(rel, filepath.Ext(rel))
+		goName = strings.ReplaceAll(goName, string(filepath.Separator), "-")
+		goName += ".go"
 		outFile := filepath.Join(outDir, goName)
 		if verbose {
 			fmt.Fprintf(os.Stderr, "  writing %s\n", outFile)

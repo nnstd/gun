@@ -113,6 +113,20 @@ func scanExportStatement(node *sitter.Node, source []byte) []PackageExport {
 					Name: name, GoName: capitalize(name), Kind: "type",
 				})
 			}
+		default:
+			// export default <expression> — check for "default" keyword in parent
+			hasDefault := false
+			for j := uint(0); j < node.ChildCount(); j++ {
+				if node.Child(j).Kind() == "default" {
+					hasDefault = true
+					break
+				}
+			}
+			if hasDefault {
+				exports = append(exports, PackageExport{
+					Name: "default", GoName: "Default", Kind: "var", IsJSValue: true,
+				})
+			}
 		case "export_clause":
 			for j := uint(0); j < child.NamedChildCount(); j++ {
 				spec := child.NamedChild(j)

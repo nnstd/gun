@@ -800,7 +800,9 @@ func (t *Transformer) transformTryCatch(node *sitter.Node) ast.Stmt {
 		[]ast.Expr{ident(catchParam)},
 		[]ast.Expr{callExpr(selectorExpr(ident("jsvalue"), "From"), ident(recoverTmp))},
 	)
-	catchBody.List = append([]ast.Stmt{wrapStmt}, catchBody.List...)
+	// Suppress "declared and not used" if catch body doesn't reference the param
+	suppressUnused := assignStmt([]ast.Expr{ident("_")}, []ast.Expr{ident(catchParam)})
+	catchBody.List = append([]ast.Stmt{wrapStmt, suppressUnused}, catchBody.List...)
 
 	ifRecover := &ast.IfStmt{
 		Init: recoverAssign,

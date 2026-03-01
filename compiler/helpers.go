@@ -426,6 +426,55 @@ func exprReferencesName(expr ast.Expr, name string) bool {
 // forward declarations + init() assignments to avoid Go initialization cycles.
 // e.g. var f = jsvalue.NewFunction(... f.Call() ...) → var f *jsvalue.JSValue + init() { f = ... }
 func (t *Transformer) fixInitCycles(decls []ast.Decl) []ast.Decl {
+	// Build reference graph: for each var, what other vars does it reference?
+	type varInfo struct {
+		name  string
+		value ast.Expr
+		decl  *ast.GenDecl
+		spec  *ast.ValueSpec
+	}
+	var vars []varInfo
+	allVarNames := make(map[string]bool)
+	for _, d := range decls {
+		if gd, ok := d.(*ast.GenDecl); ok && gd.Tok == token.VAR {
+			for _, spec := range gd.Specs {
+				if vs, ok := spec.(*ast.ValueSpec); ok && len(vs.Names) > 0 {
+					allVarNames[vs.Names[0].Name] = true
+					if len(vs.Values) > 0 {
+						vars = append(vars, varInfo{vs.Names[0].Name, vs.Values[0], gd, vs})
+					}
+				}
+			}
+		}
+	}
+
+	// Detect vars in cycles: self-ref or mutual ref
+	refs := make(map[string]map[string]bool) // name → set of referenced var names
+	for _, v := range vars {
+		r := make(map[string]bool)
+		for otherName := range allVarNames {
+			if exprReferencesName(v.value, otherName) {
+				r[otherName] = true
+			}
+		}
+		refs[v.name] = r
+	}
+
+	cyclicVars := make(map[string]bool)
+	for _, v := range vars {
+		// Self-reference
+		if refs[v.name][v.name] {
+			cyclicVars[v.name] = true
+		}
+		// Mutual reference: A→B and B→A
+		for dep := range refs[v.name] {
+			if dep != v.name && refs[dep][v.name] {
+				cyclicVars[v.name] = true
+				cyclicVars[dep] = true
+			}
+		}
+	}
+
 	var result []ast.Decl
 	var initStmts []ast.Stmt
 
@@ -441,8 +490,7 @@ func (t *Transformer) fixInitCycles(decls []ast.Decl) []ast.Decl {
 			if !ok || len(vs.Names) == 0 || len(vs.Values) == 0 {
 				continue
 			}
-			name := vs.Names[0].Name
-			if exprReferencesName(vs.Values[0], name) {
+			if cyclicVars[vs.Names[0].Name] {
 				hasCycle = true
 				break
 			}
@@ -458,7 +506,7 @@ func (t *Transformer) fixInitCycles(decls []ast.Decl) []ast.Decl {
 				continue
 			}
 			name := vs.Names[0].Name
-			if len(vs.Values) > 0 && exprReferencesName(vs.Values[0], name) {
+			if cyclicVars[name] && len(vs.Values) > 0 {
 				// Forward declare with explicit type
 				typ := vs.Type
 				if typ == nil {

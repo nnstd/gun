@@ -62,6 +62,13 @@ func CompileWithExports(source []byte, pkgName, moduleName, currentFile string, 
 // same Go package. It scans all files for exports first, then compiles
 // each file with cross-file export knowledge.
 func CompilePackage(files map[string][]byte, pkgName, moduleName, entryFile string) (map[string][]byte, error) {
+	// For the entry file's "export default", other files' default imports
+	// resolve to the entry's "Default". But non-entry files also have
+	// "export default" which becomes "Default". To avoid conflicts,
+	// rename non-entry file defaults by rewriting the source before compilation:
+	// `export default X` → `export const _fileDefault = X` in non-entry files.
+	// Then update imports of non-entry defaults to use the new name.
+	// For now, handled by post-compilation rename + reference fix.
 	// Phase 1: Scan all files for exports
 	exports := make(PackageExports)
 	for name, source := range files {
