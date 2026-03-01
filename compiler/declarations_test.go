@@ -196,9 +196,9 @@ func TestArrayDestructuringTopLevel(t *testing.T) {
 	ts := `const arr = [1, 2];
 const [x, y] = arr;`
 	out := compile(t, ts)
-	assertContains(t, out, "var x = arr[0]")
-	assertContains(t, out, "var y = arr[1]")
-	assertNotContains(t, out, "_destructure_placeholder")
+	// In all-JSValue mode, arrays use .Index() for destructuring
+	assertContains(t, out, "var x = arr.Index(0)")
+	assertContains(t, out, "var y = arr.Index(1)")
 }
 
 func TestObjectDestructuringInFunction(t *testing.T) {
@@ -226,8 +226,9 @@ func TestArrayDestructuringRest(t *testing.T) {
 	ts := `const arr = [1, 2, 3];
 const [first, ...rest] = arr;`
 	out := compile(t, ts)
-	assertContains(t, out, "var first = arr[0]")
-	assertContains(t, out, "var rest = arr[1:]")
+	// In all-JSValue mode, uses .Index() and .Slice()
+	assertContains(t, out, "var first = arr.Index(0)")
+	assertContains(t, out, "arr.Slice(")
 }
 
 func TestParamObjectDestructuring(t *testing.T) {

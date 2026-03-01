@@ -849,9 +849,13 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 	case "array_pattern":
 		// Check if the source value is a *jsvalue.JSValue — if so, use
 		// .Index() instead of Go's [] operator.
-		useJSIndex := false
+		// In all-JSValue mode, almost all values are JSValue — use .Index()
+		useJSIndex := true
+		// Only use Go bracket indexing for known Go slices ([]string, etc.)
 		if id, ok := valExpr.(*ast.Ident); ok {
-			useJSIndex = t.isUntypedLocal(id.Name) || strings.HasPrefix(id.Name, "_param") || strings.HasPrefix(id.Name, "_item")
+			if t.isTypedLocal(id.Name) {
+				useJSIndex = false
+			}
 		}
 
 		for i := uint(0); i < pattern.NamedChildCount(); i++ {

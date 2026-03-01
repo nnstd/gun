@@ -280,6 +280,14 @@ func stmtsHaveReturn(stmts []ast.Stmt) bool {
 			if s.Body != nil && stmtsHaveReturn(s.Body.List) {
 				return true
 			}
+		case *ast.SwitchStmt:
+			if s.Body != nil && stmtsHaveReturn(s.Body.List) {
+				return true
+			}
+		case *ast.CaseClause:
+			if stmtsHaveReturn(s.Body) {
+				return true
+			}
 		}
 	}
 	return false
@@ -366,6 +374,17 @@ func wrapReturnStmts(stmts []ast.Stmt) {
 			if s.Body != nil {
 				wrapReturnStmts(s.Body.List)
 			}
+		case *ast.SwitchStmt:
+			if s.Body != nil {
+				wrapReturnStmts(s.Body.List)
+			}
+		case *ast.TypeSwitchStmt:
+			if s.Body != nil {
+				wrapReturnStmts(s.Body.List)
+			}
+		case *ast.CaseClause:
+			wrapReturnStmts(s.Body)
+		// Note: do NOT descend into DeferStmt — defer funcs have their own return types
 		}
 	}
 }

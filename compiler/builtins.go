@@ -296,6 +296,18 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 		// Array as standalone value (used for Array.prototype, Array.isArray, etc.)
 		addImport("github.com/nnstd/gun/runtime/jsvalue")
 		return selectorExpr(ident("jsvalue"), "ArrayPrototype")
+	case "String":
+		// String as standalone value (e.g. passed as callback: arr.map(String))
+		addImport("github.com/nnstd/gun/runtime/jsvalue")
+		addImport("fmt")
+		// Inline function that converts to string JSValue
+		return callExpr(selectorExpr(ident("jsvalue"), "NewFunction"), &ast.FuncLit{
+			Type: &ast.FuncType{
+				Params:  fieldList(&ast.Field{Names: []*ast.Ident{ident("_a")}, Type: &ast.Ellipsis{Elt: ptrType(selectorExpr(ident("jsvalue"), "JSValue"))}}),
+				Results: fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue")))),
+			},
+			Body: blockStmt(returnStmt(callExpr(selectorExpr(ident("jsvalue"), "NewString"), callExpr(selectorExpr(ident("fmt"), "Sprint"), &ast.IndexExpr{X: ident("_a"), Index: intLit("0")})))),
+		})
 	case "Number":
 		// Number as standalone (used as Number(x) call) — identity for numeric values
 		return ident("float64")
