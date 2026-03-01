@@ -33,6 +33,7 @@ type Transformer struct {
 	exportedNames      map[string]bool            // TS names that were exported (capitalized in Go)
 	funcParamCounts    map[string]int             // hoisted function name → parameter count (for padding missing args)
 	funcReturnTypes    map[string]string          // function name → Go return type (e.g. "bool", "*jsvalue.JSValue")
+	crossFileExports   map[string]bool            // Go names registered from other files (cross-file knowledge)
 	inClassMethod      bool                       // true when transforming a class method body (arguments offset by 1 for this)
 	builtins           *BuiltinRegistry           // registry of built-in methods and their metadata
 }
@@ -55,6 +56,7 @@ func newTransformer(source []byte, pkgName, moduleName string, samePackageImport
 		exportedNames:      make(map[string]bool),
 		funcParamCounts:    make(map[string]int),
 		funcReturnTypes:    make(map[string]string),
+		crossFileExports:   make(map[string]bool),
 		builtins:           NewBuiltinRegistry(),
 	}
 }
@@ -418,6 +420,11 @@ func (t *Transformer) isUntypedLocal(name string) bool {
 	return false
 }
 
+
+// isCrossFileExport checks if goName is declared in another file of the same package.
+func (t *Transformer) isCrossFileExport(goName string) bool {
+	return t.crossFileExports[goName]
+}
 
 // isCrossFileFunction checks if goName is declared as a function in another
 // file of the same package (via cross-file exports from CompilePackage).
@@ -845,12 +852,15 @@ func (t *Transformer) transformExportClause(exportNode *sitter.Node, clause *sit
 		if reexportMod != "" {
 			t.transformReexport(origName, goName, reexportMod)
 		} else {
-			// Skip re-export if a function with this exact capitalized name
-			// already exists in another file (e.g. func ApplyExtends in apply-extends.go).
-			// Don't skip when the original name differs (e.g. export { isFullWidth }
-			// needs var IsFullWidth = isFullWidth).
-			if goName == capitalize(origName) && t.isCrossFileFunction(goName) {
-				continue
+			// Skip re-export if the capitalized name exists as a cross-file export
+			// AND the original lowercase name isn't defined in this file.
+			// This means it's a pass-through re-export (import + re-export from another file).
+			// But if the original IS defined locally (e.g. function isFullWidth),
+			// we need the var IsFullWidth = isFullWidth alias.
+			if goName == capitalize(origName) && t.isCrossFileExport(goName) {
+				if _, isLocal := t.pkgVarTyped[origName]; !isLocal {
+					continue
+				}
 			}
 			t.decls = append(t.decls, varDecl(goName, nil, ident(origName)))
 		}

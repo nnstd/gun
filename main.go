@@ -871,8 +871,13 @@ func transpileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string,
 			rel = filepath.Base(absPath)
 		}
 		// Flatten relative path: build/lib/index.js → build-lib-index.go
+		// Strip leading ".." components (Go ignores files starting with ".")
 		goName := strings.TrimSuffix(rel, filepath.Ext(rel))
 		goName = strings.ReplaceAll(goName, string(filepath.Separator), "-")
+		goName = strings.TrimLeft(goName, ".-")
+		if goName == "" {
+			goName = "file"
+		}
 		goName += ".go"
 		outFile := filepath.Join(outDir, goName)
 		if verbose {

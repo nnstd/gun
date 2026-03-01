@@ -45,6 +45,7 @@ func CompileWithExports(source []byte, pkgName, moduleName, currentFile string, 
 		for _, exp := range fileExports {
 			// All cross-file exports are JSValue in all-JSValue architecture
 			transformer.pkgVarTyped[exp.GoName] = false
+			transformer.crossFileExports[exp.GoName] = true
 		}
 	}
 
