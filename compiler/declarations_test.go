@@ -1062,3 +1062,78 @@ func TestThisAtPackageLevel(t *testing.T) {
 	out := compile(t, ts)
 	assertContains(t, out, "jsvalue.NewUndefined()")
 }
+
+func TestBareReturnInClassMethod(t *testing.T) {
+	// Bare return in class method gets wrapped to return nil
+	ts := `class Foo {
+	bar(x) {
+		if (x) { return; }
+		return x;
+	}
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "return nil")
+	assertNotContains(t, out, "\treturn\n")
+}
+
+func TestBareReturnInArrowFunction(t *testing.T) {
+	// Bare return in arrow function gets wrapped to return nil
+	ts := `const f = (x) => { if (x) { return; } return x; };`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewNull()")
+}
+
+func TestDestructuringAssignment(t *testing.T) {
+	// [a, ...b] = expr — assignment not declaration
+	ts := `function f(cmd) {
+	let aliases = [];
+	[cmd, ...aliases] = cmd;
+	return aliases;
+}`
+	out := compile(t, ts)
+	// Should use = (assign), not := (define) for destructuring assignment
+	assertContains(t, out, "cmd = ")
+	assertNotContains(t, out, "nil = cmd")
+}
+
+func TestUnusedLocalVarSuppressed(t *testing.T) {
+	// Local var declarations get _ = name suppression
+	ts := `function f() {
+	let x = foo();
+	let y = bar();
+	return y;
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "_ = x")
+}
+
+func TestForOfLoopVarInScope(t *testing.T) {
+	// for-of loop variable is registered in scope so it doesn't get capitalized
+	ts := `export function command() {}
+function f(items) {
+	for (const command of items) {
+		console.log(command);
+	}
+}`
+	out := compile(t, ts)
+	// Loop variable should stay lowercase in the body
+	assertContains(t, out, "console.Log(command)")
+	assertNotContains(t, out, "console.Log(Command)")
+}
+
+func TestNegationOnLength(t *testing.T) {
+	// !arr.length → arr.Len() == 0
+	ts := `function f(arr) {
+	if (!arr.length) { return true; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "arr.Len() == 0")
+}
+
+func TestStringAsCallback(t *testing.T) {
+	// String passed as callback: arr.map(String)
+	ts := `function f(arr) { return arr.map(String); }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Map(")
+	assertContains(t, out, "jsvalue.NewFunction(")
+}
