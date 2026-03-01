@@ -274,6 +274,13 @@ func (t *Transformer) transformUnaryExpr(node *sitter.Node) ast.Expr {
 			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 			return callExpr(selectorExpr(ident("jsvalue"), "Not"), arg)
 		}
+		// !x.length → x.Len() == 0 (length returns int, can't use ! on int)
+		if argNode != nil && argNode.Kind() == "member_expression" {
+			propNode := argNode.ChildByFieldName("property")
+			if propNode != nil && propNode.Utf8Text(t.source) == "length" {
+				return &ast.BinaryExpr{X: arg, Op: token.EQL, Y: intLit("0")}
+			}
+		}
 		return &ast.UnaryExpr{Op: token.NOT, X: arg}
 	case "-":
 		// -jsValue → jsvalue.Neg(jsValue)
@@ -500,11 +507,19 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 					}
 				}
 
-				// For JSValue receivers, try JSValue string wrapper methods first (before fmt.Sprint coercion).
-				// Only for methods that have dedicated jsvalue.* wrappers.
-				if (isUntypedLocal || t.nodeReturnsJSValue(objNode)) && hasJSValueStringWrapper(prop) {
-					if r := transformStringMethod(obj, prop, args, t.addImport, true); r != nil {
-						return r
+				// For JSValue receivers, try JSValue string/collection wrapper methods first.
+				if isUntypedLocal || t.nodeReturnsJSValue(objNode) {
+					if hasJSValueStringWrapper(prop) {
+						if r := transformStringMethod(obj, prop, args, t.addImport, true); r != nil {
+							return r
+						}
+					}
+					// Also try collection methods (slice, concat, push, etc.)
+					if t.builtins.IsArrayMethod(prop) {
+						t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+						if r := transformCollectionMethod(obj, prop, args, t.addImport, true); r != nil {
+							return r
+						}
 					}
 				}
 

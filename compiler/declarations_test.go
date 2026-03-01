@@ -226,9 +226,8 @@ func TestArrayDestructuringRest(t *testing.T) {
 	ts := `const arr = [1, 2, 3];
 const [first, ...rest] = arr;`
 	out := compile(t, ts)
-	// In all-JSValue mode, uses .Index() and .Slice()
 	assertContains(t, out, "var first = arr.Index(0)")
-	assertContains(t, out, "arr.Slice(")
+	assertContains(t, out, "jsvalue.Slice(arr,")
 }
 
 func TestParamObjectDestructuring(t *testing.T) {

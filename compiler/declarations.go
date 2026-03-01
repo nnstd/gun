@@ -876,7 +876,8 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 				name := nameNode.Utf8Text(t.source)
 				var rhs ast.Expr
 				if useJSIndex {
-					rhs = callExpr(selectorExpr(valExpr, "Slice"), intLit(fmt.Sprintf("%d", i)))
+					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+					rhs = callExpr(selectorExpr(ident("jsvalue"), "Slice"), valExpr, callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), callExpr(ident("float64"), intLit(fmt.Sprintf("%d", i)))))
 				} else {
 					rhs = &ast.SliceExpr{
 						X:   valExpr,
