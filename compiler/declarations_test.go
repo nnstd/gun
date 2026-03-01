@@ -24,7 +24,7 @@ func TestConstStringDeclaration(t *testing.T) {
 
 func TestFunctionDeclaration(t *testing.T) {
 	out := compile(t, `function add(a: number, b: number): number { return a + b; }`)
-	assertContains(t, out, "func add(a *jsvalue.JSValue, b *jsvalue.JSValue) *jsvalue.JSValue")
+	assertContains(t, out, "var add = jsvalue.NewFunction(func(_args ...*jsvalue.JSValue) *jsvalue.JSValue")
 	assertContains(t, out, "jsvalue.Add(")
 }
 
@@ -37,7 +37,7 @@ func TestArrowFunction(t *testing.T) {
 
 func TestExportCapitalizesName(t *testing.T) {
 	out := compile(t, `export function greet(name: string): string { return name; }`)
-	assertContains(t, out, "func Greet(name *jsvalue.JSValue) *jsvalue.JSValue")
+	assertContains(t, out, "var Greet = jsvalue.NewFunction(func(_args ...*jsvalue.JSValue) *jsvalue.JSValue")
 }
 
 func TestInterfaceWithMethods(t *testing.T) {
@@ -104,7 +104,7 @@ func TestParamGoKeywordEscaped(t *testing.T) {
 func TestRestParameter(t *testing.T) {
 	ts := `function sum(...nums: number[]): number { return 0; }`
 	out := compile(t, ts)
-	assertContains(t, out, "nums ...*jsvalue.JSValue")
+	assertContains(t, out, "var nums *jsvalue.JSValue")
 }
 
 func TestOptionalParameter(t *testing.T) {
@@ -122,7 +122,7 @@ func TestNullableUnionType(t *testing.T) {
 func TestBooleanType(t *testing.T) {
 	ts := `function check(b: boolean): boolean { return b; }`
 	out := compile(t, ts)
-	assertContains(t, out, "func check(b *jsvalue.JSValue) *jsvalue.JSValue")
+	assertContains(t, out, "var check = jsvalue.NewFunction(func(_args ...*jsvalue.JSValue) *jsvalue.JSValue")
 }
 
 func TestMainFunctionGenerated(t *testing.T) {
@@ -301,8 +301,8 @@ func TestDestructuringParamWithDefault(t *testing.T) {
 func TestDestructuringParamWithoutDefault(t *testing.T) {
 	ts := `function f({name, age}) { return name; }`
 	out := compile(t, ts)
-	// No default value — should NOT be variadic
-	assertNotContains(t, out, "...")
+	// Destructured param should extract from _args, not be variadic itself
+	assertContains(t, out, "var _param0 *jsvalue.JSValue")
 	assertContains(t, out, "_param0")
 	assertContains(t, out, "_param0.Get(\"name\")")
 }
@@ -428,7 +428,8 @@ func TestTypedLocalAssignedFromUntypedCall(t *testing.T) {
 	}
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "int(inner(")
+	// Hoisted inner function called via .Call() in all-JSValue mode
+	assertContains(t, out, "inner.Call(")
 	assertContains(t, out, ".Number())")
 }
 
@@ -445,7 +446,7 @@ func TestSubscriptOnJSValueCallResult(t *testing.T) {
 	ts := `function f(arg) { return arg.slice(-1)[0]; }`
 	out := compile(t, ts)
 	assertContains(t, out, ".Index(0)")
-	assertNotContains(t, out, "[0]")
+	assertNotContains(t, out, "].Slice(-1)[0]")
 }
 
 func TestJSValueSliceLocalAssignedFromSlice(t *testing.T) {
@@ -510,8 +511,8 @@ func TestHoistedFuncPaddedArgs(t *testing.T) {
 	inner(x, x);
 }`
 	out := compile(t, ts)
-	// Call with 2 args should be padded to 3 with nil
-	assertContains(t, out, ", nil)")
+	// Hoisted functions use .Call() — variadic, no nil padding needed
+	assertContains(t, out, "inner.Call(")
 }
 
 func TestHoistedFuncLiteralArgsWrapped(t *testing.T) {

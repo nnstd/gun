@@ -381,6 +381,29 @@ func wrapExprWithJSValue(expr ast.Expr) ast.Expr {
 	return callExpr(selectorExpr(ident("jsvalue"), "From"), expr)
 }
 
+// funcDeclToJSValueVar converts a Go func declaration into a var declaration
+// with jsvalue.NewFunction wrapping: func Foo(a, b) R { body } →
+// var Foo = jsvalue.NewFunction(func(_args ...*jsvalue.JSValue) *jsvalue.JSValue { ... })
+func (t *Transformer) funcDeclToJSValueVar(d *ast.FuncDecl) ast.Decl {
+	// Extract param names from the func declaration
+	var paramNames []string
+	if d.Type.Params != nil {
+		for _, f := range d.Type.Params.List {
+			for _, n := range f.Names {
+				paramNames = append(paramNames, n.Name)
+			}
+		}
+	}
+
+	fnLit := &ast.FuncLit{
+		Type: d.Type,
+		Body: d.Body,
+	}
+
+	jsVal := t.wrapFuncLitAsJSValue(fnLit, paramNames)
+	return varDecl(d.Name.Name, nil, jsVal)
+}
+
 // wrapFuncLitAsJSValue converts a Go function literal into a jsvalue.NewFunction call.
 // It rewrites the function to accept variadic _args, unpacks named params,
 // ensures *jsvalue.JSValue return type, and wraps with jsvalue.NewFunction().

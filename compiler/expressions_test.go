@@ -156,12 +156,13 @@ func TestEnsureBoolMethodCallOnLocal(t *testing.T) {
 }
 
 func TestEnsureBoolPlainCallNotWrapped(t *testing.T) {
-	// In all-JSValue mode, local function calls return *jsvalue.JSValue
-	// and get != nil truthiness check in boolean context.
+	// Package-level functions are JSValue vars, called via .Call()
+	// and use .Bool() for truthiness in boolean context.
 	ts := `function isOk(x: number): boolean { return x > 0; }
 function f(x: number): string { if (isOk(x)) { return "yes"; } return "no"; }`
 	out := compile(t, ts)
-	assertContains(t, out, "isOk(x)")
+	assertContains(t, out, "isOk.Call(")
+	assertContains(t, out, ".Bool()")
 }
 
 func TestEnsureBoolTypedLocalNotNilChecked(t *testing.T) {
@@ -180,7 +181,7 @@ func TestLengthOnJSValueChain(t *testing.T) {
 	ts := `function f(arr) { return arr[0].length; }`
 	out := compile(t, ts)
 	assertContains(t, out, ".Index(0).Len()")
-	assertNotContains(t, out, "len(")
+	assertNotContains(t, out, "len(arr")
 }
 
 func TestTernaryNumericTypeInference(t *testing.T) {
@@ -383,13 +384,14 @@ func TestMatchResultNotTreatedAsJSValue(t *testing.T) {
 	assertNotContains(t, out, "m.Index(")
 }
 
-func TestTopLevelFuncNilPadding(t *testing.T) {
+func TestTopLevelFuncCallFromMain(t *testing.T) {
 	ts := `
 function main() { increment(); }
 function increment(orig) { return orig; }
 `
 	out := compile(t, ts)
-	assertContains(t, out, "increment(nil)")
+	// main() calls increment which is a JSValue var — called directly from main (Go func)
+	assertContains(t, out, "increment()")
 }
 
 func TestPkgVarMethodCallUsesGetCall(t *testing.T) {

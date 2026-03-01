@@ -604,40 +604,24 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 	}
 
 	// When calling a function imported from a transpiled (non-runtime) module,
-	// wrap each argument with jsvalue.From() since all params are *jsvalue.JSValue.
+	// use .Call() since all transpiled exports are *jsvalue.JSValue (NewFunction).
 	if fnNode.Kind() == "identifier" {
 		name := fnNode.Utf8Text(t.source)
 		if imp, ok := t.importedNames[name]; ok && imp.isTranspiled && imp.goSymbol != "" {
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 			fun := t.transformExpr(fnNode)
 			args := t.transformArgs(argsNode)
 			for i, arg := range args {
 				args[i] = t.wrapAsJSValue(arg)
 			}
-			return callExpr(fun, args...)
+			return callExpr(selectorExpr(fun, "Call"), args...)
 		}
 	}
 
-	// When calling a local function variable whose params are all *jsvalue.JSValue
-	// (untyped hoisted function), wrap non-JSValue arguments with jsvalue.From().
-	// Pad with nil if fewer args than params (JS allows omitting trailing args).
+	// All function variables (hoisted, package-level, locals) are *jsvalue.JSValue
+	// in the all-JSValue architecture — use .Call() to invoke.
 	if fnNode.Kind() == "identifier" {
 		fnName := fnNode.Utf8Text(t.source)
-		_, inParamCounts := t.funcParamCounts[fnName]
-		if inParamCounts {
-			fun := t.transformExpr(fnNode)
-			args := t.transformArgs(argsNode)
-			for i, arg := range args {
-				args[i] = t.wrapAsJSValue(arg)
-			}
-			if expected, ok := t.funcParamCounts[fnName]; ok && len(args) < expected {
-				for len(args) < expected {
-					args = append(args, ident("nil"))
-				}
-			}
-			return callExpr(fun, args...)
-		}
-		// Untyped locals/pkg vars that are NOT hoisted functions hold *jsvalue.JSValue
-		// which may be a function reference — use .Call() to invoke.
 		isPkgUntyped := false
 		if typed, ok := t.pkgVarTyped[fnName]; ok && !typed {
 			isPkgUntyped = true

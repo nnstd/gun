@@ -416,7 +416,13 @@ func (t *Transformer) transformTopLevel(node *sitter.Node) {
 	switch node.Kind() {
 	case "function_declaration":
 		if d := t.transformFuncDecl(node, false); d != nil {
-			t.decls = append(t.decls, d)
+			// main/init stay as Go func declarations; others become JSValue vars
+			if d.Name.Name == "main" || d.Name.Name == "init" {
+				t.decls = append(t.decls, d)
+			} else {
+				t.pkgVarTyped[d.Name.Name] = false
+				t.decls = append(t.decls, t.funcDeclToJSValueVar(d))
+			}
 		}
 	case "lexical_declaration", "variable_declaration":
 		decls := t.transformVarDecl(node)
@@ -509,7 +515,13 @@ func (t *Transformer) transformExport(node *sitter.Node) {
 			t.transformExportClause(node, child)
 		case "function_declaration":
 			if d := t.transformFuncDecl(child, true); d != nil {
-				t.decls = append(t.decls, d)
+				nameNode := child.ChildByFieldName("name")
+				if nameNode != nil {
+					origName := nameNode.Utf8Text(t.source)
+					t.pkgVarTyped[origName] = false
+					t.exportedNames[origName] = true
+				}
+				t.decls = append(t.decls, t.funcDeclToJSValueVar(d))
 			}
 		case "lexical_declaration", "variable_declaration":
 			decls := t.transformVarDecl(child)
@@ -558,9 +570,12 @@ func (t *Transformer) transformExportDefault(node *sitter.Node) {
 		nameNode := child.ChildByFieldName("name")
 		if nameNode != nil {
 			if d := t.transformFuncDecl(child, true); d != nil {
-				t.decls = append(t.decls, d)
+				origName := nameNode.Utf8Text(t.source)
+				t.pkgVarTyped[origName] = false
+				t.exportedNames[origName] = true
+				t.decls = append(t.decls, t.funcDeclToJSValueVar(d))
 				// Also create a Default alias so importers can find it
-				goName := capitalize(nameNode.Utf8Text(t.source))
+				goName := capitalize(origName)
 				t.decls = append(t.decls, varDecl("Default", nil, ident(goName)))
 			}
 		} else {

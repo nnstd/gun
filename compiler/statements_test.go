@@ -233,7 +233,7 @@ function f() {
 	return width;
 }`
 	out := compileWithModule(t, ts, "test")
-	assertContains(t, out, "width += some_lib.GetValue().Number()")
+	assertContains(t, out, "width += some_lib.GetValue.Call().Number()")
 }
 
 func TestAssignToUntypedLocalWrapsJSValue(t *testing.T) {

@@ -66,7 +66,7 @@ func TestImportTypeOnly(t *testing.T) {
 	ts := `import type { User } from "./models";
 function greet(u: User): string { return "hi"; }`
 	out := compileWithModule(t, ts, "myapp")
-	assertContains(t, out, "func greet")
+	assertContains(t, out, "var greet = jsvalue.NewFunction(")
 }
 
 func TestImportOSModule(t *testing.T) {
@@ -107,9 +107,9 @@ foo();`
 	// Same-package: no import path should be generated for relative imports
 	assertNotContains(t, s, `"mymod/utils"`)
 	assertNotContains(t, s, `"mymod/foo"`)
-	// Symbols should be referenced directly without package prefix
-	assertContains(t, s, "Helper()")
-	assertContains(t, s, "Default()")
+	// Same-package transpiled functions use .Call() (all JSValue)
+	assertContains(t, s, "Helper.Call()")
+	assertContains(t, s, "Default.Call()")
 }
 
 func TestSamePackageNamespaceImport(t *testing.T) {
