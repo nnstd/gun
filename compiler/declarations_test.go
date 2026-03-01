@@ -1020,3 +1020,45 @@ func TestSuperCallInConstructor(t *testing.T) {
 	assertContains(t, out, "jserror.Error.Call(this,")
 	assertContains(t, out, `this.Set("name"`)
 }
+
+func TestNamingCollisionClassAndFunction(t *testing.T) {
+	// class Foo and function foo both capitalize to Foo — second gets numeric suffix
+	ts := `export class Foo { }
+export function foo() { return 1; }`
+	out := compile(t, ts)
+	assertContains(t, out, "var Foo = jsvalue.NewClass(")
+	assertContains(t, out, "var Foo2 = jsvalue.NewFunction(")
+	assertNotContains(t, out, "Foo redeclared")
+}
+
+func TestNamingCollisionReferencesUseRemap(t *testing.T) {
+	// References to the renamed function use the suffixed name
+	ts := `export class Foo { }
+export function foo() { return 1; }
+const x = foo();`
+	out := compile(t, ts)
+	assertContains(t, out, "Foo2.Call(")
+}
+
+func TestNoCollisionNoSuffix(t *testing.T) {
+	// No collision — names stay as-is
+	ts := `export class Dog { }
+export function bark() { return "woof"; }`
+	out := compile(t, ts)
+	assertContains(t, out, "var Dog = jsvalue.NewClass(")
+	assertContains(t, out, "var Bark = jsvalue.NewFunction(")
+}
+
+func TestSymbolGlobal(t *testing.T) {
+	// Symbol() produces jsvalue.NewSymbol
+	ts := `const s = Symbol("test");`
+	out := compile(t, ts)
+	assertContains(t, out, `jsvalue.NewSymbol(fmt.Sprint("test"))`)
+}
+
+func TestThisAtPackageLevel(t *testing.T) {
+	// this at package level is undefined (ES module semantics)
+	ts := `const x = this;`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewUndefined()")
+}
