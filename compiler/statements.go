@@ -51,6 +51,24 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 							}
 						}
 					}
+					// Destructuring assignment: [a, ...b] = expr or {a, b} = expr
+					// Uses = (assign) not := (define) since variables already exist.
+					if leftNode.Kind() == "array_pattern" || leftNode.Kind() == "object_pattern" {
+						rhs := t.transformExpr(rightNode)
+						if rhs != nil {
+							stmts := t.transformDestructuringFromExpr(leftNode, rhs)
+							// Convert := to = for assignment destructuring
+							for _, s := range stmts {
+								if as, ok := s.(*ast.AssignStmt); ok && as.Tok == token.DEFINE {
+									as.Tok = token.ASSIGN
+								}
+							}
+							if len(stmts) > 0 {
+								return &ast.BlockStmt{List: stmts}
+							}
+						}
+						return nil
+					}
 					// obj[key] = value on JSValue → obj.Set(key, wrappedValue)
 					// Handles both direct untyped locals and nested JSValue access (e.g. flags.arrays[key])
 					if leftNode.Kind() == "subscript_expression" {
@@ -277,8 +295,6 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 			return &ast.DeclStmt{Decl: decls[0]}
 		}
 		if len(decls) > 1 {
-			// Wrap multiple decls — return the first, rest get lost
-			// TODO: handle multiple declarations in statement context
 			return &ast.DeclStmt{Decl: decls[0]}
 		}
 		return nil
@@ -539,6 +555,12 @@ func (t *Transformer) transformForInOrOfStmt(node *sitter.Node) ast.Stmt {
 	// transformation recognizes them as JSValue locals.
 	if destructurePattern != nil {
 		t.preRegisterDestructureNames(destructurePattern)
+	}
+
+	// Register loop variable in scope so body references resolve correctly
+	// (prevents exportedNames from capitalizing local loop vars)
+	if varName != "_item" && varName != "_" {
+		t.addToCurrentScope(varName, false)
 	}
 
 	var body *ast.BlockStmt

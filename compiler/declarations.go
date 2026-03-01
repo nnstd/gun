@@ -527,6 +527,16 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 			decls := t.transformVarDecl(child)
 			for _, d := range decls {
 				stmts = append(stmts, &ast.DeclStmt{Decl: d})
+				// Suppress "declared and not used" for local vars
+				if gd, ok := d.(*ast.GenDecl); ok && gd.Tok == token.VAR {
+					for _, spec := range gd.Specs {
+						if vs, ok := spec.(*ast.ValueSpec); ok {
+							for _, n := range vs.Names {
+								stmts = append(stmts, assignStmt([]ast.Expr{ident("_")}, []ast.Expr{ident(n.Name)}))
+							}
+						}
+					}
+				}
 			}
 			continue
 		}
