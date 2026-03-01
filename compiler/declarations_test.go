@@ -974,3 +974,36 @@ const x = helper.name;`
 	out, _ := Compile([]byte(ts), "mypkg", "mymod", true)
 	assertContains(t, string(out), `.Get("name")`)
 }
+
+func TestArgumentsInClassMethod(t *testing.T) {
+	// arguments keyword in class methods maps to _args[1:] (skip this)
+	ts := `class Foo {
+	bar() { return arguments[0]; }
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewArray(_args[1:]...)")
+	assertContains(t, out, ".Index(0)")
+}
+
+func TestArgumentsInRegularFunction(t *testing.T) {
+	// arguments keyword in regular functions maps to _args
+	ts := `function f() { return arguments[0]; }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewArray(_args...)")
+}
+
+func TestArrayPrototypeAccess(t *testing.T) {
+	// Array as standalone value resolves to jsvalue.ArrayPrototype
+	ts := `function f() { return Array.isArray([]); }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.IsArrayValue(")
+}
+
+func TestInitCycleSplitsToInit(t *testing.T) {
+	// Self-referencing var declarations are split into forward decl + init()
+	ts := `const f = (x) => f(x - 1);`
+	out := compile(t, ts)
+	assertContains(t, out, "var f *jsvalue.JSValue")
+	assertContains(t, out, "func init()")
+	assertContains(t, out, "f = jsvalue.NewFunction(")
+}
