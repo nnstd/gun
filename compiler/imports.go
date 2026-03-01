@@ -279,6 +279,11 @@ func (t *Transformer) resolveIdentifier(name string) ast.Expr {
 	if t.isLocalName(name) {
 		return ident(sanitizeIdent(name))
 	}
+	// Exported package-level variables are capitalized in Go declarations.
+	// Reference them with the capitalized name.
+	if t.exportedNames[name] {
+		return ident(capitalize(name))
+	}
 	if imp, ok := t.importedNames[name]; ok {
 		if imp.goImportPath != "" {
 			// Use aliased import when package name differs from import path's last segment

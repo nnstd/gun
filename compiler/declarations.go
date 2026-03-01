@@ -930,7 +930,7 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 		// .Index() instead of Go's [] operator.
 		useJSIndex := false
 		if id, ok := valExpr.(*ast.Ident); ok {
-			useJSIndex = t.isUntypedLocal(id.Name) || strings.HasPrefix(id.Name, "_param")
+			useJSIndex = t.isUntypedLocal(id.Name) || strings.HasPrefix(id.Name, "_param") || strings.HasPrefix(id.Name, "_item")
 		}
 
 		for i := uint(0); i < pattern.NamedChildCount(); i++ {

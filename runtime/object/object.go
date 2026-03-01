@@ -106,3 +106,17 @@ func DefineProperty(obj any, prop any, desc any) *jsvalue.JSValue {
 	}
 	return o
 }
+
+// DefineProperties defines multiple properties on an object at once.
+// props is an object where each key maps to a property descriptor.
+func DefineProperties(obj any, props any) *jsvalue.JSValue {
+	o := toJSValue(obj)
+	p := toJSValue(props)
+	if p == nil {
+		return o
+	}
+	for _, key := range p.OwnKeys() {
+		DefineProperty(o, key, p.Get(key))
+	}
+	return o
+}

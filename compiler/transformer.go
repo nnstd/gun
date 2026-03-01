@@ -30,6 +30,7 @@ type Transformer struct {
 	mapSetLocals       map[string]string          // variable name → "map" or "set" (from new Map()/new Set())
 	typedLocalTypes    map[string]string          // typed local name → Go type name (e.g. "bool", "string", "[]string")
 	pkgVarTyped        map[string]bool            // package-level variable name → true if typed (not JSValue)
+	exportedNames      map[string]bool            // TS names that were exported (capitalized in Go)
 	funcParamCounts    map[string]int             // hoisted function name → parameter count (for padding missing args)
 	funcReturnTypes    map[string]string          // function name → Go return type (e.g. "bool", "*jsvalue.JSValue")
 	builtins           *BuiltinRegistry           // registry of built-in methods and their metadata
@@ -50,6 +51,7 @@ func newTransformer(source []byte, pkgName, moduleName string, samePackageImport
 		mapSetLocals:       make(map[string]string),
 		typedLocalTypes:    make(map[string]string),
 		pkgVarTyped:        make(map[string]bool),
+		exportedNames:      make(map[string]bool),
 		funcParamCounts:    make(map[string]int),
 		funcReturnTypes:    make(map[string]string),
 		builtins:           NewBuiltinRegistry(),
@@ -545,6 +547,7 @@ func (t *Transformer) transformExport(node *sitter.Node) {
 					for _, spec := range gd.Specs {
 						if vs, ok := spec.(*ast.ValueSpec); ok {
 							for _, n := range vs.Names {
+								t.exportedNames[n.Name] = true
 								n.Name = capitalize(n.Name)
 							}
 						}
