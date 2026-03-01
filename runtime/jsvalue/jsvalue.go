@@ -251,18 +251,27 @@ func (v *JSValue) String() string {
 	}
 }
 
-// Number returns the numeric value.
+// Number returns the numeric value. Nil-safe: returns 0 for nil.
 func (v *JSValue) Number() float64 {
+	if v == nil {
+		return 0
+	}
 	return v.numVal
 }
 
-// Bool returns the boolean value.
+// Bool returns the boolean truthiness value. Nil-safe: returns false for nil.
 func (v *JSValue) Bool() bool {
+	if v == nil {
+		return false
+	}
 	return v.boolVal
 }
 
-// Int returns the int value.
+// Int returns the int value. Nil-safe: returns 0 for nil.
 func (v *JSValue) Int() int {
+	if v == nil {
+		return 0
+	}
 	return v.intVal
 }
 
