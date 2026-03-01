@@ -12,7 +12,11 @@ type PropertyDescriptor struct {
 
 // Get retrieves a property by name, walking the prototype chain.
 // Special: "__proto__" returns the internal prototype (not an own property).
+// Nil-safe: returns undefined for nil receiver.
 func (v *JSValue) Get(name string) *JSValue {
+	if v == nil {
+		return NewUndefined()
+	}
 	// __proto__ returns the internal prototype link, not an own property.
 	// This is safe from prototype pollution because Set("__proto__", x)
 	// creates an own property — it never modifies the internal chain.

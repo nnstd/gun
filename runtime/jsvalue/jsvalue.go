@@ -350,8 +350,11 @@ func (v *JSValue) MatchString(s any) bool {
 
 
 // Call invokes the JSValue as a function with the given arguments.
-// Returns undefined if the value is not a function.
+// Returns undefined if the value is not a function or nil.
 func (v *JSValue) Call(args ...*JSValue) *JSValue {
+	if v == nil {
+		return NewUndefined()
+	}
 	if v.funcVal != nil {
 		return v.funcVal(args...)
 	}

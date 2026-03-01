@@ -70,6 +70,11 @@ func (t *Transformer) transformExpr(node *sitter.Node) ast.Expr {
 	case "assignment_expression":
 		return t.transformAssignmentExpr(node)
 
+	case "sequence_expression":
+		// JS comma operator: (expr1, expr2, ..., exprN) — evaluates all, returns last.
+		// Wrap in IIFE to preserve side effects of all expressions.
+		return t.transformSequenceExpr(node)
+
 	case "augmented_assignment_expression":
 		return t.transformAugmentedAssignment(node)
 
@@ -346,9 +351,90 @@ func (t *Transformer) transformUpdateExpr(node *sitter.Node) ast.Expr {
 	}
 }
 
+func (t *Transformer) transformSequenceExpr(node *sitter.Node) ast.Expr {
+	// JS comma operator: (a, b, c) evaluates all expressions, returns last.
+	// Wrap in IIFE: func() T { a; b; return c }()
+	count := node.NamedChildCount()
+	if count == 0 {
+		return ident("nil")
+	}
+	if count == 1 {
+		return t.transformExpr(node.NamedChild(0))
+	}
+
+	var stmts []ast.Stmt
+	for i := uint(0); i < count-1; i++ {
+		child := node.NamedChild(i)
+		if child.Kind() == "assignment_expression" {
+			// Side-effecting assignment: transform as statement
+			lhs := t.transformExpr(child.ChildByFieldName("left"))
+			rhs := t.transformExpr(child.ChildByFieldName("right"))
+			if lhs != nil && rhs != nil {
+				stmts = append(stmts, assignStmt([]ast.Expr{lhs}, []ast.Expr{rhs}))
+			}
+		} else if e := t.transformExpr(child); e != nil {
+			stmts = append(stmts, exprStmt(e))
+		}
+	}
+
+	lastChild := node.NamedChild(count - 1)
+	lastExpr := t.transformExpr(lastChild)
+	if lastExpr == nil {
+		lastExpr = ident("nil")
+	}
+
+	// Determine return type
+	var retType ast.Expr = ident("any")
+	if t.nodeReturnsJSValue(lastChild) {
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		retType = jsValuePtrType()
+	}
+
+	stmts = append(stmts, returnStmt(lastExpr))
+	return &ast.CallExpr{
+		Fun: &ast.FuncLit{
+			Type: &ast.FuncType{
+				Params:  fieldList(),
+				Results: fieldList(field("", retType)),
+			},
+			Body: &ast.BlockStmt{List: stmts},
+		},
+	}
+}
+
 func (t *Transformer) transformAssignmentExpr(node *sitter.Node) ast.Expr {
 	leftNode := node.ChildByFieldName("left")
 	rightNode := node.ChildByFieldName("right")
+
+	// Handle member assignment on JSValue: obj.prop = value → obj.Set("prop", value)
+	if leftNode != nil && leftNode.Kind() == "member_expression" {
+		memObj := leftNode.ChildByFieldName("object")
+		memProp := leftNode.ChildByFieldName("property")
+		if memObj != nil && memProp != nil {
+			isJSV := memObj.Kind() == "this" || (memObj.Kind() == "identifier" && t.isUntypedLocal(memObj.Utf8Text(t.source))) || t.nodeReturnsJSValue(memObj)
+			if isJSV {
+				obj := t.transformExpr(memObj)
+				rhs := t.transformExpr(rightNode)
+				if obj != nil && rhs != nil {
+					rhs = t.wrapAsJSValue(rhs)
+					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+					propName := memProp.Utf8Text(t.source)
+					return &ast.CallExpr{
+						Fun: &ast.FuncLit{
+							Type: &ast.FuncType{
+								Params:  fieldList(),
+								Results: fieldList(field("", jsValuePtrType())),
+							},
+							Body: blockStmt(
+								exprStmt(callExpr(selectorExpr(obj, "Set"), stringLit(propName), rhs)),
+								returnStmt(rhs),
+							),
+						},
+					}
+				}
+			}
+		}
+	}
 
 	// Handle subscript assignment on JSValue: seen[key] = value → seen.Set(key, value)
 	if leftNode != nil && leftNode.Kind() == "subscript_expression" {
@@ -679,11 +765,26 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 
 			// Catch-all: method call on any JSValue-returning expression
 			// (call results, new expressions, etc.) uses .Get("method").Call(this, args...).
+			// For complex receivers (calls, chains), wrap in IIFE to evaluate once.
 			if t.nodeReturnsJSValue(objNode) {
 				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 				obj := t.transformExpr(objNode)
 				for i, arg := range args {
 					args[i] = t.wrapAsJSValue(arg)
+				}
+				// If receiver is complex (not a simple identifier), wrap in IIFE
+				// to avoid evaluating it twice (once for .Get, once for Call this).
+				if !isSimpleExpr(obj) {
+					recv := ident("_recv")
+					allArgs := append([]ast.Expr{recv}, args...)
+					innerCall := callExpr(selectorExpr(callExpr(selectorExpr(recv, "Get"), stringLit(prop)), "Call"), allArgs...)
+					return callExpr(&ast.FuncLit{
+						Type: &ast.FuncType{
+							Params:  fieldList(field("_recv", jsValuePtrType())),
+							Results: fieldList(field("", jsValuePtrType())),
+						},
+						Body: blockStmt(returnStmt(innerCall)),
+					}, obj)
 				}
 				allArgs := append([]ast.Expr{obj}, args...)
 				return callExpr(selectorExpr(callExpr(selectorExpr(obj, "Get"), stringLit(prop)), "Call"), allArgs...)

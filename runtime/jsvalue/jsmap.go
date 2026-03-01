@@ -47,31 +47,45 @@ func jsValueEqual(a, b *JSValue) bool {
 	}
 }
 
+// mapArgs strips the leading `this` argument from Map method calls.
+// The transpiler convention is .Get("method").Call(this, args...) where
+// this is the map itself (passed as args[0]). If args[0] is the map,
+// strip it; otherwise treat all args as actual arguments.
+func mapArgs(m *JSValue, args []*JSValue) []*JSValue {
+	if len(args) > 0 && args[0] == m {
+		return args[1:]
+	}
+	return args
+}
+
 // NewMap creates an empty Map JSValue with set/get/has/delete methods.
 func NewMap() *JSValue {
 	m := &JSValue{typ: TypeMap, mapVal: &jsMap{}, properties: make(map[string]*PropertyDescriptor)}
-	// Add standard Map methods so they can be called via .Get("method").Call()
 	m.Set("set", NewFunction(func(args ...*JSValue) *JSValue {
-		if len(args) >= 2 {
-			return MapSet(m, args[0], args[1])
+		a := mapArgs(m, args)
+		if len(a) >= 2 {
+			return MapSet(m, a[0], a[1])
 		}
 		return m
 	}))
 	m.Set("get", NewFunction(func(args ...*JSValue) *JSValue {
-		if len(args) >= 1 {
-			return MapGet(m, args[0])
+		a := mapArgs(m, args)
+		if len(a) >= 1 {
+			return MapGet(m, a[0])
 		}
 		return NewUndefined()
 	}))
 	m.Set("has", NewFunction(func(args ...*JSValue) *JSValue {
-		if len(args) >= 1 {
-			return MapHas(m, args[0])
+		a := mapArgs(m, args)
+		if len(a) >= 1 {
+			return MapHas(m, a[0])
 		}
 		return NewBool(false)
 	}))
 	m.Set("delete", NewFunction(func(args ...*JSValue) *JSValue {
-		if len(args) >= 1 {
-			return MapDelete(m, args[0])
+		a := mapArgs(m, args)
+		if len(a) >= 1 {
+			return MapDelete(m, a[0])
 		}
 		return NewBool(false)
 	}))
@@ -90,6 +104,7 @@ func MapGet(m *JSValue, key *JSValue) *JSValue {
 }
 
 // MapSet sets key to value and returns the map.
+// Nil values are stored as-is (nil means JS undefined for WeakMap usage).
 func MapSet(m *JSValue, key *JSValue, value *JSValue) *JSValue {
 	if m == nil || m.mapVal == nil {
 		return m

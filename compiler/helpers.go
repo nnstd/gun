@@ -824,6 +824,19 @@ func isBoolExpr(expr ast.Expr) bool {
 	return false
 }
 
+// isSimpleExpr returns true if the Go AST expression is trivial to duplicate
+// (identifier or selector). Complex expressions (calls, etc.) should not be
+// duplicated since they may have side effects.
+func isSimpleExpr(expr ast.Expr) bool {
+	switch expr.(type) {
+	case *ast.Ident:
+		return true
+	case *ast.SelectorExpr:
+		return true
+	}
+	return false
+}
+
 // isGoTypeName reports whether s is a valid Go type name for ternary IIFE return types.
 func isGoTypeName(s string) bool {
 	switch s {
