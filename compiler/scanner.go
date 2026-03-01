@@ -81,7 +81,22 @@ func ScanExports(source []byte) ([]PackageExport, error) {
 }
 
 func scanExportStatement(node *sitter.Node, source []byte) []PackageExport {
+	// Check for "default" keyword in the export statement
+	hasDefault := false
+	for i := uint(0); i < node.ChildCount(); i++ {
+		if node.Child(i).Kind() == "default" {
+			hasDefault = true
+			break
+		}
+	}
+
 	var exports []PackageExport
+	if hasDefault {
+		exports = append(exports, PackageExport{
+			Name: "default", GoName: "Default", Kind: "var", IsJSValue: true,
+		})
+	}
+
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		kind := child.Kind()
@@ -111,20 +126,6 @@ func scanExportStatement(node *sitter.Node, source []byte) []PackageExport {
 			if name := extractDeclName(child, source); name != "" {
 				exports = append(exports, PackageExport{
 					Name: name, GoName: capitalize(name), Kind: "type",
-				})
-			}
-		default:
-			// export default <expression> — check for "default" keyword in parent
-			hasDefault := false
-			for j := uint(0); j < node.ChildCount(); j++ {
-				if node.Child(j).Kind() == "default" {
-					hasDefault = true
-					break
-				}
-			}
-			if hasDefault {
-				exports = append(exports, PackageExport{
-					Name: "default", GoName: "Default", Kind: "var", IsJSValue: true,
 				})
 			}
 		case "export_clause":

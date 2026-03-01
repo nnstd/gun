@@ -472,6 +472,12 @@ func (t *Transformer) prescanTopLevelFuncs(root *sitter.Node) {
 			if name != "main" && name != "init" {
 				t.pkgVarTyped[name] = false
 			}
+		case "class_declaration":
+			nameNode := child.ChildByFieldName("name")
+			if nameNode != nil {
+				name := capitalize(nameNode.Utf8Text(t.source))
+				t.pkgVarTyped[name] = false
+			}
 		case "lexical_declaration", "variable_declaration":
 			// Pre-register package-level variables so forward references work.
 			for j := uint(0); j < child.NamedChildCount(); j++ {
@@ -499,6 +505,12 @@ func (t *Transformer) prescanTopLevelFuncs(root *sitter.Node) {
 						name := nameNode.Utf8Text(t.source)
 						t.pkgVarTyped[name] = false
 						t.exportedNames[name] = true
+					}
+				case "class_declaration":
+					nameNode := inner.ChildByFieldName("name")
+					if nameNode != nil {
+						name := capitalize(nameNode.Utf8Text(t.source))
+						t.pkgVarTyped[name] = false
 					}
 				case "lexical_declaration", "variable_declaration":
 					for k := uint(0); k < inner.NamedChildCount(); k++ {
@@ -551,6 +563,11 @@ func (t *Transformer) transformTopLevel(node *sitter.Node) {
 		decls := t.transformVarDecl(node)
 		t.decls = append(t.decls, decls...)
 	case "class_declaration":
+		nameNode := node.ChildByFieldName("name")
+		if nameNode != nil {
+			className := capitalize(nameNode.Utf8Text(t.source))
+			t.pkgVarTyped[className] = false
+		}
 		classDecls := t.transformClassDecl(node)
 		t.decls = append(t.decls, classDecls...)
 	case "interface_declaration":
