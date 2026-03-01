@@ -283,6 +283,10 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 		// so process?.version, process?.versions etc. work through .Get()
 		addImport("github.com/nnstd/gun/runtime/process")
 		return callExpr(selectorExpr(ident("process"), "AsJSValue"))
+	case "Array":
+		// Array as standalone value (used for Array.prototype, Array.isArray, etc.)
+		addImport("github.com/nnstd/gun/runtime/jsvalue")
+		return selectorExpr(ident("jsvalue"), "ArrayPrototype")
 	case "Number":
 		// Number as standalone (used as Number(x) call) — identity for numeric values
 		return ident("float64")

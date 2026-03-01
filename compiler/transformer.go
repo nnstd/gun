@@ -33,6 +33,7 @@ type Transformer struct {
 	exportedNames      map[string]bool            // TS names that were exported (capitalized in Go)
 	funcParamCounts    map[string]int             // hoisted function name → parameter count (for padding missing args)
 	funcReturnTypes    map[string]string          // function name → Go return type (e.g. "bool", "*jsvalue.JSValue")
+	inClassMethod      bool                       // true when transforming a class method body (arguments offset by 1 for this)
 	builtins           *BuiltinRegistry           // registry of built-in methods and their metadata
 }
 
@@ -206,7 +207,7 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		// Global functions that return JSValue
 		switch name {
 		case "String", "Array", "Error", "TypeError", "RangeError", "ReferenceError",
-			"process":
+			"process", "arguments":
 			return true
 		}
 		return false

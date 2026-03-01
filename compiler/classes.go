@@ -226,6 +226,11 @@ func (t *Transformer) buildMethodSetup(className, methodName string, node *sitte
 	t.addToCurrentScope("this", false)
 	t.jsvalueLocals["this"] = true
 
+	// Set class method flag for arguments keyword handling
+	prevInClassMethod := t.inClassMethod
+	t.inClassMethod = !isStatic
+	defer func() { t.inClassMethod = prevInClassMethod }()
+
 	// Build the function body
 	var body *ast.BlockStmt
 	if bodyNode != nil {

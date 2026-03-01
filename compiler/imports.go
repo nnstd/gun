@@ -274,6 +274,22 @@ func (t *Transformer) resolveModulePath(modulePath string) moduleMapping {
 // resolveIdentifier checks if a name was imported from a TS module and returns
 // the appropriate Go expression. Falls back to builtin identifier mapping.
 func (t *Transformer) resolveIdentifier(name string) ast.Expr {
+	// JS `arguments` keyword → JSValue array of function arguments.
+	// In class methods, _args[0] is `this`, so arguments = _args[1:].
+	// In regular functions, arguments = _args.
+	if name == "arguments" {
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		var argsSlice ast.Expr
+		if t.inClassMethod {
+			argsSlice = &ast.SliceExpr{X: ident("_args"), Low: intLit("1")}
+		} else {
+			argsSlice = ident("_args")
+		}
+		call := callExpr(selectorExpr(ident("jsvalue"), "NewArray"), argsSlice)
+		// Set Ellipsis to spread the slice: jsvalue.NewArray(_args[1:]...)
+		call.Ellipsis = 1
+		return call
+	}
 	// Local parameters/variables shadow imports.
 	// Check both raw name and sanitized name (e.g. "string" → "string_").
 	sanitized := sanitizeIdent(name)
