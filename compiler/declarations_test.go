@@ -944,3 +944,33 @@ func TestProcessStdoutColumnsUsesGet(t *testing.T) {
 	out := compile(t, ts)
 	assertContains(t, out, `.Get("columns")`)
 }
+
+func TestStringGlobalReturnsJSValue(t *testing.T) {
+	// String(x) → jsvalue.NewString(fmt.Sprint(x))
+	ts := `function f(x) { return String(x); }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewString(fmt.Sprint(")
+}
+
+func TestMethodOnCallResultUsesGetCall(t *testing.T) {
+	// Method call on a call result (JSValue) uses .Get().Call()
+	ts := `function f(s) { return String(s).normalize(); }`
+	out := compile(t, ts)
+	assertContains(t, out, `.Get("normalize").Call(`)
+}
+
+func TestObjectLiteralInOrUsesJSValueOr(t *testing.T) {
+	// expr || {default: val} should use jsvalue.Or, not Go ||
+	ts := `function f(x) { return x || {fallback: true}; }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.Or(")
+	assertNotContains(t, out, " || ")
+}
+
+func TestImportedTranspiledSymbolIsJSValue(t *testing.T) {
+	// Named imports from transpiled modules are JSValue
+	ts := `import { helper } from "./utils";
+const x = helper.name;`
+	out, _ := Compile([]byte(ts), "mypkg", "mymod", true)
+	assertContains(t, string(out), `.Get("name")`)
+}
