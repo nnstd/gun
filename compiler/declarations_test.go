@@ -910,3 +910,37 @@ func TestBareReturnInJSValueFunc(t *testing.T) {
 	out := compile(t, ts)
 	assertContains(t, out, "return nil")
 }
+
+func TestLiteralVarInitWrappedAsJSValue(t *testing.T) {
+	// Variables initialized from literals are wrapped in JSValue constructors.
+	ts := `function f() {
+	let count = 0;
+	let name = "hello";
+	let flag = false;
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "var count = jsvalue.NewNumber(float64(0))")
+	assertContains(t, out, `var name = jsvalue.NewString("hello")`)
+	assertContains(t, out, "var flag = jsvalue.NewBool(false)")
+}
+
+func TestNewArrayBuiltin(t *testing.T) {
+	// new Array(n) produces jsvalue.NewArray()
+	ts := `function f() { return new Array(5); }`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.NewArray()")
+}
+
+func TestAugmentedSubAssignOnJSValue(t *testing.T) {
+	// x -= y on JSValue produces x = jsvalue.Sub(x, y)
+	ts := `function f(x, y) { x -= y; return x; }`
+	out := compile(t, ts)
+	assertContains(t, out, "x = jsvalue.Sub(x,")
+}
+
+func TestProcessStdoutColumnsUsesGet(t *testing.T) {
+	// process.stdout.columns should use .Get("columns") since stdout is JSValue
+	ts := `function f() { return process.stdout.columns; }`
+	out := compile(t, ts)
+	assertContains(t, out, `.Get("columns")`)
+}
