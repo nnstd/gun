@@ -29,7 +29,28 @@ func IsBuiltin(name string) bool {
 
 // Meta holds import.meta properties.
 type Meta struct {
-	Url *jsvalue.JSValue
+	Url     *jsvalue.JSValue
+	Resolve func(*jsvalue.JSValue) *jsvalue.JSValue
+}
+
+func init() {
+	// import.meta.resolve(specifier) — resolves a module specifier relative to the current module
+	ImportMeta.Resolve = func(specifier *jsvalue.JSValue) *jsvalue.JSValue {
+		if specifier == nil {
+			return jsvalue.NewUndefined()
+		}
+		spec := specifier.String()
+		if filepath.IsAbs(spec) {
+			return jsvalue.NewString("file://" + spec)
+		}
+		// Resolve relative to the current executable's directory
+		exe, err := os.Executable()
+		if err != nil {
+			return jsvalue.NewString(spec)
+		}
+		resolved := filepath.Join(filepath.Dir(exe), spec)
+		return jsvalue.NewString("file://" + resolved)
+	}
 }
 
 // ImportMeta returns the import.meta object for the current process.

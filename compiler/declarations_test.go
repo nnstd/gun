@@ -1007,3 +1007,16 @@ func TestInitCycleSplitsToInit(t *testing.T) {
 	assertContains(t, out, "func init()")
 	assertContains(t, out, "f = jsvalue.NewFunction(")
 }
+
+func TestSuperCallInConstructor(t *testing.T) {
+	// super(args) calls parent constructor on this
+	ts := `class Child extends Error {
+	constructor(msg) {
+		super(msg);
+		this.name = "Child";
+	}
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "jserror.Error.Call(this,")
+	assertContains(t, out, `this.Set("name"`)
+}

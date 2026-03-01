@@ -516,6 +516,17 @@ func (t *Transformer) prescanTopLevelFuncs(root *sitter.Node) {
 						t.pkgVarTyped[name] = typed
 						t.exportedNames[name] = true
 					}
+				case "export_clause":
+					// export { foo, bar } — register names as exported
+					for k := uint(0); k < inner.NamedChildCount(); k++ {
+						spec := inner.NamedChild(k)
+						if spec.Kind() == "export_specifier" {
+							nameNode := spec.ChildByFieldName("name")
+							if nameNode != nil {
+								t.exportedNames[nameNode.Utf8Text(t.source)] = true
+							}
+						}
+					}
 				}
 			}
 		}
@@ -525,7 +536,9 @@ func (t *Transformer) prescanTopLevelFuncs(root *sitter.Node) {
 func (t *Transformer) transformTopLevel(node *sitter.Node) {
 	switch node.Kind() {
 	case "function_declaration":
-		if d := t.transformFuncDecl(node, false); d != nil {
+		nameNode := node.ChildByFieldName("name")
+		isExported := nameNode != nil && t.exportedNames[nameNode.Utf8Text(t.source)]
+		if d := t.transformFuncDecl(node, isExported); d != nil {
 			// main/init stay as Go func declarations; others become JSValue vars
 			if d.Name.Name == "main" || d.Name.Name == "init" {
 				t.decls = append(t.decls, d)
@@ -853,13 +866,12 @@ func (t *Transformer) transformExportClause(exportNode *sitter.Node, clause *sit
 		if reexportMod != "" {
 			t.transformReexport(origName, goName, reexportMod)
 		} else {
-			// Skip re-export if the capitalized name exists as a cross-file export
-			// AND the original lowercase name isn't defined in this file.
-			// This means it's a pass-through re-export (import + re-export from another file).
-			// But if the original IS defined locally (e.g. function isFullWidth),
-			// we need the var IsFullWidth = isFullWidth alias.
-			if goName == capitalize(origName) && t.isCrossFileExport(goName) {
-				if _, isLocal := t.pkgVarTyped[origName]; !isLocal {
+			// Skip alias when the capitalized name already exists as a
+			// package-level var (from a capitalized function declaration
+			// or cross-file export). The alias would redeclare it.
+			capitalName := capitalize(origName)
+			if goName == capitalName {
+				if _, exists := t.pkgVarTyped[capitalName]; exists {
 					continue
 				}
 			}
