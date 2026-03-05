@@ -214,6 +214,10 @@ func init() {
 		Configurable: true,
 	})
 
+	// Array.prototype.prototype points to itself so Array.prototype.slice works
+	// when the transpiler generates ArrayPrototype.Get("prototype").Get("slice").
+	ArrayPrototype.Set("prototype", ArrayPrototype)
+
 	// ArrayPrototype slice: arr.slice(start, end) or [].slice.call(target).
 	// args[0] = this (the array), args[1:] = start, end
 	ArrayPrototype.DefineProperty("slice", &PropertyDescriptor{
