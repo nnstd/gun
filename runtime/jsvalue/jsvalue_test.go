@@ -1,6 +1,7 @@
 package jsvalue
 
 import (
+	"fmt"
 	"math"
 	"testing"
 )
@@ -399,5 +400,96 @@ func TestParseFloatInvalidReturnsNaN(t *testing.T) {
 	r := ParseFloat(NewString("abc"))
 	if !math.IsNaN(r.Number()) {
 		t.Errorf("ParseFloat(\"abc\"): got %v, want NaN", r.Number())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// NewArray nil vs empty slice
+// ---------------------------------------------------------------------------
+
+func TestNewArrayEmptyString(t *testing.T) {
+	// NewArray() with no args should produce a non-nil arrayVal so that
+	// String() returns "" (array join with no elements) instead of "[object Object]".
+	arr := NewArray()
+	got := arr.String()
+	if got != "" {
+		t.Errorf("NewArray().String(): got %q, want %q", got, "")
+	}
+}
+
+func TestNewArrayNonNilSlice(t *testing.T) {
+	// NewArray() should produce a non-nil underlying slice so that
+	// Array() returns a usable (non-nil) slice.
+	arr := NewArray()
+	if arr.Array() == nil {
+		t.Error("NewArray().Array() should not be nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// From() for arbitrary Go functions
+// ---------------------------------------------------------------------------
+
+func TestFromGoFunction(t *testing.T) {
+	// From(fmt.Sprintf) should create a callable function JSValue,
+	// not a string representation.
+	v := From(fmt.Sprintf)
+	if v.typ != TypeFunction {
+		t.Fatalf("From(fmt.Sprintf): got type %v, want TypeFunction", v.typ)
+	}
+	if v.funcVal == nil {
+		t.Fatal("From(fmt.Sprintf): funcVal should not be nil")
+	}
+}
+
+func TestFromGoFunctionCall(t *testing.T) {
+	// Wrapping fmt.Sprintf and calling it through JSValue should work.
+	format := From(fmt.Sprintf)
+	result := format.Call(NewString("hello %s"), NewString("world"))
+	if result.String() != "hello world" {
+		t.Errorf("From(fmt.Sprintf).Call(\"hello %%s\", \"world\"): got %q, want %q",
+			result.String(), "hello world")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Function.prototype.apply for non-method functions
+// ---------------------------------------------------------------------------
+
+func TestFunctionApplyNonMethod(t *testing.T) {
+	// A non-method Go function wrapped via From should work with .apply().
+	// For non-method functions, the thisArg should be skipped.
+	format := From(fmt.Sprintf)
+	argsArray := NewArray(NewString("hello %s"), NewString("world"))
+	// apply is called as: format.MethodCall("apply", thisArg, argsArray)
+	// For non-method functions, thisArg should be ignored and only argsArray used.
+	result := format.MethodCall("apply", format, argsArray)
+	if result.String() != "hello world" {
+		t.Errorf("apply on non-method function: got %q, want %q",
+			result.String(), "hello world")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// String.prototype.normalize
+// ---------------------------------------------------------------------------
+
+func TestStringNormalize(t *testing.T) {
+	// String.prototype.normalize should return the string as-is for basic ASCII.
+	v := NewString("hello")
+	result := v.MethodCall("normalize")
+	if result.String() != "hello" {
+		t.Errorf("NewString(\"hello\").MethodCall(\"normalize\"): got %q, want %q",
+			result.String(), "hello")
+	}
+}
+
+func TestStringNormalizeEmpty(t *testing.T) {
+	// normalize on an empty string should return "".
+	v := NewString("")
+	result := v.MethodCall("normalize")
+	if result.String() != "" {
+		t.Errorf("NewString(\"\").MethodCall(\"normalize\"): got %q, want %q",
+			result.String(), "")
 	}
 }

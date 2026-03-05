@@ -919,11 +919,23 @@ func (t *Transformer) transformTryCatch(node *sitter.Node) ast.Stmt {
 // stripReturns removes return statements from a block, replacing them with
 // bare returns. This is needed when catch bodies are placed inside defer funcs
 // where returning a value would return from the closure, not the outer function.
+// Return expressions that may have side effects (function calls) are preserved
+// as standalone expression statements before the bare return.
 func stripReturns(block *ast.BlockStmt) {
-	for i, stmt := range block.List {
+	var newList []ast.Stmt
+	for _, stmt := range block.List {
 		if ret, ok := stmt.(*ast.ReturnStmt); ok {
+			// Preserve return expressions that may have side effects (e.g., function
+			// calls like errorHandler(err) which may re-panic). Drop literals and
+			// identifiers that are pure values with no side effects.
+			for _, result := range ret.Results {
+				if hasSideEffect(result) {
+					newList = append(newList, &ast.ExprStmt{X: result})
+				}
+			}
 			ret.Results = nil
-			block.List[i] = ret
+			newList = append(newList, ret)
+			continue
 		}
 		// Recurse into nested blocks
 		switch s := stmt.(type) {
@@ -937,5 +949,20 @@ func stripReturns(block *ast.BlockStmt) {
 		case *ast.BlockStmt:
 			stripReturns(s)
 		}
+		newList = append(newList, stmt)
+	}
+	block.List = newList
+}
+
+// hasSideEffect returns true if the expression may have side effects
+// (function calls, method calls, etc.) and should be preserved as a statement.
+func hasSideEffect(expr ast.Expr) bool {
+	switch expr.(type) {
+	case *ast.CallExpr:
+		return true
+	case *ast.BasicLit, *ast.Ident:
+		return false
+	default:
+		return true
 	}
 }

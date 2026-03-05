@@ -3,6 +3,7 @@ package jsvalue
 import (
 	"fmt"
 	"math"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -121,11 +122,15 @@ func NewObject() *JSValue {
 
 // NewArray creates an array JSValue (stored as TypeObject).
 func NewArray(elems ...*JSValue) *JSValue {
+	arr := elems
+	if arr == nil {
+		arr = []*JSValue{}
+	}
 	return &JSValue{
 		typ:        TypeObject,
 		properties: make(map[string]*PropertyDescriptor),
 		prototype:  ArrayPrototype,
-		arrayVal:   elems,
+		arrayVal:   arr,
 	}
 }
 
@@ -234,6 +239,18 @@ func (v *JSValue) String() string {
 	case TypeSymbol:
 		return fmt.Sprintf("Symbol(%s)", v.symbolDesc)
 	case TypeObject:
+		// Arrays: JS Array.toString() joins elements with commas
+		if v.arrayVal != nil {
+			strs := make([]string, len(v.arrayVal))
+			for i, elem := range v.arrayVal {
+				if elem == nil || elem.typ == TypeNull || elem.typ == TypeUndefined {
+					strs[i] = ""
+				} else {
+					strs[i] = elem.String()
+				}
+			}
+			return strings.Join(strs, ",")
+		}
 		return "[object Object]"
 	case TypeFunction:
 		return "function"
@@ -259,12 +276,30 @@ func (v *JSValue) Number() float64 {
 	return v.numVal
 }
 
-// Bool returns the boolean truthiness value. Nil-safe: returns false for nil.
+// Bool returns the JavaScript truthiness value. Nil-safe: returns false for nil.
+// Follows JS semantics: false, 0, NaN, "", null, undefined are falsy; everything else is truthy.
 func (v *JSValue) Bool() bool {
 	if v == nil {
 		return false
 	}
-	return v.boolVal
+	switch v.typ {
+	case TypeBoolean:
+		return v.boolVal
+	case TypeNumber:
+		return v.numVal != 0 && v.numVal == v.numVal // false for 0 and NaN
+	case TypeString:
+		return v.strVal != ""
+	case TypeNull, TypeUndefined:
+		return false
+	case TypeObject, TypeFunction, TypeRegex, TypeMap, TypeSet:
+		return true
+	case TypeBigInt:
+		return v.bigIntVal != 0
+	case TypeSymbol:
+		return true
+	default:
+		return false
+	}
 }
 
 // Int returns the int value. Nil-safe: returns 0 for nil.
@@ -459,8 +494,122 @@ func From(v any) *JSValue {
 		if re, ok := v.(interface{ MatchString(string) bool }); ok {
 			return NewRegex(re)
 		}
+		// Check if it's any Go function and wrap it via reflection
+		rv := reflect.ValueOf(v)
+		if rv.Kind() == reflect.Func {
+			return wrapGoFunc(rv)
+		}
 		return NewString(fmt.Sprint(val))
 	}
+}
+
+// wrapGoFunc wraps an arbitrary Go function (detected via reflection) into a
+// JSValue function. This allows Go functions like fmt.Sprintf to be stored as
+// callable JSValue functions and used with .Call(), .MethodCall("apply", ...), etc.
+func wrapGoFunc(rv reflect.Value) *JSValue {
+	rt := rv.Type()
+	return NewFunction(func(args ...*JSValue) *JSValue {
+		numIn := rt.NumIn()
+		isVariadic := rt.IsVariadic()
+
+		var goArgs []reflect.Value
+		if isVariadic {
+			// Fixed params first
+			fixedCount := numIn - 1
+			for i := 0; i < fixedCount; i++ {
+				if i < len(args) {
+					goArgs = append(goArgs, jsvalueToReflect(args[i], rt.In(i)))
+				} else {
+					goArgs = append(goArgs, reflect.Zero(rt.In(i)))
+				}
+			}
+			// Variadic params
+			elemType := rt.In(numIn - 1).Elem()
+			for i := fixedCount; i < len(args); i++ {
+				goArgs = append(goArgs, jsvalueToReflect(args[i], elemType))
+			}
+		} else {
+			for i := 0; i < numIn; i++ {
+				if i < len(args) {
+					goArgs = append(goArgs, jsvalueToReflect(args[i], rt.In(i)))
+				} else {
+					goArgs = append(goArgs, reflect.Zero(rt.In(i)))
+				}
+			}
+		}
+
+		results := rv.Call(goArgs)
+		if len(results) == 0 {
+			return NewUndefined()
+		}
+		return reflectToJSValue(results[0])
+	})
+}
+
+// jsvalueToReflect converts a *JSValue to a reflect.Value of the target type.
+func jsvalueToReflect(v *JSValue, t reflect.Type) reflect.Value {
+	// If the target type is *JSValue, pass through directly
+	jsvalueType := reflect.TypeOf((*JSValue)(nil))
+	if t == jsvalueType {
+		if v == nil {
+			return reflect.Zero(t)
+		}
+		return reflect.ValueOf(v)
+	}
+	if v == nil || v.typ == TypeNull || v.typ == TypeUndefined {
+		return reflect.Zero(t)
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return reflect.ValueOf(v.String())
+	case reflect.Int:
+		return reflect.ValueOf(int(v.Number()))
+	case reflect.Int64:
+		return reflect.ValueOf(int64(v.Number()))
+	case reflect.Float64:
+		return reflect.ValueOf(v.Number())
+	case reflect.Float32:
+		return reflect.ValueOf(float32(v.Number()))
+	case reflect.Bool:
+		return reflect.ValueOf(v.Bool())
+	case reflect.Interface:
+		// Convert to most natural Go value for interface{}/any params
+		switch v.typ {
+		case TypeString:
+			return reflect.ValueOf(v.strVal)
+		case TypeNumber:
+			n := v.numVal
+			if n == float64(int64(n)) {
+				return reflect.ValueOf(int(n))
+			}
+			return reflect.ValueOf(n)
+		case TypeBoolean:
+			return reflect.ValueOf(v.boolVal)
+		default:
+			return reflect.ValueOf(v.String())
+		}
+	case reflect.Ptr:
+		// For pointer types (e.g. *SomeStruct), pass the JSValue as-is if it's the right type
+		if reflect.TypeOf(v).AssignableTo(t) {
+			return reflect.ValueOf(v)
+		}
+		return reflect.Zero(t)
+	default:
+		// Try direct assignment first
+		if reflect.TypeOf(v.String()).ConvertibleTo(t) {
+			return reflect.ValueOf(v.String()).Convert(t)
+		}
+		return reflect.Zero(t)
+	}
+}
+
+// reflectToJSValue converts a reflect.Value back to a *JSValue.
+func reflectToJSValue(rv reflect.Value) *JSValue {
+	if !rv.IsValid() {
+		return NewUndefined()
+	}
+	i := rv.Interface()
+	return From(i)
 }
 
 // FromStrings converts a []string into an array JSValue.
@@ -993,12 +1142,19 @@ func Slice(arr *JSValue, args ...*JSValue) *JSValue {
 
 // Concat concatenates arrays and values.
 func Concat(arr *JSValue, items ...*JSValue) *JSValue {
-	if arr == nil || arr.arrayVal == nil {
-		return NewArray(items...)
+	var result []*JSValue
+	if arr != nil && arr.arrayVal != nil {
+		result = make([]*JSValue, len(arr.arrayVal))
+		copy(result, arr.arrayVal)
 	}
-	result := make([]*JSValue, len(arr.arrayVal), len(arr.arrayVal)+len(items))
-	copy(result, arr.arrayVal)
-	result = append(result, items...)
+	// Flatten array items (JS Array.concat spreads arrays)
+	for _, item := range items {
+		if item != nil && item.arrayVal != nil {
+			result = append(result, item.arrayVal...)
+		} else {
+			result = append(result, item)
+		}
+	}
 	return NewArray(result...)
 }
 

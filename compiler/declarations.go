@@ -375,6 +375,26 @@ func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.
 
 			fields = append(fields, field(pName, pType))
 
+			// Handle default parameter values: if param == nil { param = defaultValue }
+			if valueNode != nil && pName != "_" {
+				defaultExpr := t.transformExpr(valueNode)
+				if defaultExpr != nil {
+					defaultExpr = jsvalueWrapLit(defaultExpr)
+					destructureStmts = append(destructureStmts, &ast.IfStmt{
+						Cond: &ast.BinaryExpr{
+							X:  ident(pName),
+							Op: token.EQL,
+							Y:  ident("nil"),
+						},
+						Body: blockStmt(&ast.AssignStmt{
+							Lhs: []ast.Expr{ident(pName)},
+							Tok: token.ASSIGN,
+							Rhs: []ast.Expr{defaultExpr},
+						}),
+					})
+				}
+			}
+
 		case "rest_parameter":
 			nameNode := param.ChildByFieldName("pattern")
 

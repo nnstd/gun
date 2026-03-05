@@ -752,6 +752,10 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			// Method call on a local scope variable or 'this':
 			// use .MethodCall("method", args...) which auto-prepends receiver as 'this'.
 			if (objNode.Kind() == "identifier" && t.isLocalName(objText)) || objNode.Kind() == "this" {
+				if argsNodeHasSpread(argsNode) {
+					obj := t.transformExpr(objNode)
+					return t.generateMethodCallWithSpread(obj, prop, argsNode, func(e ast.Expr) ast.Expr { return t.wrapAsJSValue(e) })
+				}
 				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 				obj := t.transformExpr(objNode)
 				for i, arg := range args {
@@ -764,6 +768,10 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			// Method call on a package-level untyped variable (JSValue):
 			if objNode.Kind() == "identifier" {
 				if typed, ok := t.pkgVarTyped[objText]; ok && !typed {
+					if argsNodeHasSpread(argsNode) {
+						obj := t.transformExpr(objNode)
+						return t.generateMethodCallWithSpread(obj, prop, argsNode, func(e ast.Expr) ast.Expr { return t.wrapAsJSValue(e) })
+					}
 					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 					obj := t.transformExpr(objNode)
 					for i, arg := range args {
@@ -778,6 +786,10 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			// (call results, new expressions, etc.) uses .MethodCall("method", args...).
 			// For complex receivers (calls, chains), wrap in IIFE to evaluate once.
 			if t.nodeReturnsJSValue(objNode) {
+				if argsNodeHasSpread(argsNode) {
+					obj := t.transformExpr(objNode)
+					return t.generateMethodCallWithSpread(obj, prop, argsNode, func(e ast.Expr) ast.Expr { return t.wrapAsJSValue(e) })
+				}
 				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 				obj := t.transformExpr(objNode)
 				for i, arg := range args {
@@ -816,8 +828,11 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 	if fnNode.Kind() == "identifier" {
 		name := fnNode.Utf8Text(t.source)
 		if imp, ok := t.importedNames[name]; ok && imp.isTranspiled && imp.goSymbol != "" {
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 			fun := t.transformExpr(fnNode)
+			if argsNodeHasSpread(argsNode) {
+				return t.generateCallWithSpread(fun, argsNode, func(e ast.Expr) ast.Expr { return t.wrapAsJSValue(e) })
+			}
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 			args := t.transformArgs(argsNode)
 			for i, arg := range args {
 				args[i] = t.wrapAsJSValue(arg)
@@ -835,8 +850,11 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			isPkgUntyped = true
 		}
 		if t.isUntypedLocal(fnName) || isPkgUntyped {
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 			fun := t.transformExpr(fnNode)
+			if argsNodeHasSpread(argsNode) {
+				return t.generateCallWithSpread(fun, argsNode, func(e ast.Expr) ast.Expr { return t.wrapAsJSValue(e) })
+			}
+			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 			args := t.transformArgs(argsNode)
 			for i, arg := range args {
 				args[i] = t.wrapAsJSValue(arg)
@@ -882,6 +900,9 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 	// If the function expression is a JSValue (from .Get() chain, etc.),
 	// use .Call() to invoke it instead of Go function call syntax.
 	if isAlreadyJSValue(fun) {
+		if argsNodeHasSpread(argsNode) {
+			return t.generateCallWithSpread(fun, argsNode, jsvalueWrapLit)
+		}
 		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		for i, a := range args {
 			args[i] = jsvalueWrapLit(a)
@@ -942,26 +963,186 @@ func isRuntimePackage(name string) bool {
 	return false
 }
 
-func (t *Transformer) transformArgs(node *sitter.Node) []ast.Expr {
+// spreadArgInfo tracks whether an argument came from a spread element.
+type spreadArgInfo struct {
+	expr     ast.Expr
+	isSpread bool
+}
+
+func (t *Transformer) transformArgsWithSpread(node *sitter.Node) []spreadArgInfo {
 	if node == nil {
 		return nil
 	}
-	var args []ast.Expr
+	var args []spreadArgInfo
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		if child.Kind() == "spread_element" {
 			if child.NamedChildCount() > 0 {
 				if inner := t.transformExpr(child.NamedChild(0)); inner != nil {
-					args = append(args, inner)
+					args = append(args, spreadArgInfo{expr: inner, isSpread: true})
 				}
 			}
 		} else {
 			if e := t.transformExpr(child); e != nil {
-				args = append(args, e)
+				args = append(args, spreadArgInfo{expr: e, isSpread: false})
 			}
 		}
 	}
 	return args
+}
+
+func (t *Transformer) transformArgs(node *sitter.Node) []ast.Expr {
+	infos := t.transformArgsWithSpread(node)
+	args := make([]ast.Expr, len(infos))
+	for i, info := range infos {
+		args[i] = info.expr
+	}
+	return args
+}
+
+// argsNodeHasSpread checks if any argument in the arguments node is a spread_element.
+func argsNodeHasSpread(node *sitter.Node) bool {
+	if node == nil {
+		return false
+	}
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		if node.NamedChild(i).Kind() == "spread_element" {
+			return true
+		}
+	}
+	return false
+}
+
+// generateMethodCallWithSpread generates a MethodCall/Call where spread args
+// are properly expanded using .Array(). wrapFn wraps non-spread args.
+func (t *Transformer) generateMethodCallWithSpread(obj ast.Expr, method string, argsNode *sitter.Node, wrapFn func(ast.Expr) ast.Expr) ast.Expr {
+	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	infos := t.transformArgsWithSpread(argsNode)
+
+	// Build the arguments for MethodCall: first arg is always the method name string
+	// For a simple case where all args are a single spread, optimize:
+	// obj.MethodCall("method", arr.Array()...)
+	if len(infos) == 1 && infos[0].isSpread {
+		spreadExpr := infos[0].expr
+		return &ast.CallExpr{
+			Fun:      selectorExpr(obj, "MethodCall"),
+			Args:     []ast.Expr{stringLit(method), callExpr(selectorExpr(spreadExpr, "Array"))},
+			Ellipsis: 1,
+		}
+	}
+
+	// Mixed case: build a []*jsvalue.JSValue slice and pass with ...
+	// append([]*jsvalue.JSValue{a, b}, spread.Array()...)
+	var parts []ast.Expr
+	var currentLiterals []ast.Expr
+
+	flushLiterals := func() {
+		if len(currentLiterals) > 0 {
+			parts = append(parts, &ast.CompositeLit{
+				Type: &ast.ArrayType{Elt: jsValuePtrType()},
+				Elts: currentLiterals,
+			})
+			currentLiterals = nil
+		}
+	}
+
+	for _, info := range infos {
+		if info.isSpread {
+			flushLiterals()
+			parts = append(parts, callExpr(selectorExpr(info.expr, "Array")))
+		} else {
+			wrapped := info.expr
+			if wrapFn != nil {
+				wrapped = wrapFn(wrapped)
+			}
+			currentLiterals = append(currentLiterals, wrapped)
+		}
+	}
+	flushLiterals()
+
+	// Build the slice using append chains
+	var sliceExpr ast.Expr
+	if len(parts) == 1 {
+		sliceExpr = parts[0]
+	} else {
+		sliceExpr = parts[0]
+		for _, p := range parts[1:] {
+			sliceExpr = &ast.CallExpr{
+				Fun:  ident("append"),
+				Args: []ast.Expr{sliceExpr, p},
+				Ellipsis: 1,
+			}
+		}
+	}
+
+	return &ast.CallExpr{
+		Fun:      selectorExpr(obj, "MethodCall"),
+		Args:     []ast.Expr{stringLit(method), sliceExpr},
+		Ellipsis: 1,
+	}
+}
+
+// generateCallWithSpread generates a .Call() where spread args are expanded.
+func (t *Transformer) generateCallWithSpread(fn ast.Expr, argsNode *sitter.Node, wrapFn func(ast.Expr) ast.Expr) ast.Expr {
+	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	infos := t.transformArgsWithSpread(argsNode)
+
+	if len(infos) == 1 && infos[0].isSpread {
+		spreadExpr := infos[0].expr
+		return &ast.CallExpr{
+			Fun:      selectorExpr(fn, "Call"),
+			Args:     []ast.Expr{callExpr(selectorExpr(spreadExpr, "Array"))},
+			Ellipsis: 1,
+		}
+	}
+
+	// Mixed case: build a []*jsvalue.JSValue slice
+	var parts []ast.Expr
+	var currentLiterals []ast.Expr
+
+	flushLiterals := func() {
+		if len(currentLiterals) > 0 {
+			parts = append(parts, &ast.CompositeLit{
+				Type: &ast.ArrayType{Elt: jsValuePtrType()},
+				Elts: currentLiterals,
+			})
+			currentLiterals = nil
+		}
+	}
+
+	for _, info := range infos {
+		if info.isSpread {
+			flushLiterals()
+			parts = append(parts, callExpr(selectorExpr(info.expr, "Array")))
+		} else {
+			wrapped := info.expr
+			if wrapFn != nil {
+				wrapped = wrapFn(wrapped)
+			}
+			currentLiterals = append(currentLiterals, wrapped)
+		}
+	}
+	flushLiterals()
+
+	var sliceExpr ast.Expr
+	if len(parts) == 1 {
+		sliceExpr = parts[0]
+	} else {
+		sliceExpr = parts[0]
+		for _, p := range parts[1:] {
+			sliceExpr = &ast.CallExpr{
+				Fun:  ident("append"),
+				Args: []ast.Expr{sliceExpr, p},
+				Ellipsis: 1,
+			}
+		}
+	}
+
+	return &ast.CallExpr{
+		Fun:      selectorExpr(fn, "Call"),
+		Args:     []ast.Expr{sliceExpr},
+		Ellipsis: 1,
+	}
 }
 
 func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
@@ -1323,8 +1504,20 @@ func (t *Transformer) ensureBool(expr ast.Expr) ast.Expr {
 	}
 
 	// Pointers/interfaces that could be nil → != nil
-	switch expr.(type) {
-	case *ast.Ident, *ast.SelectorExpr, *ast.IndexExpr:
+	// For JSValue variables, also check .Bool() for proper JS truthiness
+	// (e.g. a non-nil JSValue wrapping false/0/"" should be falsy).
+	switch e := expr.(type) {
+	case *ast.Ident:
+		nilCheck := &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
+		if e.Name != "nil" && !t.isTypedLocal(e.Name) {
+			return &ast.BinaryExpr{
+				X:  nilCheck,
+				Op: token.LAND,
+				Y:  callExpr(selectorExpr(expr, "Bool")),
+			}
+		}
+		return nilCheck
+	case *ast.SelectorExpr, *ast.IndexExpr:
 		return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
 	case *ast.CallExpr:
 		return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}

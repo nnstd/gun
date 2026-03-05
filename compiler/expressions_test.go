@@ -137,7 +137,7 @@ func TestImportMeta(t *testing.T) {
 func TestEnsureBoolTruthinessCheck(t *testing.T) {
 	ts := `function f(x: any): string { return x ? "yes" : "no"; }`
 	out := compile(t, ts)
-	assertContains(t, out, "x != nil")
+	assertContains(t, out, "x != nil && x.Bool()")
 }
 
 func TestLengthOnUntypedParam(t *testing.T) {
@@ -166,13 +166,13 @@ function f(x: number): string { if (isOk(x)) { return "yes"; } return "no"; }`
 }
 
 func TestEnsureBoolTypedLocalNotNilChecked(t *testing.T) {
-	// Variables initialized from false are now JSValue — uses != nil check
+	// Variables initialized from false are now JSValue — uses != nil && .Bool()
 	ts := `function f(s) {
 	let flag = false;
 	if (flag) { return s; }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "if flag != nil")
+	assertContains(t, out, "flag != nil && flag.Bool()")
 }
 
 func TestLengthOnJSValueChain(t *testing.T) {
@@ -374,7 +374,7 @@ func TestMatchResultNotTreatedAsJSValue(t *testing.T) {
 }`
 	out := compile(t, ts)
 	assertContains(t, out, "FindStringSubmatch")
-	assertContains(t, out, "m != nil")
+	assertContains(t, out, "m != nil && m.Bool()")
 	assertContains(t, out, "m.Index(0)")
 	// Should not treat match result as JSValue
 	assertNotContains(t, out, "m.String()")
@@ -658,6 +658,40 @@ func TestTemplateLiteralAssignedToJSValueParamWrapped(t *testing.T) {
 	ts := "function f($0: string) { $0 = `./${$0}`; return $0; }"
 	out := compile(t, ts)
 	assertContains(t, out, "jsvalue.From(fmt.Sprintf")
+}
+
+func TestSpreadInFunctionCalls(t *testing.T) {
+	// 1. fn(...args) where fn is a local JSValue function parameter
+	// generates fn.Call(args.Array()...)
+	t.Run("local_function_spread", func(t *testing.T) {
+		ts := `function f(fn, args) { return fn(...args); }`
+		out := compile(t, ts)
+		assertContains(t, out, "fn.Call(args.Array()...)")
+		assertNotContains(t, out, "fn(")
+	})
+
+	// 2. this.method(...args) inside a class method
+	// generates this.MethodCall("method", args.Array()...)
+	t.Run("this_method_spread", func(t *testing.T) {
+		ts := `class Foo {
+	dispatch(args) {
+		return this.method(...args);
+	}
+}`
+		out := compile(t, ts)
+		assertContains(t, out, `this.MethodCall("method", args.Array()...)`)
+		assertNotContains(t, out, "this.Method(")
+	})
+
+	// 3. obj.method(...args) where obj is a package-level untyped var
+	// generates obj.MethodCall("method", args.Array()...)
+	t.Run("pkg_var_method_spread", func(t *testing.T) {
+		ts := `var obj;
+function f(args) { return obj.method(...args); }`
+		out := compile(t, ts)
+		assertContains(t, out, `obj.MethodCall("method", args.Array()...)`)
+		assertNotContains(t, out, "obj.Method(")
+	})
 }
 
 func TestSamePackageTranspiledCallUsesCall(t *testing.T) {

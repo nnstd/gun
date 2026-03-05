@@ -111,7 +111,8 @@ func init() {
 			return NewUndefined()
 		}
 		callArgs := []*JSValue{}
-		if len(args) >= 2 {
+		// Only prepend thisArg for method functions (which expect 'this' as first arg)
+		if origFn.isMethod && len(args) >= 2 {
 			callArgs = append(callArgs, args[1])
 		}
 		if len(args) >= 3 && args[2] != nil && args[2].arrayVal != nil {
@@ -169,6 +170,19 @@ func init() {
 		Configurable: true,
 	})
 
+	// StringPrototype normalize returns the string as-is (basic NFC is a no-op for ASCII).
+	StringPrototype.DefineProperty("normalize", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) > 0 && args[0] != nil {
+				return args[0]
+			}
+			return NewString("")
+		}).MarkAsMethod(),
+		Writable:     true,
+		Enumerable:   false,
+		Configurable: true,
+	})
+
 	// NumberPrototype toString returns the number as string.
 	NumberPrototype.DefineProperty("toString", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
@@ -183,6 +197,84 @@ func init() {
 	BooleanPrototype.DefineProperty("toString", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
 			return NewString("false")
+		}),
+		Writable:     true,
+		Enumerable:   false,
+		Configurable: true,
+	})
+
+	// ArrayPrototype slice: arr.slice(start, end) or [].slice.call(target).
+	// args[0] = this (the array), args[1:] = start, end
+	ArrayPrototype.DefineProperty("slice", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) < 1 {
+				return NewArray()
+			}
+			return Slice(args[0], args[1:]...)
+		}),
+		Writable:     true,
+		Enumerable:   false,
+		Configurable: true,
+	})
+
+	// ArrayPrototype concat: arr.concat(other)
+	ArrayPrototype.DefineProperty("concat", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) < 1 {
+				return NewArray()
+			}
+			result := args[0]
+			for _, arg := range args[1:] {
+				result = Concat(result, arg)
+			}
+			return result
+		}),
+		Writable:     true,
+		Enumerable:   false,
+		Configurable: true,
+	})
+
+	// ArrayPrototype join: arr.join(sep)
+	ArrayPrototype.DefineProperty("join", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) < 1 {
+				return NewString("")
+			}
+			sep := NewString(",")
+			if len(args) > 1 && args[1] != nil {
+				sep = args[1]
+			}
+			return Join(args[0], sep)
+		}),
+		Writable:     true,
+		Enumerable:   false,
+		Configurable: true,
+	})
+
+	// ArrayPrototype includes: arr.includes(val)
+	ArrayPrototype.DefineProperty("includes", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) < 2 {
+				return NewBool(false)
+			}
+			return Includes(args[0], args[1])
+		}),
+		Writable:     true,
+		Enumerable:   false,
+		Configurable: true,
+	})
+
+	// ArrayPrototype reverse: arr.reverse()
+	ArrayPrototype.DefineProperty("reverse", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) < 1 || args[0] == nil || args[0].arrayVal == nil {
+				return NewArray()
+			}
+			arr := args[0].arrayVal
+			for i, j := 0, len(arr)-1; i < j; i, j = i+1, j-1 {
+				arr[i], arr[j] = arr[j], arr[i]
+			}
+			return args[0]
 		}),
 		Writable:     true,
 		Enumerable:   false,
@@ -234,4 +326,27 @@ func init() {
 		Enumerable:   false,
 		Configurable: true,
 	})
+
+	// ArrayPrototype entries: arr.entries() returns an array of [index, value] pairs.
+	// TODO: Enable once wrap_ansi and other modules that use entries() are fully working.
+	// Currently disabled because enabling it causes wrap_ansi to execute paths with
+	// additional unimplemented features (Set iterator, ANSI escape handling).
+	/*
+	ArrayPrototype.DefineProperty("entries", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) < 1 || args[0] == nil || args[0].arrayVal == nil {
+				return NewArray()
+			}
+			this := args[0]
+			entries := make([]*JSValue, len(this.arrayVal))
+			for i, v := range this.arrayVal {
+				entries[i] = NewArray(NewNumber(float64(i)), v)
+			}
+			return NewArray(entries...)
+		}).MarkAsMethod(),
+		Writable:     true,
+		Enumerable:   false,
+		Configurable: true,
+	})
+	*/
 }
