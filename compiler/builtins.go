@@ -155,7 +155,6 @@ func transformBuiltinNew(name string, args []ast.Expr, t *Transformer) ast.Expr 
 		t.addImport("time")
 		return callExpr(selectorExpr(ident("time"), "Now"))
 	case "RegExp":
-		t.addImport("regexp")
 		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 		pattern := ast.Expr(stringLit(""))
 		if len(args) > 0 {
@@ -171,7 +170,7 @@ func transformBuiltinNew(name string, args []ast.Expr, t *Transformer) ast.Expr 
 				Fun: &ast.FuncLit{
 					Type: &ast.FuncType{
 						Params:  fieldList(),
-						Results: fieldList(field("", ptrType(selectorExpr(ident("regexp"), "Regexp")))),
+						Results: fieldList(field("", selectorExpr(ident("jsvalue"), "GoRegex"))),
 					},
 					Body: blockStmt(
 						&ast.AssignStmt{

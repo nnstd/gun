@@ -46,6 +46,7 @@ type JSValue struct {
 	mapVal     *jsMap
 	setVal     *jsSet
 	isMethod   bool // true for class methods that expect this as _args[0]
+	classInit  func(this *JSValue, args ...*JSValue) *JSValue // raw constructor for super() calls
 }
 
 // MarkAsMethod marks this function as a class method that expects 'this'
@@ -450,6 +451,22 @@ func (v *JSValue) MethodCall(method string, args ...*JSValue) *JSValue {
 	return fn.Call(args...)
 }
 
+// CallSuper invokes a class constructor's raw init function on an existing
+// 'this' object, implementing JavaScript's super(args) semantics.
+// The parent constructor sets properties directly on the child's 'this'.
+func (v *JSValue) CallSuper(this *JSValue, args ...*JSValue) {
+	if v == nil {
+		return
+	}
+	// Walk the prototype chain to find classInit (handles grandparent constructors)
+	for cur := v; cur != nil; cur = cur.prototype {
+		if cur.classInit != nil {
+			cur.classInit(this, args...)
+			return
+		}
+	}
+}
+
 // ToSlice converts an any value to []*JSValue. Handles []*JSValue passthrough
 // and *JSValue (via .Array()). Used when an IIFE returns any but the target is []*JSValue.
 func ToSlice(v any) []*JSValue {
@@ -472,6 +489,9 @@ func From(v any) *JSValue {
 	}
 	switch val := v.(type) {
 	case *JSValue:
+		if val == nil {
+			return NewNull()
+		}
 		return val
 	case string:
 		return NewString(val)
@@ -1260,11 +1280,20 @@ func Trim(val *JSValue) *JSValue {
 
 // Split splits a JSValue string by separator.
 func Split(val *JSValue, sep *JSValue) *JSValue {
-	s := ","
-	if sep != nil {
-		s = sep.String()
+	s := fmt.Sprint(val)
+	// Regex separator: use GoRegex.Split
+	if sep != nil && sep.typ == TypeRegex && sep.regexVal != nil {
+		if re, ok := sep.regexVal.(GoRegex); ok {
+			parts := re.Split(s, -1)
+			return FromStrings(parts)
+		}
 	}
-	parts := strings.Split(fmt.Sprint(val), s)
+	// String separator
+	sepStr := ","
+	if sep != nil {
+		sepStr = sep.String()
+	}
+	parts := strings.Split(s, sepStr)
 	return FromStrings(parts)
 }
 
@@ -1685,7 +1714,17 @@ func TypeOf(a *JSValue) *JSValue {
 	return NewString(a.TypeString())
 }
 
-// jsUnicodeEscapeRe matches JS-style \uNNNN Unicode escapes in regex patterns.
+// GoRegex is a regexp-compatible interface satisfied by both *regexp.Regexp
+// and *regexp2Wrapper. This allows CompileRegex to transparently fall back to
+// the regexp2 engine for JS regex features (lookaheads, lookbehinds) that
+// Go's RE2 engine does not support.
+type GoRegex interface {
+	MatchString(s string) bool
+	String() string
+	ReplaceAllString(src, repl string) string
+	FindStringSubmatch(s string) []string
+	Split(s string, n int) []string
+}
 var jsUnicodeEscapeRe = regexp.MustCompile(`\\u([0-9a-fA-F]{4})`)
 
 // jsUnicodePropMap maps JS Unicode property names to Go equivalents.
@@ -1704,8 +1743,9 @@ var jsUnicodePropRe = regexp.MustCompile(`\\[pP]\{([^}]+)\}`)
 
 // CompileRegex compiles a regex pattern, converting JS-style \uNNNN Unicode
 // escapes and unsupported Unicode property names to Go-compatible equivalents.
-// If the pattern still fails to compile, returns a regex that matches nothing.
-func CompileRegex(pattern string) *regexp.Regexp {
+// Uses Go's stdlib regexp (RE2) when possible, falls back to regexp2 (.NET
+// engine) for patterns with lookaheads, lookbehinds, and other JS features.
+func CompileRegex(pattern string) GoRegex {
 	// Convert \uNNNN escapes to literal characters
 	converted := jsUnicodeEscapeRe.ReplaceAllStringFunc(pattern, func(match string) string {
 		hex := match[2:] // strip \u prefix
@@ -1724,13 +1764,17 @@ func CompileRegex(pattern string) *regexp.Regexp {
 		}
 		return match
 	})
+	// Tier 1: try Go stdlib regexp (RE2)
 	re, err := regexp.Compile(converted)
-	if err != nil {
-		// Fallback: return a regex that matches nothing rather than panicking
-		// Use a pattern that's valid in Go RE2 and never matches
-		return regexp.MustCompile(`\A\z(?:never)`)
+	if err == nil {
+		return re
 	}
-	return re
+	// Tier 2: fall back to regexp2 for lookaheads, lookbehinds, etc.
+	if r2, err2 := newRegexp2(converted); err2 == nil {
+		return r2
+	}
+	// Last resort: return a regex that matches nothing
+	return regexp.MustCompile(`\A\z(?:never)`)
 }
 
 // ParseInt parses a string as an integer with the given radix, matching JS parseInt().
@@ -1821,6 +1865,9 @@ func NewClass(constructor func(this *JSValue, args ...*JSValue) *JSValue, parent
 		}
 		return instance
 	})
+
+	// Store the raw constructor for super() calls via CallSuper
+	ctor.classInit = constructor
 
 	// Set up Class.prototype and Class.prototype.constructor
 	ctor.Set("prototype", proto)

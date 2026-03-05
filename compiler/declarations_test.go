@@ -1033,7 +1033,7 @@ func TestSuperCallInConstructor(t *testing.T) {
 	}
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "jserror.Error.Call(this,")
+	assertContains(t, out, `jserror.Error.CallSuper(this,`)
 	assertContains(t, out, `this.Set("name"`)
 }
 

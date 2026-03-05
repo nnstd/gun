@@ -550,8 +550,8 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 		// Simplest: just call parent as a function that initializes this.
 		allArgs := append([]ast.Expr{ident("this")}, args...)
 		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-		// Get parent's internal constructor and call it with this
-		return callExpr(selectorExpr(t.currentClassParent, "Call"), allArgs...)
+		// Call parent constructor on the child's this: Parent.CallSuper(this, args...)
+		return callExpr(selectorExpr(t.currentClassParent, "CallSuper"), allArgs...)
 	}
 
 	// Check for builtin call patterns on member expressions
