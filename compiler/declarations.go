@@ -123,16 +123,6 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 			}
 		}
 
-		// Track package-level function variables (JS functions-as-objects pattern).
-		// In JS, functions can have properties; in Go they can't, so we need to
-		// skip member assignments on these vars.
-		if valueNode != nil && len(t.localScopes) == 0 {
-			switch valueNode.Kind() {
-			case "arrow_function", "function", "function_expression":
-				t.funcVarNames[name] = true
-			}
-		}
-
 		// No type and no value → default to *jsvalue.JSValue
 		// Also applies when value is nil literal (null/undefined).
 		if typ == nil && (value == nil || isNilIdent(value)) {

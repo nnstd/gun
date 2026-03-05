@@ -45,16 +45,8 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 					if leftNode.Kind() == "member_expression" && leftNode.Utf8Text(t.source) == "module.exports" {
 						return nil
 					}
-					// Skip member assignments on package-level function vars.
-					// JS functions are objects and can have properties; Go functions cannot.
-					if leftNode.Kind() == "member_expression" {
-						objNode := leftNode.ChildByFieldName("object")
-						if objNode != nil && objNode.Kind() == "identifier" {
-							if t.funcVarNames[objNode.Utf8Text(t.source)] {
-								return nil
-							}
-						}
-					}
+					// In the all-JSValue architecture, function vars are *jsvalue.JSValue
+					// and CAN have properties via .Set(), so we no longer skip these.
 					// Destructuring assignment: [a, ...b] = expr or {a, b} = expr
 					// Uses = (assign) not := (define) since variables already exist.
 					if leftNode.Kind() == "array_pattern" || leftNode.Kind() == "object_pattern" {
@@ -106,7 +98,20 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 								isJSV = true
 							}
 							if isJSV {
-								obj := t.transformExpr(memObj)
+								// For own package-level variables, use the raw identifier
+								// name to avoid capitalization by resolveIdentifier (which
+								// capitalizes exported names, causing collisions).
+								var obj ast.Expr
+								if memObj.Kind() == "identifier" {
+									name := memObj.Utf8Text(t.source)
+									if _, isOwn := t.pkgVarTyped[name]; isOwn {
+										obj = ident(sanitizeIdent(name))
+									} else {
+										obj = t.transformExpr(memObj)
+									}
+								} else {
+									obj = t.transformExpr(memObj)
+								}
 								rhs := t.transformExpr(rightNode)
 								if obj != nil && rhs != nil {
 									rhs = t.wrapAsJSValue(rhs)
