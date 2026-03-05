@@ -260,10 +260,10 @@ func TestNilInitVarGetsJSValueType(t *testing.T) {
 }
 
 func TestNilAssignmentNotWrapped(t *testing.T) {
-	// Assigning null to a JSValue var should emit nil, not jsvalue.From(nil).
+	// Assigning null to a JSValue var should emit jsvalue.NewNull(), not jsvalue.From(nil).
 	ts := `function f(x) { x = null; return x; }`
 	out := compile(t, ts)
-	assertContains(t, out, "x = nil")
+	assertContains(t, out, "x = jsvalue.NewNull()")
 	assertNotContains(t, out, "jsvalue.From(nil)")
 }
 
@@ -335,7 +335,7 @@ func TestModuleExportsFunctionTrailingReturn(t *testing.T) {
 	}`
 	out := compile(t, ts)
 	assertContains(t, out, "var Default = jsvalue.NewFunction(")
-	assertContains(t, out, "return nil")
+	assertContains(t, out, "return jsvalue.NewNull()")
 }
 
 func TestForLoopExtraVarNilUsesVarDecl(t *testing.T) {

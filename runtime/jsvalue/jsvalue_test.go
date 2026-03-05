@@ -44,8 +44,8 @@ func TestFromPrimitives(t *testing.T) {
 	if v := From("hi"); v.typ != TypeString || v.String() != "hi" {
 		t.Errorf("From(string): got type=%v str=%v", v.typ, v.String())
 	}
-	if v := From(nil); v.typ != TypeNull {
-		t.Errorf("From(nil): got type=%v, want TypeNull", v.typ)
+	if v := From(nil); v.typ != TypeUndefined {
+		t.Errorf("From(nil): got type=%v, want TypeUndefined", v.typ)
 	}
 }
 

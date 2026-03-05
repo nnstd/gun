@@ -116,7 +116,7 @@ func TestProcessExit(t *testing.T) {
 func TestObjectCreateNull(t *testing.T) {
 	ts := `const obj = Object.create(null);`
 	out := compile(t, ts)
-	assertContains(t, out, "object.Create(nil)")
+	assertContains(t, out, "jsobject.Create(jsvalue.NewNull())")
 	assertNotContains(t, out, "Object.Create")
 }
 

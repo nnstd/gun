@@ -201,6 +201,8 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		return false
 	}
 	switch node.Kind() {
+	case "null", "undefined":
+		return true
 	case "identifier":
 		name := node.Utf8Text(t.source)
 		sanitized := sanitizeIdent(name)

@@ -918,13 +918,13 @@ func TestNestedFuncDeclIsJSValue(t *testing.T) {
 
 func TestBareReturnInJSValueFunc(t *testing.T) {
 	// Bare return statements in functions with JSValue return type
-	// should become return nil.
+	// should become return jsvalue.NewNull().
 	ts := `function f(x) {
 	if (x) { return; }
 	return x;
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "return nil")
+	assertContains(t, out, "return jsvalue.NewNull()")
 }
 
 func TestLiteralVarInitWrappedAsJSValue(t *testing.T) {

@@ -416,14 +416,16 @@ func ToSlice(v any) []*JSValue {
 
 // From wraps an arbitrary Go value as a *JSValue.
 // If the value is already a *JSValue, it is returned as-is.
+// Go nil maps to undefined (not null) — matching JS semantics where
+// unset variables are undefined. Use NewNull() for explicit JS null.
 func From(v any) *JSValue {
 	if v == nil {
-		return NewNull()
+		return NewUndefined()
 	}
 	switch val := v.(type) {
 	case *JSValue:
 		if val == nil {
-			return NewNull()
+			return NewUndefined()
 		}
 		return val
 	case string:
@@ -1461,6 +1463,28 @@ func Eq(a, b *JSValue) *JSValue {
 // NEq implements JavaScript !== (strict inequality).
 func NEq(a, b *JSValue) *JSValue {
 	return NewBool(!Eq(a, b).boolVal)
+}
+
+// EqLoose implements JavaScript == (abstract/loose equality).
+// Key difference from Eq (===): null == undefined is true.
+func EqLoose(a, b *JSValue) *JSValue {
+	if a == nil {
+		a = NewUndefined()
+	}
+	if b == nil {
+		b = NewUndefined()
+	}
+	// null == undefined (and vice versa) is true
+	if (a.typ == TypeNull || a.typ == TypeUndefined) && (b.typ == TypeNull || b.typ == TypeUndefined) {
+		return NewBool(true)
+	}
+	// For other types, fall back to strict equality
+	return Eq(a, b)
+}
+
+// NEqLoose implements JavaScript != (abstract/loose inequality).
+func NEqLoose(a, b *JSValue) *JSValue {
+	return NewBool(!EqLoose(a, b).boolVal)
 }
 
 // Lt implements JavaScript < operator.

@@ -42,8 +42,13 @@ func (t *Transformer) transformExpr(node *sitter.Node) ast.Expr {
 	case "false":
 		return ident("false")
 
-	case "null", "undefined":
-		return ident("nil")
+	case "null":
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		return callExpr(selectorExpr(ident("jsvalue"), "NewNull"))
+
+	case "undefined":
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		return callExpr(selectorExpr(ident("jsvalue"), "NewUndefined"))
 
 	case "meta_property":
 		// import.meta → module.ImportMeta
@@ -234,6 +239,15 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 		// Logical && → jsvalue.And(left, right) — short-circuit, returns first falsy
 		if op == token.LAND {
 			return callExpr(selectorExpr(ident("jsvalue"), "And"), wrappedLeft, wrappedRight)
+		}
+
+		// Loose equality (== / !=) → EqLoose/NEqLoose (null == undefined is true)
+		// Strict equality (=== / !==) → Eq/NEq (null === undefined is false)
+		if opText == "==" {
+			return callExpr(selectorExpr(ident("jsvalue"), "EqLoose"), wrappedLeft, wrappedRight)
+		}
+		if opText == "!=" {
+			return callExpr(selectorExpr(ident("jsvalue"), "NEqLoose"), wrappedLeft, wrappedRight)
 		}
 
 		// Arithmetic and comparison → jsvalue.Add/Sub/Eq/Lt etc.

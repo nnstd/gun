@@ -593,7 +593,8 @@ func (t *Transformer) wrapFuncLitAsJSValue(fnLit *ast.FuncLit, paramNames []stri
 						Slice3: false,
 					})
 				} else {
-					// Regular param: pass _args[i] or nil if missing
+					// Regular param: pass _args[i] or undefined if missing
+					// (JS unset function params are undefined, not null)
 					callArgs = append(callArgs, &ast.CallExpr{
 						Fun: &ast.FuncLit{
 							Type: &ast.FuncType{
@@ -610,7 +611,7 @@ func (t *Transformer) wrapFuncLitAsJSValue(fnLit *ast.FuncLit, paramNames []stri
 										X: ident("_args"), Index: intLit(itoa(paramIdx)),
 									})),
 								},
-								returnStmt(ident("nil")),
+								returnStmt(callExpr(selectorExpr(ident("jsvalue"), "NewUndefined"))),
 							),
 						},
 					})

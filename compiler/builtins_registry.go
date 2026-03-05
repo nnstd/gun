@@ -178,6 +178,7 @@ func (r *BuiltinRegistry) registerJSValuePackageFunctions() {
 		"BitNot", "BitAnd", "BitOr", "BitXor", "Shl", "Shr", "UShr",
 		// Comparison operators
 		"Eq", "NEq", "Lt", "Gt", "LtE", "GtE",
+		"EqLoose", "NEqLoose",
 		// Type checking
 		"IsArrayValue", "TypeOf",
 		// Substring/LastIndexOf
