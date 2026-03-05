@@ -444,6 +444,18 @@ func From(v any) *JSValue {
 			obj.Set(k, v)
 		}
 		return obj
+	case []string:
+		// Handle Go string slices (e.g. from regexp.FindStringSubmatch).
+		// nil []string (no regex match) → undefined (falsy).
+		// Non-nil []string → JSValue array of strings.
+		if val == nil {
+			return NewUndefined()
+		}
+		elems := make([]*JSValue, len(val))
+		for i, s := range val {
+			elems[i] = NewString(s)
+		}
+		return NewArray(elems...)
 	default:
 		// Check if it's a regex (has MatchString method)
 		if re, ok := v.(interface{ MatchString(string) bool }); ok {

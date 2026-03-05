@@ -335,7 +335,9 @@ func (t *Transformer) transformUnaryExpr(node *sitter.Node) ast.Expr {
 		t.addImport("fmt")
 		return callExpr(selectorExpr(ident("fmt"), "Sprintf"), stringLit("%T"), arg)
 	case "void":
-		return ident("nil")
+		// void X in JS always evaluates to undefined
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		return callExpr(selectorExpr(ident("jsvalue"), "NewUndefined"))
 	default:
 		return arg
 	}

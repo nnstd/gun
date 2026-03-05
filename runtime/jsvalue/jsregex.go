@@ -146,14 +146,20 @@ func MatchString(regex *JSValue, value any) bool {
 		return false
 	}
 
-	// Coerce argument to string
+	// Coerce argument to string; nil values don't match
 	var str string
 	switch val := value.(type) {
 	case string:
 		str = val
 	case *JSValue:
+		if val == nil {
+			return false
+		}
 		str = val.String()
 	default:
+		if value == nil {
+			return false
+		}
 		str = fmt.Sprint(val)
 	}
 
