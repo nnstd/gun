@@ -1,5 +1,7 @@
 package jsvalue
 
+import "sort"
+
 // Global prototype singletons.
 var (
 	ObjectPrototype   *JSValue
@@ -163,8 +165,11 @@ func init() {
 	// StringPrototype toString returns the string value.
 	StringPrototype.DefineProperty("toString", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) > 0 && args[0] != nil {
+				return NewString(args[0].String())
+			}
 			return NewString("")
-		}),
+		}).MarkAsMethod(),
 		Writable:     true,
 		Enumerable:   false,
 		Configurable: true,
@@ -186,8 +191,11 @@ func init() {
 	// NumberPrototype toString returns the number as string.
 	NumberPrototype.DefineProperty("toString", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) > 0 && args[0] != nil {
+				return NewString(args[0].String())
+			}
 			return NewString("0")
-		}),
+		}).MarkAsMethod(),
 		Writable:     true,
 		Enumerable:   false,
 		Configurable: true,
@@ -196,8 +204,11 @@ func init() {
 	// BooleanPrototype toString.
 	BooleanPrototype.DefineProperty("toString", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) > 0 && args[0] != nil {
+				return NewString(args[0].String())
+			}
 			return NewString("false")
-		}),
+		}).MarkAsMethod(),
 		Writable:     true,
 		Enumerable:   false,
 		Configurable: true,
@@ -320,6 +331,33 @@ func init() {
 				return NewUndefined()
 			}
 			return this.arrayVal[idx]
+		}).MarkAsMethod(),
+		Writable:     true,
+		Enumerable:   false,
+		Configurable: true,
+	})
+
+	// ArrayPrototype sort: arr.sort(compareFn?) sorts in place and returns the array.
+	ArrayPrototype.DefineProperty("sort", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) < 1 || args[0] == nil || args[0].arrayVal == nil {
+				return NewArray()
+			}
+			this := args[0]
+			var compareFn *JSValue
+			if len(args) >= 2 {
+				compareFn = args[1]
+			}
+			sort.SliceStable(this.arrayVal, func(i, j int) bool {
+				a, b := this.arrayVal[i], this.arrayVal[j]
+				if compareFn != nil && compareFn.funcVal != nil {
+					result := compareFn.Call(a, b)
+					return result.Number() < 0
+				}
+				// Default: string comparison
+				return a.String() < b.String()
+			})
+			return this
 		}).MarkAsMethod(),
 		Writable:     true,
 		Enumerable:   false,

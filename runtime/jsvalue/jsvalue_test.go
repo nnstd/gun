@@ -536,3 +536,58 @@ func TestArraySetNumericKey(t *testing.T) {
 		t.Errorf("Set(\"3\"): got %q, want %q", arr.Index(3).String(), "d")
 	}
 }
+
+func TestIncludesString(t *testing.T) {
+	s := NewString("hello world")
+	if !Includes(s, NewString("world")).Bool() {
+		t.Error("String.includes('world') should be true")
+	}
+	if Includes(s, NewString("xyz")).Bool() {
+		t.Error("String.includes('xyz') should be false")
+	}
+}
+
+func TestIncludesArrayValueComparison(t *testing.T) {
+	// Array includes should use value comparison, not pointer comparison
+	arr := NewArray(NewString("help"), NewString("version"))
+	if !Includes(arr, NewString("help")).Bool() {
+		t.Error("Array.includes(NewString('help')) should be true with value comparison")
+	}
+	if Includes(arr, NewString("missing")).Bool() {
+		t.Error("Array.includes(NewString('missing')) should be false")
+	}
+}
+
+func TestArraySort(t *testing.T) {
+	arr := NewArray(NewString("c"), NewString("a"), NewString("b"))
+	result := arr.MethodCall("sort")
+	if result.Index(0).String() != "a" || result.Index(1).String() != "b" || result.Index(2).String() != "c" {
+		t.Errorf("sort: got [%q, %q, %q], want [a, b, c]",
+			result.Index(0).String(), result.Index(1).String(), result.Index(2).String())
+	}
+}
+
+func TestSpreadIntoArray(t *testing.T) {
+	// String spread: [...str] splits into characters
+	elems := SpreadIntoArray(NewString("abc"))
+	if len(elems) != 3 {
+		t.Fatalf("SpreadIntoArray('abc'): len=%d, want 3", len(elems))
+	}
+	if elems[0].String() != "a" || elems[1].String() != "b" || elems[2].String() != "c" {
+		t.Errorf("SpreadIntoArray('abc'): got %v", elems)
+	}
+	// Array spread: [...arr] returns elements
+	arr := NewArray(NewNumber(1), NewNumber(2))
+	aElems := SpreadIntoArray(arr)
+	if len(aElems) != 2 {
+		t.Fatalf("SpreadIntoArray(arr): len=%d, want 2", len(aElems))
+	}
+}
+
+func TestNumberToString(t *testing.T) {
+	n := NewNumber(42)
+	result := n.MethodCall("toString")
+	if result.String() != "42" {
+		t.Errorf("(42).toString(): got %q, want %q", result.String(), "42")
+	}
+}

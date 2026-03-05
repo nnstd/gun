@@ -621,6 +621,28 @@ func FromStrings(ss []string) *JSValue {
 	return NewArray(elems...)
 }
 
+// SpreadIntoArray spreads a JSValue into array elements.
+// For arrays, returns the elements as-is (like [...arr]).
+// For strings, splits into individual characters (like [...str]).
+// For other types, returns a single-element slice.
+func SpreadIntoArray(v *JSValue) []*JSValue {
+	if v == nil {
+		return nil
+	}
+	if v.arrayVal != nil {
+		return v.arrayVal
+	}
+	if v.typ == TypeString {
+		runes := []rune(v.strVal)
+		elems := make([]*JSValue, len(runes))
+		for i, r := range runes {
+			elems[i] = NewString(string(r))
+		}
+		return elems
+	}
+	return []*JSValue{v}
+}
+
 
 // Truthy implements JavaScript truthiness semantics.
 // Returns false for nil, undefined, null, false, 0, NaN, and "".
@@ -1049,12 +1071,44 @@ func Join(arr *JSValue, sep *JSValue) *JSValue {
 
 // Includes checks if array contains a value.
 func Includes(arr *JSValue, val *JSValue) *JSValue {
-	if arr == nil || arr.arrayVal == nil {
+	if arr == nil {
 		return NewBool(false)
+	}
+	// String.prototype.includes(searchString)
+	if arr.typ == TypeString {
+		if val == nil {
+			return NewBool(false)
+		}
+		return NewBool(strings.Contains(arr.strVal, val.String()))
+	}
+	// Array.prototype.includes(value) — uses SameValueZero comparison
+	if arr.arrayVal == nil {
+		return NewBool(false)
+	}
+	valStr := ""
+	if val != nil {
+		valStr = val.String()
 	}
 	for _, elem := range arr.arrayVal {
 		if elem == val {
 			return NewBool(true)
+		}
+		// Value comparison for primitives (string, number, boolean)
+		if elem != nil && val != nil && elem.typ == val.typ {
+			switch elem.typ {
+			case TypeString:
+				if elem.strVal == valStr {
+					return NewBool(true)
+				}
+			case TypeNumber:
+				if elem.numVal == val.numVal {
+					return NewBool(true)
+				}
+			case TypeBoolean:
+				if elem.boolVal == val.boolVal {
+					return NewBool(true)
+				}
+			}
 		}
 	}
 	return NewBool(false)

@@ -658,6 +658,20 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 					}
 					// Also try collection methods (slice, concat, push, etc.)
 					if t.builtins.IsArrayMethod(prop) {
+						// Handle spread in push/unshift: arr.push(...items) or arr.unshift(...items)
+						if (prop == "push" || prop == "unshift") && argsNodeHasSpread(argsNode) {
+							t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+							infos := t.transformArgsWithSpread(argsNode)
+							funcName := capitalize(prop)
+							if len(infos) == 1 && infos[0].isSpread {
+								// Single spread: Unshift(arr, spread.Array()...) or Push(arr, spread.Array()...)
+								return &ast.CallExpr{
+									Fun:      selectorExpr(ident("jsvalue"), funcName),
+									Args:     []ast.Expr{obj, callExpr(selectorExpr(infos[0].expr, "Array"))},
+									Ellipsis: 1,
+								}
+							}
+						}
 						t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 						if r := transformCollectionMethod(obj, prop, args, t.addImport, true); r != nil {
 							return r
@@ -1302,13 +1316,83 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 
 func (t *Transformer) transformArrayLiteral(node *sitter.Node) ast.Expr {
 	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-	var elts []ast.Expr
+
+	// Check if any element is a spread_element
+	hasSpread := false
 	for i := uint(0); i < node.NamedChildCount(); i++ {
-		if e := t.transformExpr(node.NamedChild(i)); e != nil {
-			elts = append(elts, jsvalueWrapLit(e))
+		if node.NamedChild(i).Kind() == "spread_element" {
+			hasSpread = true
+			break
 		}
 	}
-	return callExpr(selectorExpr(ident("jsvalue"), "NewArray"), elts...)
+
+	if !hasSpread {
+		// Simple case: no spread, just collect elements
+		var elts []ast.Expr
+		for i := uint(0); i < node.NamedChildCount(); i++ {
+			if e := t.transformExpr(node.NamedChild(i)); e != nil {
+				elts = append(elts, jsvalueWrapLit(e))
+			}
+		}
+		return callExpr(selectorExpr(ident("jsvalue"), "NewArray"), elts...)
+	}
+
+	// Has spread elements: build using append + SpreadIntoArray
+	// [...arr] or [...str] or [a, ...b, c]
+	var parts []ast.Expr
+	var currentElts []ast.Expr
+
+	flushElts := func() {
+		if len(currentElts) > 0 {
+			parts = append(parts, &ast.CompositeLit{
+				Type: &ast.ArrayType{Elt: jsValuePtrType()},
+				Elts: currentElts,
+			})
+			currentElts = nil
+		}
+	}
+
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if child.Kind() == "spread_element" {
+			flushElts()
+			if child.NamedChildCount() > 0 {
+				inner := t.transformExpr(child.NamedChild(0))
+				if inner != nil {
+					parts = append(parts, callExpr(selectorExpr(ident("jsvalue"), "SpreadIntoArray"), inner))
+				}
+			}
+		} else {
+			if e := t.transformExpr(child); e != nil {
+				currentElts = append(currentElts, jsvalueWrapLit(e))
+			}
+		}
+	}
+	flushElts()
+
+	if len(parts) == 1 {
+		// Single spread: NewArray(SpreadIntoArray(x)...)
+		return &ast.CallExpr{
+			Fun:      selectorExpr(ident("jsvalue"), "NewArray"),
+			Args:     []ast.Expr{parts[0]},
+			Ellipsis: 1,
+		}
+	}
+
+	// Multiple parts: append chains then NewArray(result...)
+	result := parts[0]
+	for _, p := range parts[1:] {
+		result = &ast.CallExpr{
+			Fun:      ident("append"),
+			Args:     []ast.Expr{result, p},
+			Ellipsis: 1,
+		}
+	}
+	return &ast.CallExpr{
+		Fun:      selectorExpr(ident("jsvalue"), "NewArray"),
+		Args:     []ast.Expr{result},
+		Ellipsis: 1,
+	}
 }
 
 func (t *Transformer) transformObjectLiteral(node *sitter.Node) ast.Expr {
@@ -1712,11 +1796,19 @@ func (t *Transformer) transformTernary(node *sitter.Node) ast.Expr {
 		case "string":
 			if t.inferNodeResultType(consNode) == "" {
 				t.addImport("fmt")
-				cons = callExpr(selectorExpr(ident("fmt"), "Sprint"), cons)
+				if id, ok := cons.(*ast.Ident); ok && id.Name == "nil" {
+					cons = stringLit("")
+				} else {
+					cons = callExpr(selectorExpr(ident("fmt"), "Sprint"), cons)
+				}
 			}
 			if t.inferNodeResultType(altNode) == "" {
 				t.addImport("fmt")
-				alt = callExpr(selectorExpr(ident("fmt"), "Sprint"), alt)
+				if id, ok := alt.(*ast.Ident); ok && id.Name == "nil" {
+					alt = stringLit("")
+				} else {
+					alt = callExpr(selectorExpr(ident("fmt"), "Sprint"), alt)
+				}
 			}
 		case "float64":
 			if t.inferNodeResultType(consNode) == "" {
