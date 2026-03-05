@@ -211,7 +211,7 @@ func init() {
 				return NewArray()
 			}
 			return Slice(args[0], args[1:]...)
-		}),
+		}).MarkAsMethod(),
 		Writable:     true,
 		Enumerable:   false,
 		Configurable: true,
@@ -228,7 +228,7 @@ func init() {
 				result = Concat(result, arg)
 			}
 			return result
-		}),
+		}).MarkAsMethod(),
 		Writable:     true,
 		Enumerable:   false,
 		Configurable: true,
@@ -245,7 +245,7 @@ func init() {
 				sep = args[1]
 			}
 			return Join(args[0], sep)
-		}),
+		}).MarkAsMethod(),
 		Writable:     true,
 		Enumerable:   false,
 		Configurable: true,
@@ -258,7 +258,7 @@ func init() {
 				return NewBool(false)
 			}
 			return Includes(args[0], args[1])
-		}),
+		}).MarkAsMethod(),
 		Writable:     true,
 		Enumerable:   false,
 		Configurable: true,
@@ -275,14 +275,13 @@ func init() {
 				arr[i], arr[j] = arr[j], arr[i]
 			}
 			return args[0]
-		}),
+		}).MarkAsMethod(),
 		Writable:     true,
 		Enumerable:   false,
 		Configurable: true,
 	})
 
 	// ArrayPrototype fill: arr.fill(value) fills all elements with value.
-	// In the transpiled context, this is called as .Get("fill").Call(this, value).
 	ArrayPrototype.DefineProperty("fill", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
 			if len(args) < 2 {
@@ -297,7 +296,7 @@ func init() {
 				this.arrayVal[i] = val
 			}
 			return this
-		}),
+		}).MarkAsMethod(),
 		Writable:     true,
 		Enumerable:   false,
 		Configurable: true,
@@ -321,17 +320,13 @@ func init() {
 				return NewUndefined()
 			}
 			return this.arrayVal[idx]
-		}),
+		}).MarkAsMethod(),
 		Writable:     true,
 		Enumerable:   false,
 		Configurable: true,
 	})
 
 	// ArrayPrototype entries: arr.entries() returns an array of [index, value] pairs.
-	// TODO: Enable once wrap_ansi and other modules that use entries() are fully working.
-	// Currently disabled because enabling it causes wrap_ansi to execute paths with
-	// additional unimplemented features (Set iterator, ANSI escape handling).
-	/*
 	ArrayPrototype.DefineProperty("entries", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
 			if len(args) < 1 || args[0] == nil || args[0].arrayVal == nil {
@@ -348,5 +343,4 @@ func init() {
 		Enumerable:   false,
 		Configurable: true,
 	})
-	*/
 }

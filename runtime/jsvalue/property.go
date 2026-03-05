@@ -86,6 +86,17 @@ func (v *JSValue) Set(name string, value *JSValue) {
 			}
 		}
 	}
+	// For arrays, numeric string keys update arrayVal (JS: arr["0"] = x sets arr[0])
+	if v.arrayVal != nil {
+		if idx, ok := parseArrayIndex(name); ok {
+			// Grow the array if needed
+			for idx >= len(v.arrayVal) {
+				v.arrayVal = append(v.arrayVal, nil)
+			}
+			v.arrayVal[idx] = value
+			return
+		}
+	}
 	// No accessor found — create a data descriptor
 	if v.properties == nil {
 		v.properties = make(map[string]*PropertyDescriptor)

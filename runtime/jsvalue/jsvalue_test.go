@@ -493,3 +493,46 @@ func TestStringNormalizeEmpty(t *testing.T) {
 			result.String(), "")
 	}
 }
+
+func TestArrayAt(t *testing.T) {
+	arr := NewArray(NewString("a"), NewString("b"), NewString("c"))
+	// at(0) → "a"
+	if arr.MethodCall("at", NewNumber(0)).String() != "a" {
+		t.Errorf("at(0): got %q, want %q", arr.MethodCall("at", NewNumber(0)).String(), "a")
+	}
+	// at(-1) → "c"
+	if arr.MethodCall("at", NewNumber(-1)).String() != "c" {
+		t.Errorf("at(-1): got %q, want %q", arr.MethodCall("at", NewNumber(-1)).String(), "c")
+	}
+}
+
+func TestArrayEntries(t *testing.T) {
+	arr := NewArray(NewString("x"), NewString("y"))
+	entries := arr.MethodCall("entries")
+	if entries.Len() != 2 {
+		t.Fatalf("entries len: got %d, want 2", entries.Len())
+	}
+	e0 := entries.Index(0)
+	if e0.Index(0).Number() != 0 || e0.Index(1).String() != "x" {
+		t.Errorf("entry[0]: got [%v, %q], want [0, \"x\"]", e0.Index(0).Number(), e0.Index(1).String())
+	}
+	e1 := entries.Index(1)
+	if e1.Index(0).Number() != 1 || e1.Index(1).String() != "y" {
+		t.Errorf("entry[1]: got [%v, %q], want [1, \"y\"]", e1.Index(0).Number(), e1.Index(1).String())
+	}
+}
+
+func TestArraySetNumericKey(t *testing.T) {
+	arr := NewArray(NewString("a"), NewString("b"))
+	arr.Set("0", NewString("x"))
+	if arr.Index(0).String() != "x" {
+		t.Errorf("Set(\"0\"): got %q, want %q", arr.Index(0).String(), "x")
+	}
+	arr.Set("3", NewString("d"))
+	if arr.Len() != 4 {
+		t.Errorf("after Set(\"3\"): len=%d, want 4", arr.Len())
+	}
+	if arr.Index(3).String() != "d" {
+		t.Errorf("Set(\"3\"): got %q, want %q", arr.Index(3).String(), "d")
+	}
+}

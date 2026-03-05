@@ -182,6 +182,9 @@ func (r *BuiltinRegistry) registerJSValuePackageFunctions() {
 		"IsArrayValue", "TypeOf",
 		// Substring/LastIndexOf
 		"Substring", "LastIndexOf",
+		// Set/Map functions
+		"SetHas", "SetAdd", "SetDelete", "SetValues",
+		"MapGet", "MapSet", "MapHas", "MapDelete", "MapKeys", "MapValues",
 	}
 	for _, name := range funcs {
 		r.jsvaluePackageFuncs[name] = true
