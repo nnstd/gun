@@ -454,6 +454,13 @@ func From(v any) *JSValue {
 		if rv.Kind() == reflect.Func {
 			return wrapGoFunc(rv)
 		}
+		// Nil slices/maps/pointers passed as any are typed nils (not caught by v == nil).
+		// Treat them as undefined to match JS semantics (e.g. regex FindStringSubmatch returning nil).
+		if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Map || rv.Kind() == reflect.Ptr || rv.Kind() == reflect.Interface {
+			if rv.IsNil() {
+				return NewUndefined()
+			}
+		}
 		return NewString(fmt.Sprint(val))
 	}
 }

@@ -426,30 +426,9 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 	hoistedSet := map[string]bool{}
 	var hoistedVarNames []string
 	hoistedVarSet := map[string]bool{}
+	// First sub-pass: scan for function declarations to populate hoisted set.
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
-		// Hoist bare variable declarations (let x; / var x;) so closures
-		// defined earlier in the same block can reference them.
-		if child.Kind() == "lexical_declaration" || child.Kind() == "variable_declaration" {
-			for j := uint(0); j < child.NamedChildCount(); j++ {
-				decl := child.NamedChild(j)
-				if decl.Kind() != "variable_declarator" {
-					continue
-				}
-				nameNode := decl.ChildByFieldName("name")
-				valueNode := decl.ChildByFieldName("value")
-				if nameNode != nil && nameNode.Kind() == "identifier" && valueNode == nil {
-					name := sanitizeIdent(nameNode.Utf8Text(t.source))
-					if !hoistedVarSet[name] {
-						hoistedVarNames = append(hoistedVarNames, name)
-						hoistedVarSet[name] = true
-						t.addToCurrentScope(name, false)
-						t.jsvalueLocals[name] = true
-					}
-				}
-			}
-			continue
-		}
 		if child.Kind() == "function_declaration" {
 			nameNode := child.ChildByFieldName("name")
 			if nameNode == nil {
@@ -490,6 +469,37 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 		}
 	}
 
+	// Second sub-pass: scan for variable declarations. When hoisted functions
+	// exist, forward-declare ALL variables (not just bare ones) so function
+	// closures can reference them. JS has function-level scoping for var.
+	hasHoistedFuncs := len(hoisted) > 0
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if child.Kind() == "lexical_declaration" || child.Kind() == "variable_declaration" {
+			for j := uint(0); j < child.NamedChildCount(); j++ {
+				decl := child.NamedChild(j)
+				if decl.Kind() != "variable_declarator" {
+					continue
+				}
+				nameNode := decl.ChildByFieldName("name")
+				valueNode := decl.ChildByFieldName("value")
+				if nameNode != nil && nameNode.Kind() == "identifier" {
+					name := sanitizeIdent(nameNode.Utf8Text(t.source))
+					if !hoistedVarSet[name] {
+						// Bare variables always hoisted; initialized variables
+						// only when hoisted functions exist (they may reference them).
+						if valueNode == nil || hasHoistedFuncs {
+							hoistedVarNames = append(hoistedVarNames, name)
+							hoistedVarSet[name] = true
+							t.addToCurrentScope(name, false)
+							t.jsvalueLocals[name] = true
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Emit forward declarations for hoisted variables as *jsvalue.JSValue.
 	for _, name := range hoistedVarNames {
 		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
@@ -515,9 +525,9 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 		})
 	}
 
-	// Second pass: process all statements in order.
-	// Hoisted function bodies are transformed HERE so that all surrounding
-	// variables and sibling hoisted functions are available in scope.
+	// Second pass: first transform and emit hoisted function assignments.
+	// JS fully hoists function declarations (both name and body), so they
+	// must be available before any other statements in the block.
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		if child.Kind() == "function_declaration" {
@@ -536,17 +546,33 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 					}
 				}
 			}
-			continue
+		}
+	}
+
+	// Third pass: process non-function statements in order.
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if child.Kind() == "function_declaration" {
+			continue // already handled above
 		}
 		// Handle variable declarations directly so destructuring (and multi-decl)
 		// statements are not lost — transformStmt can only return one ast.Stmt.
 		if child.Kind() == "lexical_declaration" || child.Kind() == "variable_declaration" {
 			decls := t.transformVarDecl(child)
 			for _, d := range decls {
-				// Skip bare declarations that were already forward-declared via hoisting.
 				if gd, ok := d.(*ast.GenDecl); ok && gd.Tok == token.VAR && len(gd.Specs) == 1 {
-					if vs, ok := gd.Specs[0].(*ast.ValueSpec); ok && len(vs.Names) == 1 && len(vs.Values) == 0 {
+					if vs, ok := gd.Specs[0].(*ast.ValueSpec); ok && len(vs.Names) == 1 {
 						if hoistedVarSet[vs.Names[0].Name] {
+							// Skip bare declarations already forward-declared.
+							if len(vs.Values) == 0 {
+								continue
+							}
+							// Convert initialized declarations to assignments
+							// since the variable was already forward-declared.
+							stmts = append(stmts, assignStmt(
+								[]ast.Expr{ident(vs.Names[0].Name)},
+								[]ast.Expr{vs.Values[0]},
+							))
 							continue
 						}
 					}

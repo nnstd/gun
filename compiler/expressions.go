@@ -1419,6 +1419,13 @@ func (t *Transformer) transformObjectLiteral(node *sitter.Node) ast.Expr {
 			valNode := child.ChildByFieldName("value")
 			if keyNode != nil && valNode != nil {
 				key := keyNode.Utf8Text(t.source)
+				// Strip quote characters from string-literal keys.
+				// JS: { 'short-option-groups': true } — the key is short-option-groups, not 'short-option-groups'.
+				if keyNode.Kind() == "string" || keyNode.Kind() == "string_fragment" {
+					if len(key) >= 2 && (key[0] == '\'' || key[0] == '"') {
+						key = key[1 : len(key)-1]
+					}
+				}
 				if val := t.transformExpr(valNode); val != nil {
 					args = append(args, stringLit(key), t.wrapAsJSValue(val))
 				}
