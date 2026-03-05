@@ -119,16 +119,26 @@ func (cmd *RunCmd) Run() error {
 		return err
 	}
 
-	binPath := filepath.Join(tmpDir, "main")
+	binName := strings.TrimSuffix(filepath.Base(cmd.Input), ".ts")
+	binPath := filepath.Join(tmpDir, binName)
 	if err := goBuild(tmpDir, binPath, cmd.Verbose); err != nil {
 		return err
 	}
 
+	absInput, _ := filepath.Abs(cmd.Input)
 	run := exec.Command(binPath, cmd.Args...)
+	run.Env = append(os.Environ(), "GUN_ENTRY_SCRIPT="+absInput)
 	run.Stdin = os.Stdin
 	run.Stdout = os.Stdout
 	run.Stderr = os.Stderr
-	return run.Run()
+	if err := run.Run(); err != nil {
+		// Propagate the child's exit code silently — it already printed its own errors.
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		return err
+	}
+	return nil
 }
 
 // transpileProject transpiles a .ts entry file and all its relative imports
@@ -159,8 +169,16 @@ func transpileProject(input, outDir, pkg string, verbose bool) error {
 	return scaffoldGoMod(outDir, verbose)
 }
 
-// goBuild runs `go build` in dir and writes the binary to binPath.
+// goBuild runs `go mod tidy` then `go build` in dir and writes the binary to binPath.
 func goBuild(dir, binPath string, verbose bool) error {
+	// Run go mod tidy to ensure dependencies are consistent
+	tidy := exec.Command("go", "mod", "tidy")
+	tidy.Dir = dir
+	tidy.Stderr = os.Stderr
+	if err := tidy.Run(); err != nil {
+		return fmt.Errorf("go mod tidy failed: %w", err)
+	}
+
 	build := exec.Command("go", "build", "-o", binPath, ".")
 	build.Dir = dir
 	var stderr strings.Builder

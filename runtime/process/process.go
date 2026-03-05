@@ -8,7 +8,20 @@ import (
 	"github.com/nnstd/gun/runtime/jsvalue"
 )
 
-var Argv = jsvalue.FromStrings(stdos.Args)
+// Argv follows Node.js convention: [runtime, script, ...args].
+// GUN_ENTRY_SCRIPT is set by "gun run" to the original .ts entry file path.
+// Without it, Args[0] (the binary) is used as the script path.
+var Argv = func() *jsvalue.JSValue {
+	script := stdos.Getenv("GUN_ENTRY_SCRIPT")
+	if script == "" {
+		script = stdos.Args[0]
+	}
+	argv := make([]string, 0, len(stdos.Args)+1)
+	argv = append(argv, stdos.Args[0]) // runtime (the binary itself)
+	argv = append(argv, script)        // script path
+	argv = append(argv, stdos.Args[1:]...)
+	return jsvalue.FromStrings(argv)
+}()
 
 var Platform = jsvalue.NewString(func() string {
 	switch runtime.GOOS {

@@ -375,16 +375,17 @@ func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.
 
 			fields = append(fields, field(pName, pType))
 
-			// Handle default parameter values: if param == nil { param = defaultValue }
+			// Handle default parameter values: if !param.Bool() { param = defaultValue }
+			// JS default params trigger when the value is undefined (falsy),
+			// and missing params are jsvalue.NewUndefined().
 			if valueNode != nil && pName != "_" {
 				defaultExpr := t.transformExpr(valueNode)
 				if defaultExpr != nil {
 					defaultExpr = jsvalueWrapLit(defaultExpr)
 					destructureStmts = append(destructureStmts, &ast.IfStmt{
-						Cond: &ast.BinaryExpr{
-							X:  ident(pName),
-							Op: token.EQL,
-							Y:  ident("nil"),
+						Cond: &ast.UnaryExpr{
+							Op: token.NOT,
+							X: callExpr(selectorExpr(ident(pName), "Bool")),
 						},
 						Body: blockStmt(&ast.AssignStmt{
 							Lhs: []ast.Expr{ident(pName)},
