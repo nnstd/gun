@@ -589,6 +589,52 @@ func TestNumberToString(t *testing.T) {
 	}
 }
 
+func TestNumberToStringRadix(t *testing.T) {
+	n := NewNumber(255)
+	if r := n.MethodCall("toString", NewNumber(16)); r.String() != "ff" {
+		t.Errorf("(255).toString(16): got %q, want %q", r.String(), "ff")
+	}
+	if r := n.MethodCall("toString", NewNumber(2)); r.String() != "11111111" {
+		t.Errorf("(255).toString(2): got %q, want %q", r.String(), "11111111")
+	}
+	if r := n.MethodCall("toString", NewNumber(8)); r.String() != "377" {
+		t.Errorf("(255).toString(8): got %q, want %q", r.String(), "377")
+	}
+}
+
+func TestNumberToFixed(t *testing.T) {
+	n := NewNumber(42.567)
+	if r := n.MethodCall("toFixed", NewNumber(2)); r.String() != "42.57" {
+		t.Errorf("(42.567).toFixed(2): got %q, want %q", r.String(), "42.57")
+	}
+	if r := NewNumber(0).MethodCall("toFixed", NewNumber(2)); r.String() != "0.00" {
+		t.Errorf("(0).toFixed(2): got %q, want %q", r.String(), "0.00")
+	}
+}
+
+func TestNumberToPrecision(t *testing.T) {
+	n := NewNumber(42.567)
+	if r := n.MethodCall("toPrecision", NewNumber(4)); r.String() != "42.57" {
+		t.Errorf("(42.567).toPrecision(4): got %q, want %q", r.String(), "42.57")
+	}
+}
+
+func TestNumberToExponential(t *testing.T) {
+	n := NewNumber(42.567)
+	r := n.MethodCall("toExponential", NewNumber(2))
+	if r.String() != "4.26e+01" {
+		t.Errorf("(42.567).toExponential(2): got %q, want %q", r.String(), "4.26e+01")
+	}
+}
+
+func TestNumberValueOf(t *testing.T) {
+	n := NewNumber(42)
+	r := n.MethodCall("valueOf")
+	if r.Number() != 42 {
+		t.Errorf("(42).valueOf(): got %v, want 42", r.Number())
+	}
+}
+
 func TestStringTrimLeftRight(t *testing.T) {
 	s := NewString("  hello  ")
 

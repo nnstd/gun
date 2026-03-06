@@ -1,7 +1,9 @@
 package jsvalue
 
 import (
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -345,17 +347,73 @@ func init() {
 		return NewNumber(float64(runes[idx]))
 	})
 
-	// NumberPrototype toString returns the number as string.
-	NumberPrototype.DefineProperty("toString", &PropertyDescriptor{
-		Value: NewFunction(func(args ...*JSValue) *JSValue {
-			if len(args) > 0 && args[0] != nil {
-				return NewString(args[0].String())
-			}
-			return NewString("0")
-		}).MarkAsMethod(),
-		Writable:     true,
-		Enumerable:   false,
-		Configurable: true,
+	// --- NumberPrototype methods ---
+
+	defMethod(NumberPrototype, "toString", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("0") }
+		n := args[0].numVal
+		if math.IsNaN(n) { return NewString("NaN") }
+		if math.IsInf(n, 1) { return NewString("Infinity") }
+		if math.IsInf(n, -1) { return NewString("-Infinity") }
+		// Optional radix argument (args[1])
+		radix := 10
+		if len(args) > 1 && args[1] != nil {
+			radix = int(args[1].numVal)
+		}
+		if radix == 10 {
+			return NewString(args[0].String())
+		}
+		// Integer radix conversion
+		neg := n < 0
+		if neg { n = -n }
+		intPart := int64(n)
+		s := strconv.FormatInt(intPart, radix)
+		if neg { s = "-" + s }
+		return NewString(s)
+	})
+	defMethod(NumberPrototype, "valueOf", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewNumber(0) }
+		return NewNumber(args[0].numVal)
+	})
+	defMethod(NumberPrototype, "toFixed", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("0") }
+		n := args[0].numVal
+		if math.IsNaN(n) { return NewString("NaN") }
+		digits := 0
+		if len(args) > 1 && args[1] != nil {
+			digits = int(args[1].numVal)
+		}
+		return NewString(strconv.FormatFloat(n, 'f', digits, 64))
+	})
+	defMethod(NumberPrototype, "toPrecision", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("0") }
+		n := args[0].numVal
+		if math.IsNaN(n) { return NewString("NaN") }
+		if math.IsInf(n, 0) { return NewString(args[0].String()) }
+		// No argument: same as toString()
+		if len(args) < 2 || args[1] == nil {
+			return NewString(args[0].String())
+		}
+		prec := int(args[1].numVal)
+		return NewString(strconv.FormatFloat(n, 'g', prec, 64))
+	})
+	defMethod(NumberPrototype, "toExponential", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("0") }
+		n := args[0].numVal
+		if math.IsNaN(n) { return NewString("NaN") }
+		if math.IsInf(n, 0) { return NewString(args[0].String()) }
+		digits := -1
+		if len(args) > 1 && args[1] != nil {
+			digits = int(args[1].numVal)
+		}
+		if digits < 0 {
+			return NewString(strconv.FormatFloat(n, 'e', -1, 64))
+		}
+		return NewString(strconv.FormatFloat(n, 'e', digits, 64))
+	})
+	defMethod(NumberPrototype, "toLocaleString", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("0") }
+		return NewString(args[0].String())
 	})
 
 	// BooleanPrototype toString.
