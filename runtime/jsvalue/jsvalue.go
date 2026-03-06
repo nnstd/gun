@@ -303,11 +303,19 @@ func (v *JSValue) Array() []*JSValue {
 	return v.arrayVal
 }
 
-// Index returns the element at position i in an array JSValue.
-// Returns undefined if out of bounds or not an array.
+// Index returns the element at position i in an array or string JSValue.
+// For arrays: returns the element at position i.
+// For strings: returns a single-character string (matching JS "str"[i] semantics).
+// Returns undefined if out of bounds or not an array/string.
 func (v *JSValue) Index(i int) *JSValue {
 	if v.arrayVal != nil && i >= 0 && i < len(v.arrayVal) {
 		return v.arrayVal[i]
+	}
+	if v.typ == TypeString && i >= 0 {
+		runes := []rune(v.strVal)
+		if i < len(runes) {
+			return NewString(string(runes[i]))
+		}
 	}
 	return NewUndefined()
 }

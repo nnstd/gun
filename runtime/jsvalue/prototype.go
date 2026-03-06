@@ -241,6 +241,10 @@ func init() {
 		if len(args) < 1 || args[0] == nil { return NewString("") }
 		return NewString(strings.TrimRight(args[0].String(), " \t\n\r"))
 	})
+	defMethod(StringPrototype, "slice", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("") }
+		return Slice(args[0], args[1:]...)
+	})
 	defMethod(StringPrototype, "split", func(args ...*JSValue) *JSValue {
 		if len(args) < 1 || args[0] == nil { return NewArray() }
 		return Split(args[0], safeArg(args, 1))
