@@ -154,7 +154,7 @@ var EvalError = makeErrorClass("EvalError", Error)
 func init() {
 	// Error.stackTraceLimit — accessor property backed by Go variable
 	Error.DefineProperty("stackTraceLimit", &jsvalue.PropertyDescriptor{
-		Get: func() *jsvalue.JSValue {
+		Get: func(_ *jsvalue.JSValue) *jsvalue.JSValue {
 			return jsvalue.NewNumber(float64(stackTraceLimit))
 		},
 		Set: func(v *jsvalue.JSValue) {

@@ -77,7 +77,7 @@ func TestArrayPush(t *testing.T) {
 	ts := `function add(arr: number[]): any { return arr.push(1); }`
 	out := compile(t, ts)
 	// arr is now *jsvalue.JSValue, so uses jsvalue.Push
-	assertContains(t, out, "jsvalue.Push(")
+	assertContains(t, out, `MethodCall("push"`)
 }
 
 func TestNewTypeError(t *testing.T) {
@@ -145,7 +145,7 @@ func TestArrayConcat(t *testing.T) {
 	ts := `function f(arr: number[]): any { return arr.concat(1); }`
 	out := compile(t, ts)
 	// arr is now *jsvalue.JSValue, uses jsvalue.Concat
-	assertContains(t, out, "jsvalue.Concat(")
+	assertContains(t, out, `MethodCall("concat"`)
 }
 
 func TestMathMinCoercesFloat64(t *testing.T) {
@@ -176,9 +176,8 @@ func TestPushOnMapLocalValue(t *testing.T) {
 	flags.keys.push(key);
 }`
 	out := compile(t, ts)
-	// Should use jsvalue.Push wrapper
-	assertContains(t, out, `jsvalue.Push(flags.Get("keys")`)
-	assertContains(t, out, "jsvalue.From")
+	// Should use prototype method via MethodCall
+	assertContains(t, out, `MethodCall("push"`)
 	assertNotContains(t, out, `append(flags["keys"].Array()`)
 }
 
@@ -188,7 +187,7 @@ func TestPopOnJSValueArray(t *testing.T) {
 }`
 	out := compile(t, ts)
 	// Should use jsvalue.Pop wrapper
-	assertContains(t, out, "jsvalue.Pop(arr)")
+	assertContains(t, out, `MethodCall("pop"`)
 	assertNotContains(t, out, "_arr := arr.Array()")
 	assertNotContains(t, out, "if len(_arr) > 0")
 }
@@ -199,8 +198,8 @@ func TestPopOnMapLocalValue(t *testing.T) {
 	return flags.keys.pop();
 }`
 	out := compile(t, ts)
-	// Should use jsvalue.Pop wrapper
-	assertContains(t, out, `jsvalue.Pop(flags.Get("keys"))`)
+	// Should use prototype method via MethodCall
+	assertContains(t, out, `MethodCall("pop"`)
 	assertNotContains(t, out, "_arr :=")
 }
 
@@ -210,7 +209,7 @@ func TestNegativeSliceIndex(t *testing.T) {
 }`
 	out := compile(t, ts)
 	// arr is now *jsvalue.JSValue, uses jsvalue.Slice wrapper
-	assertContains(t, out, "jsvalue.Slice(arr,")
+	assertContains(t, out, `MethodCall("slice"`)
 }
 
 func TestNegativeSliceIndexOnJSValue(t *testing.T) {
@@ -218,9 +217,8 @@ func TestNegativeSliceIndexOnJSValue(t *testing.T) {
 	return arr.slice(1, -2);
 }`
 	out := compile(t, ts)
-	// Should use jsvalue.Slice wrapper with JSValue-wrapped args
-	assertContains(t, out, "jsvalue.Slice(arr,")
-	assertContains(t, out, "jsvalue.NewNumber")
+	// Should use prototype method via MethodCall
+	assertContains(t, out, `MethodCall("slice"`)
 	assertNotContains(t, out, "len(arr.Array())")
 }
 
@@ -229,8 +227,8 @@ func TestJoinOnJSValueArray(t *testing.T) {
 	return arr.join(",");
 }`
 	out := compile(t, ts)
-	// Should use jsvalue.Join wrapper with JSValue-wrapped separator
-	assertContains(t, out, `jsvalue.Join(arr, jsvalue.NewString(","))`)
+	// Should use prototype method via MethodCall
+	assertContains(t, out, `MethodCall("join"`)
 	assertNotContains(t, out, "_arr := arr.Array()")
 	assertNotContains(t, out, "make([]string")
 }
@@ -241,9 +239,9 @@ func TestJoinOnMapResult(t *testing.T) {
 	return arr.map(x => x).join(".");
 }`
 	out := compile(t, ts)
-	// Should use jsvalue.Map and jsvalue.Join wrappers
-	assertContains(t, out, "jsvalue.Map(arr,")
-	assertContains(t, out, `jsvalue.Join(`)
+	// Should use prototype methods via MethodCall
+	assertContains(t, out, `MethodCall("map"`)
+	assertContains(t, out, `MethodCall("join"`)
 	assertNotContains(t, out, "_arr :=")
 	assertNotContains(t, out, "strings.Join")
 }
@@ -281,8 +279,7 @@ func TestCharAtAcceptsJSValueIndex(t *testing.T) {
 func TestSliceAcceptsJSValueArgs(t *testing.T) {
 	ts := `function f(arr) { return arr.slice(1, 3); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.Slice(arr,")
-	assertContains(t, out, "jsvalue.NewNumber")
+	assertContains(t, out, `MethodCall("slice"`)
 }
 
 func TestLastIndexOfWrapsArgs(t *testing.T) {
@@ -294,7 +291,7 @@ func TestLastIndexOfWrapsArgs(t *testing.T) {
 func TestJoinWrapsJSValueSeparator(t *testing.T) {
 	ts := `function f(arr) { return arr.join(","); }`
 	out := compile(t, ts)
-	assertContains(t, out, `jsvalue.Join(arr, jsvalue.NewString(","))`)
+	assertContains(t, out, `MethodCall("join"`)
 }
 
 func TestIsArrayReturnsJSValue(t *testing.T) {
@@ -315,7 +312,7 @@ func TestMatchOnJSValueUsesRegexpCompile(t *testing.T) {
 func TestSpliceOnJSValue(t *testing.T) {
 	ts := `function f(arr) { return arr.splice(1, 2); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.Splice(")
+	assertContains(t, out, `MethodCall("splice"`)
 }
 
 func TestIndexOfOnComplexReceiverReturnsJSValue(t *testing.T) {
@@ -358,7 +355,7 @@ func TestPushOnSliceLocalWrapsLiteralArgs(t *testing.T) {
 	// push(true) on a []*jsvalue.JSValue slice wraps the literal.
 	ts := `function f() { const arr = []; arr.push(true); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.Push(")
+	assertContains(t, out, `MethodCall("push"`)
 	assertContains(t, out, "jsvalue.From(true)")
 }
 

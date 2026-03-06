@@ -182,18 +182,7 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 			t.jsvalueLocals[name] = true
 		}
 
-		// Track locals initialized from new Map() or new Set()
-		if valueNode != nil && valueNode.Kind() == "new_expression" {
-			ctorNode := valueNode.ChildByFieldName("constructor")
-			if ctorNode != nil {
-				switch ctorNode.Utf8Text(t.source) {
-				case "Map":
-					t.mapSetLocals[name] = "map"
-				case "Set":
-					t.mapSetLocals[name] = "set"
-				}
-			}
-		}
+
 
 		// In all-JSValue mode, wrap literal values with jsvalueWrapLit
 		// so `let x = 0` → `var x = jsvalue.NewNumber(float64(0))`

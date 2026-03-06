@@ -649,54 +649,6 @@ func Truthy(v *JSValue) bool {
 	}
 }
 
-// Splice removes/replaces elements in an array and returns the removed elements.
-// Implements JavaScript Array.prototype.splice(start, deleteCount, ...items).
-func Splice(arrAny any, args ...*JSValue) *JSValue {
-	arr := asArray(arrAny)
-	if arr == nil || arr.arrayVal == nil {
-		return NewArray()
-	}
-	length := len(arr.arrayVal)
-	start := 0
-	if len(args) >= 1 && args[0] != nil {
-		start = int(args[0].Number())
-		if start < 0 {
-			start = length + start
-			if start < 0 {
-				start = 0
-			}
-		}
-		if start > length {
-			start = length
-		}
-	}
-	deleteCount := length - start
-	if len(args) >= 2 && args[1] != nil {
-		deleteCount = int(args[1].Number())
-		if deleteCount < 0 {
-			deleteCount = 0
-		}
-		if start+deleteCount > length {
-			deleteCount = length - start
-		}
-	}
-	// Extract removed elements
-	removed := make([]*JSValue, deleteCount)
-	copy(removed, arr.arrayVal[start:start+deleteCount])
-	// Build new items to insert
-	var newItems []*JSValue
-	for i := 2; i < len(args); i++ {
-		newItems = append(newItems, args[i])
-	}
-	// Rebuild array: before + newItems + after
-	result := make([]*JSValue, 0, length-deleteCount+len(newItems))
-	result = append(result, arr.arrayVal[:start]...)
-	result = append(result, newItems...)
-	result = append(result, arr.arrayVal[start+deleteCount:]...)
-	arr.arrayVal = result
-	return NewArray(removed...)
-}
-
 // asArray converts any to *JSValue, handling []*JSValue from Go rest params.
 func asArray(v any) *JSValue {
 	switch val := v.(type) {
@@ -707,255 +659,6 @@ func asArray(v any) *JSValue {
 	default:
 		return nil
 	}
-}
-
-// Map applies fn to each element and returns a new array.
-// fn can be func(*JSValue) *JSValue or func(*JSValue, *JSValue) *JSValue (value, index).
-func Map(arrAny any, fn any) *JSValue {
-	arr := asArray(arrAny)
-	if arr == nil || arr.arrayVal == nil {
-		return NewArray()
-	}
-	results := make([]*JSValue, len(arr.arrayVal))
-	switch f := fn.(type) {
-	case func(*JSValue) *JSValue:
-		for i, elem := range arr.arrayVal {
-			results[i] = f(elem)
-		}
-	case func(*JSValue, *JSValue) *JSValue:
-		for i, elem := range arr.arrayVal {
-			results[i] = f(elem, NewNumber(float64(i)))
-		}
-	case *JSValue:
-		if f != nil && f.funcVal != nil {
-			for i, elem := range arr.arrayVal {
-				results[i] = f.funcVal(elem, NewNumber(float64(i)))
-			}
-		}
-	}
-	return NewArray(results...)
-}
-
-// Filter returns a new array containing elements for which fn returns truthy.
-// fn can be func(*JSValue) bool or func(*JSValue) *JSValue.
-func Filter(arrAny any, fn any) *JSValue {
-	arr := asArray(arrAny)
-	if arr == nil || arr.arrayVal == nil {
-		return NewArray()
-	}
-	var results []*JSValue
-	switch f := fn.(type) {
-	case func(*JSValue) bool:
-		for _, elem := range arr.arrayVal {
-			if f(elem) {
-				results = append(results, elem)
-			}
-		}
-	case func(*JSValue) *JSValue:
-		for _, elem := range arr.arrayVal {
-			if f(elem).Bool() {
-				results = append(results, elem)
-			}
-		}
-	case func(*JSValue, *JSValue) *JSValue:
-		for i, elem := range arr.arrayVal {
-			if f(elem, NewNumber(float64(i))).Bool() {
-				results = append(results, elem)
-			}
-		}
-	case *JSValue:
-		if f != nil && f.funcVal != nil {
-			for i, elem := range arr.arrayVal {
-				r := f.funcVal(elem, NewNumber(float64(i)))
-				if r != nil && r.Bool() {
-					results = append(results, elem)
-				}
-			}
-		}
-	}
-	return NewArray(results...)
-}
-
-// ForEach calls fn for each element in the array.
-// fn can be func(*JSValue), func(*JSValue) *JSValue, or 2-param variants.
-func ForEach(arrAny any, fn any) {
-	arr := asArray(arrAny)
-	if arr == nil || arr.arrayVal == nil {
-		return
-	}
-	switch f := fn.(type) {
-	case func(*JSValue):
-		for _, elem := range arr.arrayVal {
-			f(elem)
-		}
-	case func(*JSValue) *JSValue:
-		for _, elem := range arr.arrayVal {
-			f(elem)
-		}
-	case func(*JSValue, *JSValue):
-		for i, elem := range arr.arrayVal {
-			f(elem, NewNumber(float64(i)))
-		}
-	case func(*JSValue, *JSValue) *JSValue:
-		for i, elem := range arr.arrayVal {
-			f(elem, NewNumber(float64(i)))
-		}
-	case *JSValue:
-		if f != nil && f.funcVal != nil {
-			for i, elem := range arr.arrayVal {
-				f.funcVal(elem, NewNumber(float64(i)))
-			}
-		}
-	}
-}
-
-// Find returns the first element for which fn returns truthy, or undefined.
-func Find(arrAny any, fn any) *JSValue {
-	arr := asArray(arrAny)
-	if arr == nil || arr.arrayVal == nil {
-		return NewUndefined()
-	}
-	switch f := fn.(type) {
-	case func(*JSValue) *JSValue:
-		for _, elem := range arr.arrayVal {
-			if Truthy(f(elem)) {
-				return elem
-			}
-		}
-	case func(*JSValue, *JSValue) *JSValue:
-		for i, elem := range arr.arrayVal {
-			if Truthy(f(elem, NewNumber(float64(i)))) {
-				return elem
-			}
-		}
-	case func(*JSValue) bool:
-		for _, elem := range arr.arrayVal {
-			if f(elem) {
-				return elem
-			}
-		}
-	case *JSValue:
-		if f != nil && f.funcVal != nil {
-			for _, elem := range arr.arrayVal {
-				if Truthy(f.funcVal(elem)) {
-					return elem
-				}
-			}
-		}
-	}
-	return NewUndefined()
-}
-
-// Some returns true if at least one element satisfies the predicate.
-func Some(arrAny any, fn any) *JSValue {
-	arr := asArray(arrAny)
-	if arr == nil || arr.arrayVal == nil {
-		return NewBool(false)
-	}
-	switch f := fn.(type) {
-	case func(*JSValue) *JSValue:
-		for _, elem := range arr.arrayVal {
-			if Truthy(f(elem)) {
-				return NewBool(true)
-			}
-		}
-	case func(*JSValue, *JSValue) *JSValue:
-		for i, elem := range arr.arrayVal {
-			if Truthy(f(elem, NewNumber(float64(i)))) {
-				return NewBool(true)
-			}
-		}
-	case func(*JSValue) bool:
-		for _, elem := range arr.arrayVal {
-			if f(elem) {
-				return NewBool(true)
-			}
-		}
-	case *JSValue:
-		if f != nil && f.funcVal != nil {
-			for _, elem := range arr.arrayVal {
-				if Truthy(f.funcVal(elem)) {
-					return NewBool(true)
-				}
-			}
-		}
-	}
-	return NewBool(false)
-}
-
-// Every returns true if all elements satisfy the predicate.
-func Every(arrAny any, fn any) *JSValue {
-	arr := asArray(arrAny)
-	if arr == nil || arr.arrayVal == nil {
-		return NewBool(true)
-	}
-	switch f := fn.(type) {
-	case func(*JSValue) *JSValue:
-		for _, elem := range arr.arrayVal {
-			if !Truthy(f(elem)) {
-				return NewBool(false)
-			}
-		}
-	case func(*JSValue, *JSValue) *JSValue:
-		for i, elem := range arr.arrayVal {
-			if !Truthy(f(elem, NewNumber(float64(i)))) {
-				return NewBool(false)
-			}
-		}
-	case func(*JSValue) bool:
-		for _, elem := range arr.arrayVal {
-			if !f(elem) {
-				return NewBool(false)
-			}
-		}
-	case *JSValue:
-		if f != nil && f.funcVal != nil {
-			for _, elem := range arr.arrayVal {
-				if !Truthy(f.funcVal(elem)) {
-					return NewBool(false)
-				}
-			}
-		}
-	}
-	return NewBool(true)
-}
-
-// Reduce applies fn against an accumulator and each element. Returns the final accumulated value.
-func Reduce(arrAny any, fn any, initial ...*JSValue) *JSValue {
-	arr := asArray(arrAny)
-	if arr == nil || arr.arrayVal == nil {
-		if len(initial) > 0 {
-			return initial[0]
-		}
-		return NewUndefined()
-	}
-	var acc *JSValue
-	startIdx := 0
-	if len(initial) > 0 {
-		acc = initial[0]
-	} else if len(arr.arrayVal) > 0 {
-		acc = arr.arrayVal[0]
-		startIdx = 1
-	} else {
-		return NewUndefined()
-	}
-	switch f := fn.(type) {
-	case func(*JSValue, *JSValue) *JSValue:
-		for i := startIdx; i < len(arr.arrayVal); i++ {
-			acc = f(acc, arr.arrayVal[i])
-		}
-	case func(*JSValue, *JSValue, *JSValue) *JSValue:
-		for i := startIdx; i < len(arr.arrayVal); i++ {
-			acc = f(acc, arr.arrayVal[i], NewNumber(float64(i)))
-		}
-	case *JSValue:
-		if f != nil && f.funcVal != nil {
-			for i := startIdx; i < len(arr.arrayVal); i++ {
-				acc = f.funcVal(acc, arr.arrayVal[i])
-			}
-		}
-	}
-	return acc
 }
 
 // IsTruthy returns true if the JSValue is truthy in JavaScript semantics.
@@ -973,154 +676,40 @@ func normalizeIndex(idx int, length int) int {
 	return idx
 }
 
-// Pop returns the last element of an array, or undefined if empty.
-func Pop(arr *JSValue) *JSValue {
-	if arr == nil || arr.arrayVal == nil || len(arr.arrayVal) == 0 {
-		return NewUndefined()
-	}
-	last := arr.arrayVal[len(arr.arrayVal)-1]
-	arr.arrayVal = arr.arrayVal[:len(arr.arrayVal)-1]
-	return last
-}
 
-// Join joins array elements into a string with separator.
-func Join(arr *JSValue, sep *JSValue) *JSValue {
-	if arr == nil || arr.arrayVal == nil {
-		return NewString("")
-	}
-	s := ","
-	if sep != nil {
-		s = sep.String()
-	}
-	strs := make([]string, len(arr.arrayVal))
-	for i, elem := range arr.arrayVal {
-		strs[i] = fmt.Sprint(elem)
-	}
-	return NewString(strings.Join(strs, s))
-}
+// Slice, Concat, Join, Includes are kept as package-level functions because
+// they handle both array AND string operations, and are used by prototype methods.
 
-// Includes checks if array contains a value.
-func Includes(arr *JSValue, val *JSValue) *JSValue {
-	if arr == nil {
-		return NewBool(false)
-	}
-	// String.prototype.includes(searchString)
-	if arr.typ == TypeString {
-		if val == nil {
-			return NewBool(false)
-		}
-		return NewBool(strings.Contains(arr.strVal, val.String()))
-	}
-	// Array.prototype.includes(value) — uses SameValueZero comparison
-	if arr.arrayVal == nil {
-		return NewBool(false)
-	}
-	valStr := ""
-	if val != nil {
-		valStr = val.String()
-	}
-	for _, elem := range arr.arrayVal {
-		if elem == val {
-			return NewBool(true)
-		}
-		// Value comparison for primitives (string, number, boolean)
-		if elem != nil && val != nil && elem.typ == val.typ {
-			switch elem.typ {
-			case TypeString:
-				if elem.strVal == valStr {
-					return NewBool(true)
-				}
-			case TypeNumber:
-				if elem.numVal == val.numVal {
-					return NewBool(true)
-				}
-			case TypeBoolean:
-				if elem.boolVal == val.boolVal {
-					return NewBool(true)
-				}
-			}
-		}
-	}
-	return NewBool(false)
-}
-
-// OrDefault implements JavaScript || operator with truthiness semantics.
-func OrDefault(val *JSValue, fallback *JSValue) *JSValue {
-	if val == nil || !val.IsTruthy() {
-		return fallback
-	}
-	return val
-}
-
-// Slice slices array (or string) with support for negative indices.
+// Slice creates a slice of an array or string.
 func Slice(arr *JSValue, args ...*JSValue) *JSValue {
 	if arr == nil {
 		return NewArray()
 	}
-
-	// String slicing
 	if arr.typ == TypeString {
 		runes := []rune(arr.strVal)
 		length := len(runes)
-		start := 0
-		end := length
-		if len(args) >= 1 && args[0] != nil {
-			start = normalizeIndex(int(args[0].Number()), length)
-		}
-		if len(args) >= 2 && args[1] != nil {
-			end = normalizeIndex(int(args[1].Number()), length)
-		}
-		if start < 0 {
-			start = 0
-		}
-		if start > length {
-			start = length
-		}
-		if end < 0 {
-			end = 0
-		}
-		if end > length {
-			end = length
-		}
-		if end < start {
-			end = start
-		}
+		start, end := 0, length
+		if len(args) >= 1 && args[0] != nil { start = normalizeIndex(int(args[0].Number()), length) }
+		if len(args) >= 2 && args[1] != nil { end = normalizeIndex(int(args[1].Number()), length) }
+		if start < 0 { start = 0 }
+		if start > length { start = length }
+		if end < 0 { end = 0 }
+		if end > length { end = length }
+		if end < start { end = start }
 		return NewString(string(runes[start:end]))
 	}
-
-	// Array slicing
 	if arr.arrayVal == nil {
 		return NewArray()
 	}
-
 	length := len(arr.arrayVal)
-	start := 0
-	end := length
-
-	if len(args) >= 1 && args[0] != nil {
-		start = normalizeIndex(int(args[0].Number()), length)
-	}
-	if len(args) >= 2 && args[1] != nil {
-		end = normalizeIndex(int(args[1].Number()), length)
-	}
-
-	// Clamp to valid range
-	if start < 0 {
-		start = 0
-	}
-	if start > length {
-		start = length
-	}
-	if end < 0 {
-		end = 0
-	}
-	if end > length {
-		end = length
-	}
-	if end < start {
-		end = start
-	}
-
+	start, end := 0, length
+	if len(args) >= 1 && args[0] != nil { start = normalizeIndex(int(args[0].Number()), length) }
+	if len(args) >= 2 && args[1] != nil { end = normalizeIndex(int(args[1].Number()), length) }
+	if start < 0 { start = 0 }
+	if start > length { start = length }
+	if end < 0 { end = 0 }
+	if end > length { end = length }
+	if end < start { end = start }
 	return NewArray(arr.arrayVal[start:end]...)
 }
 
@@ -1131,7 +720,6 @@ func Concat(arr *JSValue, items ...*JSValue) *JSValue {
 		result = make([]*JSValue, len(arr.arrayVal))
 		copy(result, arr.arrayVal)
 	}
-	// Flatten array items (JS Array.concat spreads arrays)
 	for _, item := range items {
 		if item != nil && item.arrayVal != nil {
 			result = append(result, item.arrayVal...)
@@ -1142,35 +730,42 @@ func Concat(arr *JSValue, items ...*JSValue) *JSValue {
 	return NewArray(result...)
 }
 
-// Push appends items to array (returns new array in Go).
-// arr accepts *JSValue or []*JSValue (from rest params).
-func Push(arrAny any, items ...*JSValue) *JSValue {
-	arr := asArray(arrAny)
-	if arr == nil {
-		return NewNumber(float64(len(items)))
+// Join joins array elements into a string with separator.
+func Join(arr *JSValue, sep *JSValue) *JSValue {
+	if arr == nil || arr.arrayVal == nil {
+		return NewString("")
 	}
-	// Mutate in place — JS Array.push modifies the array
-	arr.arrayVal = append(arr.arrayVal, items...)
-	return NewNumber(float64(len(arr.arrayVal)))
+	s := ","
+	if sep != nil { s = sep.String() }
+	strs := make([]string, len(arr.arrayVal))
+	for i, elem := range arr.arrayVal {
+		strs[i] = fmt.Sprint(elem)
+	}
+	return NewString(strings.Join(strs, s))
 }
 
-// Shift removes and returns first element, or undefined if empty. Mutates in place.
-func Shift(arr *JSValue) *JSValue {
-	if arr == nil || arr.arrayVal == nil || len(arr.arrayVal) == 0 {
-		return NewUndefined()
+// Includes checks if array or string contains a value.
+func Includes(arr *JSValue, val *JSValue) *JSValue {
+	if arr == nil { return NewBool(false) }
+	if arr.typ == TypeString {
+		if val == nil { return NewBool(false) }
+		return NewBool(strings.Contains(arr.strVal, val.String()))
 	}
-	first := arr.arrayVal[0]
-	arr.arrayVal = arr.arrayVal[1:]
-	return first
-}
-
-// Unshift prepends items to array. Mutates in place. Returns new length.
-func Unshift(arr *JSValue, items ...*JSValue) *JSValue {
-	if arr == nil {
-		return NewNumber(float64(len(items)))
+	if arr.arrayVal == nil { return NewBool(false) }
+	for _, elem := range arr.arrayVal {
+		if elem == val { return NewBool(true) }
+		if elem != nil && val != nil && elem.typ == val.typ {
+			switch elem.typ {
+			case TypeString:
+				if elem.strVal == val.String() { return NewBool(true) }
+			case TypeNumber:
+				if elem.numVal == val.numVal { return NewBool(true) }
+			case TypeBoolean:
+				if elem.boolVal == val.boolVal { return NewBool(true) }
+			}
+		}
 	}
-	arr.arrayVal = append(items, arr.arrayVal...)
-	return NewNumber(float64(len(arr.arrayVal)))
+	return NewBool(false)
 }
 
 // ToLowerCase converts a JSValue to lowercase string and wraps it.

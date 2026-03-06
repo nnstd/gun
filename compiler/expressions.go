@@ -650,21 +650,6 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 					}
 				}
 
-				// Map/Set method dispatch for known Map/Set locals
-				if objNode.Kind() == "identifier" {
-					if msType, ok := t.mapSetLocals[objText]; ok {
-						if msType == "map" {
-							if r := transformMapMethod(obj, prop, args, t.addImport); r != nil {
-								return r
-							}
-						} else if msType == "set" {
-							if r := transformSetMethod(obj, prop, args, t.addImport); r != nil {
-								return r
-							}
-						}
-					}
-				}
-
 				// For JSValue receivers, try JSValue string/collection wrapper methods first.
 				if isUntypedLocal || t.nodeReturnsJSValue(objNode) {
 					if hasJSValueStringWrapper(prop) {
@@ -672,28 +657,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 							return r
 						}
 					}
-					// Also try collection methods (slice, concat, push, etc.)
-					if t.builtins.IsArrayMethod(prop) {
-						// Handle spread in push/unshift: arr.push(...items) or arr.unshift(...items)
-						if (prop == "push" || prop == "unshift") && argsNodeHasSpread(argsNode) {
-							t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-							infos := t.transformArgsWithSpread(argsNode)
-							funcName := capitalize(prop)
-							if len(infos) == 1 && infos[0].isSpread {
-								// Single spread: Unshift(arr, spread.Array()...) or Push(arr, spread.Array()...)
-								return &ast.CallExpr{
-									Fun:      selectorExpr(ident("jsvalue"), funcName),
-									Args:     []ast.Expr{obj, callExpr(selectorExpr(infos[0].expr, "Array"))},
-									Ellipsis: 1,
-								}
-							}
-						}
-						t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-						if r := transformCollectionMethod(obj, prop, args, t.addImport, true); r != nil {
-							return r
-						}
 					}
-				}
 
 				// When the receiver returns JSValue (untyped local or JSValue-returning expression),
 				// coerce it to string for string methods, but not for array methods.
@@ -730,27 +694,9 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 							return callExpr(selectorExpr(ident("jsvalue"), "NewString"), r)
 						}
 					}
-				} else if (isUntypedLocal || t.nodeReturnsJSValue(objNode)) && t.builtins.IsArrayMethod(prop) {
-					// For array methods on JSValue receivers (untyped locals or JSValue-returning expressions), apply JSValue coercion
-					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-
-					// Handle map/filter/forEach with package-level functions
-					if prop == "map" || prop == "filter" || prop == "forEach" ||
-						prop == "find" || prop == "some" || prop == "every" || prop == "reduce" {
-						funcName := capitalize(prop)
-						return callExpr(selectorExpr(ident("jsvalue"), funcName), append([]ast.Expr{obj}, args...)...)
-					}
-
-					// Handle length with array coercion
-					if prop == "length" {
-						return callExpr(ident("len"), callExpr(selectorExpr(obj, "Array")))
-					}
-
-					// For other array methods, call transformCollectionMethod with isJSValueReceiver=true
-					if r := transformCollectionMethod(obj, prop, args, t.addImport, true); r != nil {
-						return r
-					}
-				} else {
+				} else if !isUntypedLocal && !t.nodeReturnsJSValue(objNode) {
+					// Non-JSValue receivers: handle with typed Go array/string methods.
+					// JSValue receivers fall through to .MethodCall() below.
 					// [].concat(x) → just x; skip coercion so JSValue args stay as-is.
 					if prop == "concat" {
 						if cl, ok := obj.(*ast.CompositeLit); ok && len(cl.Elts) == 0 && len(args) > 0 {
@@ -758,21 +704,6 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 						}
 					}
 					coercedArgs := t.coerceJSValueArgs(args, argsNode)
-					// []*jsvalue.JSValue slice locals dispatch through package-level functions.
-					// Wrap the Go slice in jsvalue.NewArray() so it becomes a *JSValue.
-					if objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objText] && t.builtins.IsArrayMethod(prop) {
-						t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-						for k, a := range coercedArgs {
-							coercedArgs[k] = jsvalueWrapLit(a)
-						}
-						funcName := capitalize(prop)
-						wrappedObj := &ast.CallExpr{
-							Fun:      selectorExpr(ident("jsvalue"), "NewArray"),
-							Args:     []ast.Expr{obj},
-							Ellipsis: 1,
-						}
-						return callExpr(selectorExpr(ident("jsvalue"), funcName), append([]ast.Expr{wrappedObj}, coercedArgs...)...)
-					}
 					if r := transformBuiltinMethod(obj, prop, coercedArgs, t.addImport); r != nil {
 						return r
 					}
@@ -788,6 +719,14 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 				}
 				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 				obj := t.transformExpr(objNode)
+				// Wrap []*jsvalue.JSValue slice locals in NewArray() for .MethodCall()
+				if objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objText] {
+					obj = &ast.CallExpr{
+						Fun:      selectorExpr(ident("jsvalue"), "NewArray"),
+						Args:     []ast.Expr{obj},
+						Ellipsis: 1,
+					}
+				}
 				for i, arg := range args {
 					args[i] = t.wrapAsJSValue(arg)
 				}
@@ -1229,16 +1168,7 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 		return callExpr(ident("len"), obj)
 	}
 
-	// Map/Set .size property
-	if prop == "size" && objNode.Kind() == "identifier" {
-		if msType, ok := t.mapSetLocals[objNode.Utf8Text(t.source)]; ok {
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-			if msType == "map" {
-				return callExpr(selectorExpr(ident("jsvalue"), "MapSize"), obj)
-			}
-			return callExpr(selectorExpr(ident("jsvalue"), "SetSize"), obj)
-		}
-	}
+
 
 	// For local scope variables and 'this' (typed as *jsvalue.JSValue),
 	// use dynamic property access via Get() instead of Go selector expressions.

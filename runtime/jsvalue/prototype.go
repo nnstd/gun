@@ -12,6 +12,8 @@ var (
 	SymbolPrototype   *JSValue
 	ArrayPrototype    *JSValue
 	FunctionPrototype *JSValue
+	MapPrototype      *JSValue
+	SetPrototype      *JSValue
 )
 
 func init() {
@@ -384,5 +386,520 @@ func init() {
 		Writable:     true,
 		Enumerable:   false,
 		Configurable: true,
+	})
+
+	// --- Additional ArrayPrototype methods (moved from package-level functions) ---
+
+	defMethod := func(proto *JSValue, name string, fn func(args ...*JSValue) *JSValue) {
+		proto.DefineProperty(name, &PropertyDescriptor{
+			Value: NewFunction(fn).MarkAsMethod(), Writable: true, Enumerable: false, Configurable: true,
+		})
+	}
+	defGetter := func(proto *JSValue, name string, fn func(this *JSValue) *JSValue) {
+		proto.DefineProperty(name, &PropertyDescriptor{
+			Get: fn, Enumerable: false, Configurable: true,
+		})
+	}
+
+	// arr.push(...items) — mutates, returns new length
+	defMethod(ArrayPrototype, "push", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil {
+			return NewNumber(0)
+		}
+		this := args[0]
+		this.arrayVal = append(this.arrayVal, args[1:]...)
+		return NewNumber(float64(len(this.arrayVal)))
+	})
+
+	// arr.pop() — mutates, returns removed element
+	defMethod(ArrayPrototype, "pop", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil || args[0].arrayVal == nil || len(args[0].arrayVal) == 0 {
+			return NewUndefined()
+		}
+		this := args[0]
+		last := this.arrayVal[len(this.arrayVal)-1]
+		this.arrayVal = this.arrayVal[:len(this.arrayVal)-1]
+		return last
+	})
+
+	// arr.shift() — mutates, returns removed first element
+	defMethod(ArrayPrototype, "shift", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil || args[0].arrayVal == nil || len(args[0].arrayVal) == 0 {
+			return NewUndefined()
+		}
+		this := args[0]
+		first := this.arrayVal[0]
+		this.arrayVal = this.arrayVal[1:]
+		return first
+	})
+
+	// arr.unshift(...items) — mutates, returns new length
+	defMethod(ArrayPrototype, "unshift", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil {
+			return NewNumber(0)
+		}
+		this := args[0]
+		this.arrayVal = append(args[1:], this.arrayVal...)
+		return NewNumber(float64(len(this.arrayVal)))
+	})
+
+	// arr.splice(start, deleteCount, ...items) — mutates, returns removed elements
+	defMethod(ArrayPrototype, "splice", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil || args[0].arrayVal == nil {
+			return NewArray()
+		}
+		this := args[0]
+		rest := args[1:]
+		length := len(this.arrayVal)
+		start := 0
+		if len(rest) >= 1 && rest[0] != nil {
+			start = int(rest[0].Number())
+			if start < 0 {
+				start = length + start
+				if start < 0 {
+					start = 0
+				}
+			}
+			if start > length {
+				start = length
+			}
+		}
+		deleteCount := length - start
+		if len(rest) >= 2 && rest[1] != nil {
+			deleteCount = int(rest[1].Number())
+			if deleteCount < 0 {
+				deleteCount = 0
+			}
+			if start+deleteCount > length {
+				deleteCount = length - start
+			}
+		}
+		removed := make([]*JSValue, deleteCount)
+		copy(removed, this.arrayVal[start:start+deleteCount])
+		var newItems []*JSValue
+		for i := 2; i < len(rest); i++ {
+			newItems = append(newItems, rest[i])
+		}
+		result := make([]*JSValue, 0, length-deleteCount+len(newItems))
+		result = append(result, this.arrayVal[:start]...)
+		result = append(result, newItems...)
+		result = append(result, this.arrayVal[start+deleteCount:]...)
+		this.arrayVal = result
+		return NewArray(removed...)
+	})
+
+	// arr.indexOf(value) — returns index or -1
+	defMethod(ArrayPrototype, "indexOf", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+			return NewNumber(-1)
+		}
+		for i, elem := range args[0].arrayVal {
+			if jsValueEqual(elem, args[1]) {
+				return NewNumber(float64(i))
+			}
+		}
+		return NewNumber(-1)
+	})
+
+	// arr.findIndex(fn) — returns index or -1
+	defMethod(ArrayPrototype, "findIndex", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+			return NewNumber(-1)
+		}
+		fn := args[1]
+		if fn == nil || fn.funcVal == nil {
+			return NewNumber(-1)
+		}
+		for i, elem := range args[0].arrayVal {
+			if Truthy(fn.funcVal(elem, NewNumber(float64(i)))) {
+				return NewNumber(float64(i))
+			}
+		}
+		return NewNumber(-1)
+	})
+
+	// arr.map(fn) — returns new array
+	defMethod(ArrayPrototype, "map", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+			return NewArray()
+		}
+		fn := args[1]
+		if fn == nil || fn.funcVal == nil {
+			return NewArray()
+		}
+		results := make([]*JSValue, len(args[0].arrayVal))
+		for i, elem := range args[0].arrayVal {
+			results[i] = fn.funcVal(elem, NewNumber(float64(i)))
+		}
+		return NewArray(results...)
+	})
+
+	// arr.filter(fn) — returns new array
+	defMethod(ArrayPrototype, "filter", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+			return NewArray()
+		}
+		fn := args[1]
+		if fn == nil || fn.funcVal == nil {
+			return NewArray()
+		}
+		var results []*JSValue
+		for i, elem := range args[0].arrayVal {
+			r := fn.funcVal(elem, NewNumber(float64(i)))
+			if r != nil && r.Bool() {
+				results = append(results, elem)
+			}
+		}
+		return NewArray(results...)
+	})
+
+	// arr.forEach(fn)
+	defMethod(ArrayPrototype, "forEach", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+			return NewUndefined()
+		}
+		fn := args[1]
+		if fn == nil || fn.funcVal == nil {
+			return NewUndefined()
+		}
+		for i, elem := range args[0].arrayVal {
+			fn.funcVal(elem, NewNumber(float64(i)))
+		}
+		return NewUndefined()
+	})
+
+	// arr.find(fn) — returns first matching element or undefined
+	defMethod(ArrayPrototype, "find", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+			return NewUndefined()
+		}
+		fn := args[1]
+		if fn == nil || fn.funcVal == nil {
+			return NewUndefined()
+		}
+		for _, elem := range args[0].arrayVal {
+			if Truthy(fn.funcVal(elem)) {
+				return elem
+			}
+		}
+		return NewUndefined()
+	})
+
+	// arr.some(fn) — returns true if any element matches
+	defMethod(ArrayPrototype, "some", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+			return NewBool(false)
+		}
+		fn := args[1]
+		if fn == nil || fn.funcVal == nil {
+			return NewBool(false)
+		}
+		for _, elem := range args[0].arrayVal {
+			if Truthy(fn.funcVal(elem)) {
+				return NewBool(true)
+			}
+		}
+		return NewBool(false)
+	})
+
+	// arr.every(fn) — returns true if all elements match
+	defMethod(ArrayPrototype, "every", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+			return NewBool(true)
+		}
+		fn := args[1]
+		if fn == nil || fn.funcVal == nil {
+			return NewBool(true)
+		}
+		for _, elem := range args[0].arrayVal {
+			if !Truthy(fn.funcVal(elem)) {
+				return NewBool(false)
+			}
+		}
+		return NewBool(true)
+	})
+
+	// arr.reduce(fn, initial?) — returns accumulated value
+	defMethod(ArrayPrototype, "reduce", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+			if len(args) >= 3 {
+				return args[2]
+			}
+			return NewUndefined()
+		}
+		fn := args[1]
+		if fn == nil || fn.funcVal == nil {
+			return NewUndefined()
+		}
+		arr := args[0].arrayVal
+		var acc *JSValue
+		startIdx := 0
+		if len(args) >= 3 {
+			acc = args[2]
+		} else if len(arr) > 0 {
+			acc = arr[0]
+			startIdx = 1
+		} else {
+			return NewUndefined()
+		}
+		for i := startIdx; i < len(arr); i++ {
+			acc = fn.funcVal(acc, arr[i])
+		}
+		return acc
+	})
+
+	// arr.flat() — flattens one level
+	defMethod(ArrayPrototype, "flat", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil || args[0].arrayVal == nil {
+			return NewArray()
+		}
+		var result []*JSValue
+		for _, elem := range args[0].arrayVal {
+			if elem != nil && elem.arrayVal != nil {
+				result = append(result, elem.arrayVal...)
+			} else {
+				result = append(result, elem)
+			}
+		}
+		return NewArray(result...)
+	})
+
+	// arr.flatMap(fn) — map then flatten one level
+	defMethod(ArrayPrototype, "flatMap", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+			return NewArray()
+		}
+		fn := args[1]
+		if fn == nil || fn.funcVal == nil {
+			return NewArray()
+		}
+		var result []*JSValue
+		for i, elem := range args[0].arrayVal {
+			r := fn.funcVal(elem, NewNumber(float64(i)))
+			if r != nil && r.arrayVal != nil {
+				result = append(result, r.arrayVal...)
+			} else {
+				result = append(result, r)
+			}
+		}
+		return NewArray(result...)
+	})
+
+	// --- MapPrototype ---
+
+	MapPrototype = &JSValue{
+		typ:        TypeObject,
+		properties: make(map[string]*PropertyDescriptor),
+		prototype:  ObjectPrototype,
+	}
+
+	defGetter(MapPrototype, "size", func(this *JSValue) *JSValue {
+		if this == nil || this.mapVal == nil {
+			return NewNumber(0)
+		}
+		return NewNumber(float64(len(this.mapVal.entries)))
+	})
+
+	defMethod(MapPrototype, "get", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil || args[0].mapVal == nil {
+			return NewUndefined()
+		}
+		this := args[0]
+		if len(args) < 2 {
+			return NewUndefined()
+		}
+		if i := this.mapVal.find(args[1]); i >= 0 {
+			return this.mapVal.entries[i].value
+		}
+		return NewUndefined()
+	})
+
+	defMethod(MapPrototype, "set", func(args ...*JSValue) *JSValue {
+		if len(args) < 3 || args[0] == nil || args[0].mapVal == nil {
+			if len(args) > 0 {
+				return args[0]
+			}
+			return NewUndefined()
+		}
+		this := args[0]
+		key, value := args[1], args[2]
+		if i := this.mapVal.find(key); i >= 0 {
+			this.mapVal.entries[i].value = value
+		} else {
+			this.mapVal.entries = append(this.mapVal.entries, &jsMapEntry{key, value})
+		}
+		return this
+	})
+
+	defMethod(MapPrototype, "has", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil || args[0].mapVal == nil {
+			return NewBool(false)
+		}
+		return NewBool(args[0].mapVal.find(args[1]) >= 0)
+	})
+
+	defMethod(MapPrototype, "delete", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil || args[0].mapVal == nil {
+			return NewBool(false)
+		}
+		this := args[0]
+		if i := this.mapVal.find(args[1]); i >= 0 {
+			this.mapVal.entries = append(this.mapVal.entries[:i], this.mapVal.entries[i+1:]...)
+			return NewBool(true)
+		}
+		return NewBool(false)
+	})
+
+	defMethod(MapPrototype, "clear", func(args ...*JSValue) *JSValue {
+		if len(args) >= 1 && args[0] != nil && args[0].mapVal != nil {
+			args[0].mapVal.entries = nil
+		}
+		return NewUndefined()
+	})
+
+	defMethod(MapPrototype, "keys", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil || args[0].mapVal == nil {
+			return NewArray()
+		}
+		keys := make([]*JSValue, len(args[0].mapVal.entries))
+		for i, e := range args[0].mapVal.entries {
+			keys[i] = e.key
+		}
+		return NewArray(keys...)
+	})
+
+	defMethod(MapPrototype, "values", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil || args[0].mapVal == nil {
+			return NewArray()
+		}
+		vals := make([]*JSValue, len(args[0].mapVal.entries))
+		for i, e := range args[0].mapVal.entries {
+			vals[i] = e.value
+		}
+		return NewArray(vals...)
+	})
+
+	defMethod(MapPrototype, "entries", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil || args[0].mapVal == nil {
+			return NewArray()
+		}
+		pairs := make([]*JSValue, len(args[0].mapVal.entries))
+		for i, e := range args[0].mapVal.entries {
+			pairs[i] = NewArray(e.key, e.value)
+		}
+		return NewArray(pairs...)
+	})
+
+	defMethod(MapPrototype, "forEach", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil || args[0].mapVal == nil {
+			return NewUndefined()
+		}
+		fn := args[1]
+		if fn == nil || fn.funcVal == nil {
+			return NewUndefined()
+		}
+		for _, e := range args[0].mapVal.entries {
+			fn.funcVal(e.value, e.key)
+		}
+		return NewUndefined()
+	})
+
+	// --- SetPrototype ---
+
+	SetPrototype = &JSValue{
+		typ:        TypeObject,
+		properties: make(map[string]*PropertyDescriptor),
+		prototype:  ObjectPrototype,
+	}
+
+	defGetter(SetPrototype, "size", func(this *JSValue) *JSValue {
+		if this == nil || this.setVal == nil {
+			return NewNumber(0)
+		}
+		return NewNumber(float64(len(this.setVal.items)))
+	})
+
+	defMethod(SetPrototype, "add", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil || args[0].setVal == nil {
+			if len(args) > 0 {
+				return args[0]
+			}
+			return NewUndefined()
+		}
+		this := args[0]
+		if this.setVal.find(args[1]) < 0 {
+			this.setVal.items = append(this.setVal.items, args[1])
+		}
+		return this
+	})
+
+	defMethod(SetPrototype, "has", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil || args[0].setVal == nil {
+			return NewBool(false)
+		}
+		return NewBool(args[0].setVal.find(args[1]) >= 0)
+	})
+
+	defMethod(SetPrototype, "delete", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil || args[0].setVal == nil {
+			return NewBool(false)
+		}
+		this := args[0]
+		if i := this.setVal.find(args[1]); i >= 0 {
+			this.setVal.items = append(this.setVal.items[:i], this.setVal.items[i+1:]...)
+			return NewBool(true)
+		}
+		return NewBool(false)
+	})
+
+	defMethod(SetPrototype, "clear", func(args ...*JSValue) *JSValue {
+		if len(args) >= 1 && args[0] != nil && args[0].setVal != nil {
+			args[0].setVal.items = nil
+		}
+		return NewUndefined()
+	})
+
+	defMethod(SetPrototype, "values", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil || args[0].setVal == nil {
+			return NewArray()
+		}
+		elems := make([]*JSValue, len(args[0].setVal.items))
+		copy(elems, args[0].setVal.items)
+		return NewArray(elems...)
+	})
+
+	defMethod(SetPrototype, "keys", func(args ...*JSValue) *JSValue {
+		// Set.keys() === Set.values() per JS spec
+		if len(args) < 1 || args[0] == nil || args[0].setVal == nil {
+			return NewArray()
+		}
+		elems := make([]*JSValue, len(args[0].setVal.items))
+		copy(elems, args[0].setVal.items)
+		return NewArray(elems...)
+	})
+
+	defMethod(SetPrototype, "entries", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil || args[0].setVal == nil {
+			return NewArray()
+		}
+		pairs := make([]*JSValue, len(args[0].setVal.items))
+		for i, item := range args[0].setVal.items {
+			pairs[i] = NewArray(item, item) // [value, value] per JS spec
+		}
+		return NewArray(pairs...)
+	})
+
+	defMethod(SetPrototype, "forEach", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil || args[0].setVal == nil {
+			return NewUndefined()
+		}
+		fn := args[1]
+		if fn == nil || fn.funcVal == nil {
+			return NewUndefined()
+		}
+		for _, item := range args[0].setVal.items {
+			fn.funcVal(item)
+		}
+		return NewUndefined()
 	})
 }

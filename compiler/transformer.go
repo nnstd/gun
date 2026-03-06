@@ -27,7 +27,6 @@ type Transformer struct {
 	localScopes        []map[string]bool          // stack of local variable/parameter names that shadow imports (true = has type annotation, false = JSValue default)
 	jsvalueLocals      map[string]bool            // local variables that hold *jsvalue.JSValue (not slices or maps)
 	jsvalueSliceLocals map[string]bool            // typed locals whose elements are *jsvalue.JSValue (e.g. []*jsvalue.JSValue slices)
-	mapSetLocals       map[string]string          // variable name → "map" or "set" (from new Map()/new Set())
 	typedLocalTypes    map[string]string          // typed local name → Go type name (e.g. "bool", "string", "[]string")
 	pkgVarTyped        map[string]bool            // package-level variable name → true if typed (not JSValue)
 	exportedNames      map[string]bool            // TS names that were exported (capitalized in Go)
@@ -54,7 +53,6 @@ func newTransformer(source []byte, pkgName, moduleName string, samePackageImport
 		funcVarNames:       make(map[string]bool),
 		jsvalueLocals:      make(map[string]bool),
 		jsvalueSliceLocals: make(map[string]bool),
-		mapSetLocals:       make(map[string]string),
 		typedLocalTypes:    make(map[string]string),
 		pkgVarTyped:        make(map[string]bool),
 		exportedNames:      make(map[string]bool),

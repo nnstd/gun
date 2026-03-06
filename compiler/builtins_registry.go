@@ -158,13 +158,8 @@ func (r *BuiltinRegistry) registerJSValuePackageFunctions() {
 		"From", "FromStrings",
 		// Object methods
 		"Keys",
-		// Array wrapper functions
-		"Join", "Pop", "Includes",
-		"Slice", "Concat", "Push",
-		"Shift", "Unshift",
-		"Map", "Filter", "ForEach",
-		"Find", "Some", "Every", "Reduce",
-		"Splice",
+		// Array/string helper functions (kept as package-level)
+		"Slice", "Concat", "Join", "Includes",
 		// String wrapper functions
 		"ToLowerCase", "ToUpperCase", "Trim",
 		"Split", "Replace", "CharAt",
@@ -183,9 +178,6 @@ func (r *BuiltinRegistry) registerJSValuePackageFunctions() {
 		"IsArrayValue", "TypeOf",
 		// Substring/LastIndexOf
 		"Substring", "LastIndexOf",
-		// Set/Map functions
-		"SetHas", "SetAdd", "SetDelete", "SetValues",
-		"MapGet", "MapSet", "MapHas", "MapDelete", "MapKeys", "MapValues",
 	}
 	for _, name := range funcs {
 		r.jsvaluePackageFuncs[name] = true

@@ -473,7 +473,7 @@ func TestJSValueSliceLocalAssignedFromSlice(t *testing.T) {
 }`
 	out := compile(t, ts)
 	assertContains(t, out, "jsvalue.NewArray()")
-	assertContains(t, out, "jsvalue.Slice(args,")
+	assertContains(t, out, `MethodCall("slice"`)
 }
 
 func TestSplitOnJSValueReturnsJSValue(t *testing.T) {
@@ -501,14 +501,13 @@ func TestJSValueLenInBoolContext(t *testing.T) {
 }
 
 func TestJSValueSliceMethodCallWrapped(t *testing.T) {
-	// Collection methods on []*jsvalue.JSValue slices work directly
-	// because runtime functions accept any (handles []*JSValue internally).
+	// Collection methods on JSValue arrays use prototype methods via MethodCall.
 	ts := `function f() {
 	const items = [];
 	items.forEach((x) => { return x; });
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.ForEach(")
+	assertContains(t, out, `MethodCall("forEach"`)
 }
 
 func TestTypedLocalIndexOnJSValueUsesGet(t *testing.T) {
@@ -1150,7 +1149,7 @@ func TestStringAsCallback(t *testing.T) {
 	// String passed as callback: arr.map(String)
 	ts := `function f(arr) { return arr.map(String); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.Map(")
+	assertContains(t, out, `MethodCall("map"`)
 	assertContains(t, out, "jsvalue.NewFunction(")
 }
 

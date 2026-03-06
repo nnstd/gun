@@ -22,7 +22,7 @@ type PropertyDescriptor struct {
 	Writable     bool
 	Enumerable   bool
 	Configurable bool
-	Get          func() *JSValue
+	Get          func(*JSValue) *JSValue
 	Set          func(*JSValue)
 }
 
@@ -49,16 +49,17 @@ func (v *JSValue) Get(name string) *JSValue {
 			return nil
 		}
 	}
-	if v.properties != nil {
-		if desc, ok := v.properties[name]; ok {
-			if desc.Get != nil {
-				return desc.Get()
+	// Walk own properties, then prototype chain. For getters, pass the original
+	// receiver (v) as 'this' so Map/Set size getters can access their data.
+	for cur := v; cur != nil; cur = cur.prototype {
+		if cur.properties != nil {
+			if desc, ok := cur.properties[name]; ok {
+				if desc.Get != nil {
+					return desc.Get(v)
+				}
+				return desc.Value
 			}
-			return desc.Value
 		}
-	}
-	if v.prototype != nil {
-		return v.prototype.Get(name)
 	}
 	return NewUndefined()
 }
