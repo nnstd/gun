@@ -577,24 +577,46 @@ func (t *Transformer) wrapFuncLitAsJSValue(fnLit *ast.FuncLit, paramNames []stri
 	fnLit.Type.Results = results
 	ensureTrailingReturn(fnLit.Body, results)
 
+	// Detect if the last param is a rest param by checking if the number of
+	// inner params is less than would be needed to consume all _args.
+	// Rest params are *jsvalue.JSValue (not variadic), but need all remaining _args.
+	hasRestParam := false
+	if fnLit.Type.Params != nil && len(paramNames) > 0 {
+		lastField := fnLit.Type.Params.List[len(fnLit.Type.Params.List)-1]
+		_, lastIsVariadic := lastField.Type.(*ast.Ellipsis)
+		if !lastIsVariadic && isJSValuePtrType(lastField.Type) {
+			// Check if this param was a rest param by comparing with paramNames
+			// from the original TS declaration. Rest params are the only case where
+			// the inner function has fewer params than _args slots.
+			hasRestParam = len(paramNames) > 0
+		}
+	}
+	_ = hasRestParam // may not be used in all code paths
+
 	// Build args to pass to the original function by unpacking _args.
-	// Each original param gets _args[i]; variadic params get _args[i:]...
 	var callArgs []ast.Expr
 	paramIdx := 0
 	if fnLit.Type.Params != nil {
-		for _, f := range fnLit.Type.Params.List {
+		for fi, f := range fnLit.Type.Params.List {
 			_, isVariadic := f.Type.(*ast.Ellipsis)
+			isLastField := fi == len(fnLit.Type.Params.List)-1
 			for range f.Names {
 				if isVariadic {
-					// Variadic param: pass remaining _args as spread slice
+					// Variadic param (for default-value params):
 					callArgs = append(callArgs, &ast.SliceExpr{
 						X:      ident("_args"),
 						Low:    intLit(itoa(paramIdx)),
 						Slice3: false,
 					})
+				} else if isLastField && t.isRestParam(f.Names[0].Name) {
+					// Rest param: wrap remaining _args into a JSValue array.
+					callArgs = append(callArgs, &ast.CallExpr{
+						Fun:      selectorExpr(ident("jsvalue"), "NewArray"),
+						Args:     []ast.Expr{&ast.SliceExpr{X: ident("_args"), Low: intLit(itoa(paramIdx)), Slice3: false}},
+						Ellipsis: 1,
+					})
 				} else {
 					// Regular param: pass _args[i] or undefined if missing
-					// (JS unset function params are undefined, not null)
 					callArgs = append(callArgs, &ast.CallExpr{
 						Fun: &ast.FuncLit{
 							Type: &ast.FuncType{

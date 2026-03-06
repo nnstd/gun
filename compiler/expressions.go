@@ -655,11 +655,6 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 				}
 				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 				obj := t.transformExpr(objNode)
-				// Wrap []*jsvalue.JSValue rest params with From() so .MethodCall() works.
-				// From() handles both *JSValue (pass-through) and []*JSValue (→ NewArray).
-				if objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objText] {
-					obj = callExpr(selectorExpr(ident("jsvalue"), "From"), obj)
-				}
 				for i, arg := range args {
 					args[i] = t.wrapAsJSValue(arg)
 				}
@@ -682,6 +677,19 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 					allArgs := append([]ast.Expr{stringLit(prop)}, args...)
 					return callExpr(selectorExpr(obj, "MethodCall"), allArgs...)
 				}
+			}
+
+			// String/number/boolean literal as method receiver:
+			// "str".method() → jsvalue.NewString("str").MethodCall("method", ...)
+			if objNode.Kind() == "string" || objNode.Kind() == "template_string" ||
+				objNode.Kind() == "number" || objNode.Kind() == "true" || objNode.Kind() == "false" {
+				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+				obj := jsvalueWrapLit(t.transformExpr(objNode))
+				for i, arg := range args {
+					args[i] = t.wrapAsJSValue(arg)
+				}
+				allArgs := append([]ast.Expr{stringLit(prop)}, args...)
+				return callExpr(selectorExpr(obj, "MethodCall"), allArgs...)
 			}
 
 			// Catch-all: method call on any JSValue-returning expression
@@ -892,8 +900,7 @@ func (t *Transformer) transformArgsWithSpread(node *sitter.Node) []spreadArgInfo
 			if child.NamedChildCount() > 0 {
 				innerNode := child.NamedChild(0)
 				if inner := t.transformExpr(innerNode); inner != nil {
-					isSlice := innerNode.Kind() == "identifier" && t.jsvalueSliceLocals[innerNode.Utf8Text(t.source)]
-					args = append(args, spreadArgInfo{expr: inner, isSpread: true, isSlice: isSlice})
+					args = append(args, spreadArgInfo{expr: inner, isSpread: true, isSlice: false})
 				}
 			}
 		} else {

@@ -141,24 +141,10 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 						// For JSValue slice locals, convert via .Array() instead.
 						if leftNode.Kind() == "identifier" && t.isTypedLocal(leftNode.Utf8Text(t.source)) && t.nodeReturnsJSValue(rightNode) {
 							lname := leftNode.Utf8Text(t.source)
-							if t.jsvalueSliceLocals[lname] {
-								rhs = callExpr(selectorExpr(rhs, "Array"))
-							} else if t.typedLocalTypes[lname] == "bool" {
+							if t.typedLocalTypes[lname] == "bool" {
 								rhs = callExpr(selectorExpr(rhs, "Bool"))
 							} else {
 								rhs = callExpr(ident("int"), callExpr(selectorExpr(rhs, "Number")))
-							}
-						}
-						// Ternary/conditional assigned to a []*jsvalue.JSValue local
-						// generates an IIFE returning `any`. Wrap with jsvalue.ToSlice().
-						if leftNode.Kind() == "identifier" {
-							lname := leftNode.Utf8Text(t.source)
-							if t.jsvalueSliceLocals[lname] {
-								rk := rightNode.Kind()
-								if rk == "ternary_expression" || rk == "parenthesized_expression" {
-									t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-									rhs = callExpr(selectorExpr(ident("jsvalue"), "ToSlice"), rhs)
-								}
 							}
 						}
 						return assignStmt([]ast.Expr{lhs}, []ast.Expr{rhs})

@@ -26,7 +26,7 @@ type Transformer struct {
 	funcVarNames       map[string]bool            // package-level vars assigned function literals (can't have Go fields)
 	localScopes        []map[string]bool          // stack of local variable/parameter names that shadow imports (true = has type annotation, false = JSValue default)
 	jsvalueLocals      map[string]bool            // local variables that hold *jsvalue.JSValue (not slices or maps)
-	jsvalueSliceLocals map[string]bool            // typed locals whose elements are *jsvalue.JSValue (e.g. []*jsvalue.JSValue slices)
+	restParams         map[string]bool            // param names that are rest params (...args)
 	typedLocalTypes    map[string]string          // typed local name → Go type name (e.g. "bool", "string", "[]string")
 	pkgVarTyped        map[string]bool            // package-level variable name → true if typed (not JSValue)
 	exportedNames      map[string]bool            // TS names that were exported (capitalized in Go)
@@ -52,7 +52,7 @@ func newTransformer(source []byte, pkgName, moduleName string, samePackageImport
 		varTypes:           make(map[string]string),
 		funcVarNames:       make(map[string]bool),
 		jsvalueLocals:      make(map[string]bool),
-		jsvalueSliceLocals: make(map[string]bool),
+		restParams:         make(map[string]bool),
 		typedLocalTypes:    make(map[string]string),
 		pkgVarTyped:        make(map[string]bool),
 		exportedNames:      make(map[string]bool),
@@ -150,14 +150,14 @@ func (t *Transformer) pushTypedScope(names map[string]bool) {
 	t.localScopes = append(t.localScopes, names)
 }
 
+// isRestParam returns true if the name was declared as a rest parameter.
+func (t *Transformer) isRestParam(name string) bool {
+	return t.restParams[name]
+}
+
 // popScope removes the most recent local scope and cleans up
-// jsvalueSliceLocals entries that were added in this scope.
 func (t *Transformer) popScope() {
 	if len(t.localScopes) > 0 {
-		scope := t.localScopes[len(t.localScopes)-1]
-		for name := range scope {
-			delete(t.jsvalueSliceLocals, name)
-		}
 		t.localScopes = t.localScopes[:len(t.localScopes)-1]
 	}
 }
@@ -240,9 +240,6 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 			return true
 		}
 		// Typed slice with JSValue elements (e.g. []*jsvalue.JSValue)
-		if objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objNode.Utf8Text(t.source)] {
-			return true
-		}
 		return false
 	case "call_expression":
 		fnNode := node.ChildByFieldName("function")
@@ -327,35 +324,29 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		}
 		if fnNode != nil && fnNode.Kind() == "member_expression" {
 			objNode := fnNode.ChildByFieldName("object")
-			propNode := fnNode.ChildByFieldName("property")
 			if objNode != nil && t.nodeReturnsJSValue(objNode) {
-				// String methods on JSValue receivers (untyped parameters or JSValue locals)
-				// are wrapped to return JSValue, maintaining type consistency.
-				if propNode != nil {
-					prop := propNode.Utf8Text(t.source)
-
-					// match and exec always return []string, not JSValue
-					if prop == "match" || prop == "exec" {
-						return false
-					}
-
-						// Check if receiver is a JSValue expression
-						isJSValueReceiver := t.nodeReturnsJSValue(objNode)
-
-
-					// String methods on JSValue receivers return JSValue (wrapped)
-					if isJSValueReceiver && t.builtins.ReturnsJSValueForUntypedReceiver(prop) {
-						return true
-					}
-
-					// String methods on typed receivers return native Go types
-					if !isJSValueReceiver && t.builtins.IsStringMethod(prop) {
-						return false
-					}
-				}
+				// Method calls on JSValue receivers return JSValue (via prototype chain)
 				return true
 			}
+			// Method calls on literals ("str".method(), 42..method()) also return JSValue
+			// because literals are wrapped as JSValue and use prototype methods.
+			if objNode != nil {
+				switch objNode.Kind() {
+				case "string", "template_string", "number", "true", "false":
+					return true
+				}
+			}
 		}
+	case "as_expression", "type_assertion":
+		// Unwrap type assertions and check the inner expression
+		exprNode := node.ChildByFieldName("expression")
+		if exprNode == nil && node.NamedChildCount() > 0 {
+			exprNode = node.NamedChild(0)
+		}
+		if exprNode != nil {
+			return t.nodeReturnsJSValue(exprNode)
+		}
+		return false
 	case "parenthesized_expression":
 		// Unwrap parentheses and check the inner expression
 		if node.NamedChildCount() > 0 {

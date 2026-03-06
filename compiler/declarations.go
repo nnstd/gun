@@ -162,19 +162,11 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 			if cl, ok := value.(*ast.CompositeLit); ok {
 				if at, ok := cl.Type.(*ast.ArrayType); ok {
 					if isJSValuePtrType(at.Elt) {
-						t.jsvalueSliceLocals[name] = true
-					}
+						}
 				}
 			}
 		}
 
-		// Track locals assigned from jsvalueSliceLocals (e.g. var toCheck = patterns)
-		if valueNode != nil && valueNode.Kind() == "identifier" {
-			rhsName := valueNode.Utf8Text(t.source)
-			if t.jsvalueSliceLocals[rhsName] {
-				t.jsvalueSliceLocals[name] = true
-			}
-		}
 
 		// Track locals that hold *jsvalue.JSValue (not slices or maps)
 		// so method calls on them are properly coerced.
@@ -290,13 +282,10 @@ func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.
 						break
 					}
 				}
-				// Track rest params as JSValue slice locals so collection methods
-				// wrap them with jsvalue.NewArray(args...) before calling
-				t.jsvalueSliceLocals[restName] = true
-				// All-JSValue: rest params are always ...*jsvalue.JSValue
-				var elemType ast.Expr = ptrType(selectorExpr(ident("jsvalue"), "JSValue"))
+				// All-JSValue: rest params are *jsvalue.JSValue (an array JSValue)
 				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-				fields = append(fields, field(restName, &ast.Ellipsis{Elt: elemType}))
+				t.restParams[restName] = true
+				fields = append(fields, field(restName, jsValuePtrType()))
 				continue
 			}
 
@@ -383,13 +372,12 @@ func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.
 				pName = sanitizeIdent(nameNode.Utf8Text(t.source))
 			}
 
-			// All-JSValue: rest params are always ...*jsvalue.JSValue
-			var elemType ast.Expr = ptrType(selectorExpr(ident("jsvalue"), "JSValue"))
+			// All-JSValue: rest params are *jsvalue.JSValue (an array JSValue),
+			// not Go variadic ...*jsvalue.JSValue. This ensures rest params
+			// have prototype methods (push, forEach, etc.) like any other JSValue.
 			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-			// Track rest params as JSValue slice locals
-			t.jsvalueSliceLocals[pName] = true
-
-			fields = append(fields, field(pName, &ast.Ellipsis{Elt: elemType}))
+			t.restParams[pName] = true
+			fields = append(fields, field(pName, jsValuePtrType()))
 		}
 	}
 

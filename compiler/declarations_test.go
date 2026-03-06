@@ -104,9 +104,9 @@ func TestParamGoKeywordEscaped(t *testing.T) {
 func TestRestParameter(t *testing.T) {
 	ts := `function sum(...nums: number[]): number { return 0; }`
 	out := compile(t, ts)
-	// Rest param passed as slice from _args to inner function
-	assertContains(t, out, "nums ...*jsvalue.JSValue")
-	assertContains(t, out, "_args[0:]")
+	// Rest param is *jsvalue.JSValue (array), wrapped with NewArray from _args
+	assertContains(t, out, "nums *jsvalue.JSValue")
+	assertContains(t, out, "jsvalue.NewArray(_args[0:]...)")
 }
 
 func TestOptionalParameter(t *testing.T) {
