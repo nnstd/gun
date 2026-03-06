@@ -132,10 +132,7 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 
 		// Register the variable in the current scope so property access
 		// on it uses .Get() when appropriate.
-		// Variables with explicit types, or initialized from non-JSValue
-		// expressions (literals, ternaries, binary ops) are marked typed
-		// so they don't get spurious JSValue coercion.
-		typed := typeNode != nil || t.isNonJSValueInit(valueNode)
+		typed := typeNode != nil
 		t.addToCurrentScope(name, typed)
 
 		// Track the actual Go type of typed locals for proper boolean conversion.
@@ -192,13 +189,6 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 	return decls
 }
 
-// isNonJSValueInit returns true when a tree-sitter value node clearly does not
-// produce a *jsvalue.JSValue (e.g. literals, ternaries, binary/unary ops,
-// calls to known string-returning methods like toLowerCase).
-func (t *Transformer) isNonJSValueInit(node *sitter.Node) bool {
-	// In all-JSValue architecture, all variables are *jsvalue.JSValue.
-	return false
-}
 
 func (t *Transformer) transformFuncDecl(node *sitter.Node, exported bool) *ast.FuncDecl {
 	nameNode := node.ChildByFieldName("name")

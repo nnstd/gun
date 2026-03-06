@@ -555,9 +555,7 @@ func (t *Transformer) prescanTopLevelFuncs(root *sitter.Node) {
 					continue
 				}
 				name := nameNode.Utf8Text(t.source)
-				valueNode := decl.ChildByFieldName("value")
-				typed := t.isNonJSValueInit(valueNode)
-				t.pkgVarTyped[name] = typed
+				t.pkgVarTyped[name] = false
 			}
 		case "export_statement":
 			// Prescan exported declarations too
@@ -591,9 +589,7 @@ func (t *Transformer) prescanTopLevelFuncs(root *sitter.Node) {
 							continue
 						}
 						name := nameNode.Utf8Text(t.source)
-						valueNode := decl.ChildByFieldName("value")
-						typed := t.isNonJSValueInit(valueNode)
-						t.pkgVarTyped[name] = typed
+						t.pkgVarTyped[name] = false
 						t.exportedNames[name] = true
 					}
 				case "export_clause":
