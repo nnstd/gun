@@ -1846,7 +1846,6 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 	defer t.popScope()
 
 	// All-JSValue: ignore return type annotations, determined by body content
-	var results *ast.FieldList
 	_ = returnTypeNode
 
 	var body *ast.BlockStmt
@@ -1868,12 +1867,11 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 		body.List = append(paramStmts, body.List...)
 	}
 
-	if results == nil {
-		if hasReturnValue(body) {
-			results = fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-			wrapReturnsWithJSValue(body)
-		}
+	var results *ast.FieldList
+	if hasReturnValue(body) {
+		results = fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		wrapReturnsWithJSValue(body)
 	}
 
 	ensureTrailingReturn(body, results)

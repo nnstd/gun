@@ -222,7 +222,6 @@ func (t *Transformer) transformFuncDecl(node *sitter.Node, exported bool) *ast.F
 	defer t.popScope()
 
 	params, paramStmts := t.transformParams(paramsNode)
-	var results *ast.FieldList
 	// In the all-JSValue world, explicit return type annotations are ignored —
 	// all functions return *jsvalue.JSValue (handled below in the hasReturnValue check).
 	_ = returnTypeNode
@@ -238,14 +237,13 @@ func (t *Transformer) transformFuncDecl(node *sitter.Node, exported bool) *ast.F
 		body.List = append(paramStmts, body.List...)
 	}
 
-	if results == nil {
-		// Always use *jsvalue.JSValue for functions with return values
-		// This ensures consistency across all transpiled functions
-		if hasReturnValue(body) {
-			results = fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-			wrapReturnsWithJSValue(body)
-		}
+	// Always use *jsvalue.JSValue for functions with return values
+	// This ensures consistency across all transpiled functions
+	var results *ast.FieldList
+	if hasReturnValue(body) {
+		results = fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
+		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		wrapReturnsWithJSValue(body)
 	}
 
 	ensureTrailingReturn(body, results)
