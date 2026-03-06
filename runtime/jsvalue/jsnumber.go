@@ -3,6 +3,7 @@ package jsvalue
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 )
 
@@ -340,4 +341,70 @@ func ParseFloat(s *JSValue) *JSValue {
 		return NewNumber(math.NaN())
 	}
 	return NewNumber(num)
+}
+
+func initNumberPrototype() {
+	defMethod(NumberPrototype, "toString", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("0") }
+		n := args[0].numVal
+		if math.IsNaN(n) { return NewString("NaN") }
+		if math.IsInf(n, 1) { return NewString("Infinity") }
+		if math.IsInf(n, -1) { return NewString("-Infinity") }
+		radix := 10
+		if len(args) > 1 && args[1] != nil {
+			radix = int(args[1].numVal)
+		}
+		if radix == 10 {
+			return NewString(args[0].String())
+		}
+		neg := n < 0
+		if neg { n = -n }
+		intPart := int64(n)
+		s := strconv.FormatInt(intPart, radix)
+		if neg { s = "-" + s }
+		return NewString(s)
+	})
+	defMethod(NumberPrototype, "valueOf", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewNumber(0) }
+		return NewNumber(args[0].numVal)
+	})
+	defMethod(NumberPrototype, "toFixed", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("0") }
+		n := args[0].numVal
+		if math.IsNaN(n) { return NewString("NaN") }
+		digits := 0
+		if len(args) > 1 && args[1] != nil {
+			digits = int(args[1].numVal)
+		}
+		return NewString(strconv.FormatFloat(n, 'f', digits, 64))
+	})
+	defMethod(NumberPrototype, "toPrecision", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("0") }
+		n := args[0].numVal
+		if math.IsNaN(n) { return NewString("NaN") }
+		if math.IsInf(n, 0) { return NewString(args[0].String()) }
+		if len(args) < 2 || args[1] == nil {
+			return NewString(args[0].String())
+		}
+		prec := int(args[1].numVal)
+		return NewString(strconv.FormatFloat(n, 'g', prec, 64))
+	})
+	defMethod(NumberPrototype, "toExponential", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("0") }
+		n := args[0].numVal
+		if math.IsNaN(n) { return NewString("NaN") }
+		if math.IsInf(n, 0) { return NewString(args[0].String()) }
+		digits := -1
+		if len(args) > 1 && args[1] != nil {
+			digits = int(args[1].numVal)
+		}
+		if digits < 0 {
+			return NewString(strconv.FormatFloat(n, 'e', -1, 64))
+		}
+		return NewString(strconv.FormatFloat(n, 'e', digits, 64))
+	})
+	defMethod(NumberPrototype, "toLocaleString", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("0") }
+		return NewString(args[0].String())
+	})
 }
