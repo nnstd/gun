@@ -5,13 +5,13 @@ import "testing"
 func TestConsoleLog(t *testing.T) {
 	out := compile(t, `console.log("hello");`)
 	assertContains(t, out, `console.Log("hello")`)
-	assertContains(t, out, `runtime/console`)
+	assertContains(t, out, `runtime/builtin/console`)
 }
 
 func TestConsoleError(t *testing.T) {
 	out := compile(t, `console.error("fail");`)
 	assertContains(t, out, `console.Error("fail")`)
-	assertContains(t, out, `runtime/console`)
+	assertContains(t, out, `runtime/builtin/console`)
 }
 
 func TestMathFloor(t *testing.T) {

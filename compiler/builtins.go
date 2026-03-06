@@ -285,7 +285,7 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 		addImport("github.com/nnstd/gun/runtime/builtin")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), callExpr(selectorExpr(ident("math"), "NaN")))
 	case "console":
-		addImport("github.com/nnstd/gun/runtime/console")
+		addImport("github.com/nnstd/gun/runtime/builtin/console")
 		return ident("console")
 	case "Math":
 		addImport("github.com/nnstd/gun/runtime/builtin/math")

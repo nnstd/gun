@@ -152,7 +152,7 @@ const data = readFileSync("hello.txt");`
 func TestConsoleErrorUsesRuntimePackage(t *testing.T) {
 	ts := `console.error("fail");`
 	out := compile(t, ts)
-	assertContains(t, out, `runtime/console`)
+	assertContains(t, out, `runtime/builtin/console`)
 	assertContains(t, out, `console.Error("fail")`)
 	assertNotContains(t, out, "os.Stderr")
 }
