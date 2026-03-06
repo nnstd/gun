@@ -11,14 +11,14 @@ func transformRegexpMethod(obj ast.Expr, prop string, args []ast.Expr, addImport
 		// regex.test(str) → jsvalue.NewBool(jsvalue.MatchString(regex, str))
 		// Wrapped in NewBool so the result is *jsvalue.JSValue for all-JSValue consistency.
 		if len(args) > 0 {
-			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			addImport("github.com/nnstd/gun/runtime/builtin")
 			matchCall := callExpr(selectorExpr(ident("jsvalue"), "MatchString"), obj, args[0])
 			return callExpr(selectorExpr(ident("jsvalue"), "NewBool"), matchCall)
 		}
 	case "exec":
 		// regex.exec(str) → jsvalue.RegexExec(regex, str)
 		if len(args) > 0 {
-			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			addImport("github.com/nnstd/gun/runtime/builtin")
 			return callExpr(selectorExpr(ident("jsvalue"), "RegexExec"), obj, args[0])
 		}
 	}

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nnstd/gun/runtime/jsvalue"
+	"github.com/nnstd/gun/runtime/builtin"
 )
 
 func TestErrorConstructor(t *testing.T) {

@@ -182,7 +182,7 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 							subObj := leftNode.ChildByFieldName("object")
 							subIdx := leftNode.ChildByFieldName("index")
 							if subObj != nil && t.nodeReturnsJSValue(subObj) && subIdx != nil {
-								t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+								t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 								t.addImport("fmt")
 								obj := t.transformExpr(subObj)
 								key := callExpr(selectorExpr(ident("fmt"), "Sprint"), t.transformExpr(subIdx))
@@ -194,7 +194,7 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 						// Augmented assignment on JSValue: lhs += rhs → lhs = jsvalue.Add(lhs, rhs)
 						// Handles +=, -=, *=, /=, %=, etc.
 						if (t.nodeReturnsJSValue(leftNode) || t.isPkgLevelVar(leftNode)) && isAugmentedAssignOp(opText) {
-							t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+							t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 							helperName := augmentedOpToJSValueHelper(opText)
 							wrappedRhs := jsvalueWrapLit(rhs)
 							return assignStmt([]ast.Expr{lhs}, []ast.Expr{
@@ -222,7 +222,7 @@ func (t *Transformer) transformStmt(node *sitter.Node) ast.Stmt {
 					if arg != nil {
 						// JSValue variables use jsvalue.Inc/Dec instead of Go ++/--
 						if t.nodeReturnsJSValue(argNode) || t.isPkgLevelVar(argNode) {
-							t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+							t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 							helperName := "Inc"
 							if opText == "--" {
 								helperName = "Dec"
@@ -488,7 +488,7 @@ func (t *Transformer) transformForStmt(node *sitter.Node) ast.Stmt {
 				// JSValue variables can't use Go's ++ operator.
 				// ii++ → ii = jsvalue.NewNumber(ii.Number() + 1)
 				if argNode.Kind() == "identifier" && t.isUntypedLocal(argNode.Utf8Text(t.source)) {
-					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+					t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 					lhs := t.transformExpr(argNode)
 					rhs := t.transformExpr(argNode)
 					op := token.ADD
@@ -872,7 +872,7 @@ func (t *Transformer) transformTryCatch(node *sitter.Node) ast.Stmt {
 		[]ast.Expr{ident(recoverTmp)},
 		[]ast.Expr{callExpr(ident("recover"))},
 	)
-	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 	wrapStmt := assignDefine(
 		[]ast.Expr{ident(catchParam)},
 		[]ast.Expr{callExpr(selectorExpr(ident("jsvalue"), "From"), ident(recoverTmp))},

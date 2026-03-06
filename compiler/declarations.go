@@ -40,7 +40,7 @@ func (t *Transformer) wrapInJSValue(node *sitter.Node, expr ast.Expr) ast.Expr {
 		return expr
 	}
 
-	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 
 	switch node.Kind() {
 	case "true", "false":
@@ -127,7 +127,7 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 		// Also applies when value is nil literal (null/undefined).
 		if typ == nil && (value == nil || isNilIdent(value)) {
 			typ = ptrType(selectorExpr(ident("jsvalue"), "JSValue"))
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		}
 
 		// Register the variable in the current scope so property access
@@ -177,7 +177,7 @@ func (t *Transformer) transformVarDecl(node *sitter.Node) []ast.Decl {
 		// so `let x = 0` → `var x = jsvalue.NewNumber(float64(0))`
 		// Consts also use JSValue (not Go const) so .Len(), .Get() etc. work.
 		if !typed && value != nil && typ == nil {
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			value = jsvalueWrapLit(value)
 		}
 		if isConst {
@@ -232,7 +232,7 @@ func (t *Transformer) transformFuncDecl(node *sitter.Node, exported bool) *ast.F
 	var results *ast.FieldList
 	if hasReturnValue(body) {
 		results = fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		wrapReturnsWithJSValue(body)
 	}
 
@@ -258,7 +258,7 @@ func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.
 
 			// All-JSValue: all params are *jsvalue.JSValue
 			var pType ast.Expr = ptrType(selectorExpr(ident("jsvalue"), "JSValue"))
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 
 			// Handle rest pattern in required_parameter (JS without type annotations)
 			// tree-sitter parses `...args` as required_parameter > rest_pattern
@@ -271,7 +271,7 @@ func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.
 					}
 				}
 				// All-JSValue: rest params are *jsvalue.JSValue (an array JSValue)
-				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+				t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 				t.restParams[restName] = true
 				fields = append(fields, field(restName, jsValuePtrType()))
 				continue
@@ -363,7 +363,7 @@ func (t *Transformer) transformParams(node *sitter.Node) (*ast.FieldList, []ast.
 			// All-JSValue: rest params are *jsvalue.JSValue (an array JSValue),
 			// not Go variadic ...*jsvalue.JSValue. This ensures rest params
 			// have prototype methods (push, forEach, etc.) like any other JSValue.
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			t.restParams[pName] = true
 			fields = append(fields, field(pName, jsValuePtrType()))
 		}
@@ -467,7 +467,7 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 
 	// Emit forward declarations for hoisted variables as *jsvalue.JSValue.
 	for _, name := range hoistedVarNames {
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		stmts = append(stmts, &ast.DeclStmt{
 			Decl: varDecl(name, jsValuePtrType(), nil),
 		})
@@ -476,7 +476,7 @@ func (t *Transformer) transformBlock(node *sitter.Node) *ast.BlockStmt {
 
 	// Emit forward declarations for hoisted functions as *jsvalue.JSValue.
 	for _, h := range hoisted {
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		stmts = append(stmts, &ast.DeclStmt{
 			Decl: &ast.GenDecl{
 				Tok: token.VAR,
@@ -616,7 +616,7 @@ func (t *Transformer) transformInterfaceAsGoInterface(name string, body *sitter.
 		// All-JSValue: interface methods return *jsvalue.JSValue
 		var results *ast.FieldList
 		if returnNode != nil {
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			results = fieldList(field("", jsValuePtrType()))
 		}
 
@@ -671,7 +671,7 @@ func (t *Transformer) transformInterfaceAsStruct(name string, body *sitter.Node)
 			// All-JSValue: interface methods return *jsvalue.JSValue
 			var results *ast.FieldList
 			if returnNode != nil {
-				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+				t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 				results = fieldList(field("", jsValuePtrType()))
 			}
 			fields = append(fields, &ast.Field{
@@ -916,7 +916,7 @@ func (t *Transformer) transformDestructuringFromExpr(pattern *sitter.Node, valEx
 				name := nameNode.Utf8Text(t.source)
 				var rhs ast.Expr
 				if useJSIndex {
-					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+					t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 					rhs = callExpr(selectorExpr(ident("jsvalue"), "Slice"), valExpr, callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), callExpr(ident("float64"), intLit(fmt.Sprintf("%d", i)))))
 				} else {
 					rhs = &ast.SliceExpr{

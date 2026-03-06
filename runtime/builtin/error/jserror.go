@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/nnstd/gun/runtime/jsvalue"
+	"github.com/nnstd/gun/runtime/builtin"
 )
 
 // stackTraceLimit is the Go-side backing store for Error.stackTraceLimit.

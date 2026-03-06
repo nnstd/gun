@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/nnstd/gun/runtime/jsvalue"
+	"github.com/nnstd/gun/runtime/builtin"
 )
 
 // BuiltinModules is the list of known built-in module names.

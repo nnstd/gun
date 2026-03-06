@@ -4,7 +4,7 @@ import (
 	gomath "math"
 	"math/rand"
 
-	"github.com/nnstd/gun/runtime/jsvalue"
+	"github.com/nnstd/gun/runtime/builtin"
 )
 
 // Floor returns the largest integer <= x.

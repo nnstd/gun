@@ -43,11 +43,11 @@ func (t *Transformer) transformExpr(node *sitter.Node) ast.Expr {
 		return ident("false")
 
 	case "null":
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewNull"))
 
 	case "undefined":
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewUndefined"))
 
 	case "meta_property":
@@ -58,7 +58,7 @@ func (t *Transformer) transformExpr(node *sitter.Node) ast.Expr {
 	case "this":
 		// At package level (no scopes), this is undefined (ES modules)
 		if len(t.localScopes) == 0 {
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			return callExpr(selectorExpr(ident("jsvalue"), "NewUndefined"))
 		}
 		return ident("this")
@@ -149,7 +149,7 @@ func (t *Transformer) transformExpr(node *sitter.Node) ast.Expr {
 
 	case "regex":
 		t.addImport("regexp")
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		pattern := node.Utf8Text(t.source)
 		// Strip JS regex delimiters: /pattern/flags → pattern
 		if len(pattern) >= 2 && pattern[0] == '/' {
@@ -205,7 +205,7 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 	// ?? (nullish coalescing) → jsvalue.Nullish(left, right)
 	if opText == "??" {
 		if eitherJSValue {
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			return callExpr(selectorExpr(ident("jsvalue"), "Nullish"),
 				jsvalueWrapLit(left), jsvalueWrapLit(right))
 		}
@@ -219,7 +219,7 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 
 	// in → obj.HasOwnProperty(key) wrapped as JSValue bool
 	if opText == "in" {
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		t.addImport("fmt")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewBool"),
 			callExpr(selectorExpr(right, "HasOwnProperty"), callExpr(selectorExpr(ident("fmt"), "Sprint"), left)))
@@ -228,7 +228,7 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 	// When either operand is JSValue, use jsvalue operation helpers.
 	// This eliminates complex type coercion — the helpers handle type semantics internally.
 	if eitherJSValue {
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		wrappedLeft := jsvalueWrapLit(left)
 		wrappedRight := jsvalueWrapLit(right)
 
@@ -285,7 +285,7 @@ func (t *Transformer) transformUnaryExpr(node *sitter.Node) ast.Expr {
 	case "!":
 		// !jsValue → jsvalue.Not(jsValue) — returns *JSValue boolean
 		if argNode != nil && t.nodeReturnsJSValue(argNode) {
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			return callExpr(selectorExpr(ident("jsvalue"), "Not"), arg)
 		}
 		// !x.length → x.Len() == 0 (length returns int, can't use ! on int)
@@ -299,7 +299,7 @@ func (t *Transformer) transformUnaryExpr(node *sitter.Node) ast.Expr {
 	case "-":
 		// -jsValue → jsvalue.Neg(jsValue)
 		if argNode != nil && t.nodeReturnsJSValue(argNode) {
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			return callExpr(selectorExpr(ident("jsvalue"), "Neg"), arg)
 		}
 		return &ast.UnaryExpr{Op: token.SUB, X: arg}
@@ -308,21 +308,21 @@ func (t *Transformer) transformUnaryExpr(node *sitter.Node) ast.Expr {
 	case "~":
 		// ~jsValue → jsvalue.BitNot(jsValue)
 		if argNode != nil && t.nodeReturnsJSValue(argNode) {
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			return callExpr(selectorExpr(ident("jsvalue"), "BitNot"), arg)
 		}
 		return &ast.UnaryExpr{Op: token.XOR, X: arg}
 	case "typeof":
 		// typeof jsValue → jsvalue.TypeOf(jsValue)
 		if argNode != nil && t.nodeReturnsJSValue(argNode) {
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			return callExpr(selectorExpr(ident("jsvalue"), "TypeOf"), arg)
 		}
 		t.addImport("fmt")
 		return callExpr(selectorExpr(ident("fmt"), "Sprintf"), stringLit("%T"), arg)
 	case "void":
 		// void X in JS always evaluates to undefined
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewUndefined"))
 	default:
 		return arg
@@ -392,7 +392,7 @@ func (t *Transformer) transformSequenceExpr(node *sitter.Node) ast.Expr {
 	// Determine return type
 	var retType ast.Expr = ident("any")
 	if t.nodeReturnsJSValue(lastChild) {
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		retType = jsValuePtrType()
 	}
 
@@ -423,7 +423,7 @@ func (t *Transformer) transformAssignmentExpr(node *sitter.Node) ast.Expr {
 				rhs := t.transformExpr(rightNode)
 				if obj != nil && rhs != nil {
 					rhs = t.wrapAsJSValue(rhs)
-					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+					t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 					propName := memProp.Utf8Text(t.source)
 					return &ast.CallExpr{
 						Fun: &ast.FuncLit{
@@ -460,7 +460,7 @@ func (t *Transformer) transformAssignmentExpr(node *sitter.Node) ast.Expr {
 					key = callExpr(selectorExpr(ident("fmt"), "Sprint"), key)
 				}
 				rhs = t.wrapAsJSValue(rhs)
-				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+				t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 				// IIFE: func() *jsvalue.JSValue { obj.Set(key, rhs); return rhs }()
 				return &ast.CallExpr{
 					Fun: &ast.FuncLit{
@@ -498,7 +498,7 @@ func (t *Transformer) transformAssignmentExpr(node *sitter.Node) ast.Expr {
 		name := leftNode.Utf8Text(t.source)
 		if t.isUntypedLocal(name) || t.isUntypedLocal(sanitizeIdent(name)) || !t.isLocalName(name) {
 			retType = jsValuePtrType()
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			// Wrap RHS with jsvalue.From() so any-typed expressions
 			// (e.g. conditional IIFEs) convert to *jsvalue.JSValue.
 			assignRHS = t.wrapAsJSValue(right)
@@ -551,7 +551,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 		// which is what NewClass's inner constructor does.
 		// Simplest: just call parent as a function that initializes this.
 		allArgs := append([]ast.Expr{ident("this")}, args...)
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		// Call parent constructor on the child's this: Parent.CallSuper(this, args...)
 		return callExpr(selectorExpr(t.currentClassParent, "CallSuper"), allArgs...)
 	}
@@ -590,7 +590,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			if prop == "call" {
 				if isObjectPrototypeHasOwnProperty(objNode, t.source) && len(args) >= 2 {
 					t.addImport("fmt")
-					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+					t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 					return callExpr(selectorExpr(ident("jsvalue"), "NewBool"),
 						callExpr(selectorExpr(args[0], "HasOwnProperty"), callExpr(selectorExpr(ident("fmt"), "Sprint"), args[1])))
 				}
@@ -599,7 +599,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 				for i, a := range args {
 					args[i] = jsvalueWrapLit(a)
 				}
-				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+				t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 				return callExpr(selectorExpr(obj, "Call"), args...)
 			}
 
@@ -639,7 +639,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 					obj := t.transformExpr(objNode)
 					return t.generateMethodCallWithSpread(obj, prop, argsNode, func(e ast.Expr) ast.Expr { return t.wrapAsJSValue(e) })
 				}
-				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+				t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 				obj := t.transformExpr(objNode)
 				for i, arg := range args {
 					args[i] = t.wrapAsJSValue(arg)
@@ -655,7 +655,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 						obj := t.transformExpr(objNode)
 						return t.generateMethodCallWithSpread(obj, prop, argsNode, func(e ast.Expr) ast.Expr { return t.wrapAsJSValue(e) })
 					}
-					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+					t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 					obj := t.transformExpr(objNode)
 					for i, arg := range args {
 						args[i] = t.wrapAsJSValue(arg)
@@ -669,7 +669,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			// "str".method() → jsvalue.NewString("str").MethodCall("method", ...)
 			if objNode.Kind() == "string" || objNode.Kind() == "template_string" ||
 				objNode.Kind() == "number" || objNode.Kind() == "true" || objNode.Kind() == "false" {
-				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+				t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 				obj := jsvalueWrapLit(t.transformExpr(objNode))
 				for i, arg := range args {
 					args[i] = t.wrapAsJSValue(arg)
@@ -686,7 +686,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 					obj := t.transformExpr(objNode)
 					return t.generateMethodCallWithSpread(obj, prop, argsNode, func(e ast.Expr) ast.Expr { return t.wrapAsJSValue(e) })
 				}
-				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+				t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 				obj := t.transformExpr(objNode)
 				for i, arg := range args {
 					args[i] = t.wrapAsJSValue(arg)
@@ -714,7 +714,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 		name := fnNode.Utf8Text(t.source)
 		args := t.transformArgs(argsNode)
 		if r := transformGlobalCall(name, args, t); r != nil {
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			return r
 		}
 	}
@@ -728,7 +728,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			if argsNodeHasSpread(argsNode) {
 				return t.generateCallWithSpread(fun, argsNode, func(e ast.Expr) ast.Expr { return t.wrapAsJSValue(e) })
 			}
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			args := t.transformArgs(argsNode)
 			for i, arg := range args {
 				args[i] = t.wrapAsJSValue(arg)
@@ -750,7 +750,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			if argsNodeHasSpread(argsNode) {
 				return t.generateCallWithSpread(fun, argsNode, func(e ast.Expr) ast.Expr { return t.wrapAsJSValue(e) })
 			}
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			args := t.transformArgs(argsNode)
 			for i, arg := range args {
 				args[i] = t.wrapAsJSValue(arg)
@@ -764,7 +764,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 	if fnNode.Kind() == "subscript_expression" {
 		subObj := fnNode.ChildByFieldName("object")
 		if subObj != nil && (subObj.Kind() == "this" || t.nodeReturnsJSValue(subObj)) {
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			obj := t.transformExpr(subObj)
 			fnExpr := t.transformExpr(fnNode) // this.Get(fmt.Sprint(key))
 			args := t.transformArgs(argsNode)
@@ -785,7 +785,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 	if sel, ok := fun.(*ast.SelectorExpr); ok {
 		if pkgIdent, ok := sel.X.(*ast.Ident); ok {
 			if isRuntimePackage(pkgIdent.Name) {
-				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+				t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 				for i, arg := range args {
 					args[i] = jsvalueWrapLit(arg)
 				}
@@ -799,7 +799,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 		if argsNodeHasSpread(argsNode) {
 			return t.generateCallWithSpread(fun, argsNode, jsvalueWrapLit)
 		}
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		for i, a := range args {
 			args[i] = jsvalueWrapLit(a)
 		}
@@ -923,7 +923,7 @@ func argsNodeHasSpread(node *sitter.Node) bool {
 // generateMethodCallWithSpread generates a MethodCall/Call where spread args
 // are properly expanded using .Array(). wrapFn wraps non-spread args.
 func (t *Transformer) generateMethodCallWithSpread(obj ast.Expr, method string, argsNode *sitter.Node, wrapFn func(ast.Expr) ast.Expr) ast.Expr {
-	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 	infos := t.transformArgsWithSpread(argsNode)
 
 	// Build the arguments for MethodCall: first arg is always the method name string
@@ -990,7 +990,7 @@ func (t *Transformer) generateMethodCallWithSpread(obj ast.Expr, method string, 
 
 // generateCallWithSpread generates a .Call() where spread args are expanded.
 func (t *Transformer) generateCallWithSpread(fn ast.Expr, argsNode *sitter.Node, wrapFn func(ast.Expr) ast.Expr) ast.Expr {
-	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 	infos := t.transformArgsWithSpread(argsNode)
 
 	if len(infos) == 1 && infos[0].isSpread {
@@ -1077,7 +1077,7 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 
 	// Error.X → jserror.Error.Get("X") for static properties
 	if objNode.Kind() == "identifier" && isErrorType(objNode.Utf8Text(t.source)) {
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jserror", "jserror")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "jserror")
 		errName := objNode.Utf8Text(t.source)
 		return callExpr(selectorExpr(selectorExpr(ident("jserror"), errName), "Get"), stringLit(prop))
 	}
@@ -1109,7 +1109,7 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 	// For local scope variables and 'this' (typed as *jsvalue.JSValue),
 	// use dynamic property access via Get() instead of Go selector expressions.
 	if (objNode.Kind() == "identifier" && t.isLocalName(objNode.Utf8Text(t.source))) || objNode.Kind() == "this" {
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		return callExpr(selectorExpr(obj, "Get"), stringLit(prop))
 	}
 
@@ -1118,7 +1118,7 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 	if objNode.Kind() == "identifier" {
 		name := objNode.Utf8Text(t.source)
 		if typed, ok := t.pkgVarTyped[name]; ok && !typed {
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			return callExpr(selectorExpr(obj, "Get"), stringLit(prop))
 		}
 	}
@@ -1126,7 +1126,7 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 	// If the object is a JSValue expression (from Get(), method call, etc.),
 	// use .Get() for property access.
 	if t.nodeReturnsJSValue(objNode) {
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		return callExpr(selectorExpr(obj, "Get"), stringLit(prop))
 	}
 
@@ -1138,7 +1138,7 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 		_, isOwnPkgVar := t.pkgVarTyped[name]
 		isKnownGlobal := isKnownGlobalObject(name)
 		if !isImported && !isKnownGlobal && !t.isLocalName(name) && !isOwnPkgVar {
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			return callExpr(selectorExpr(obj, "Get"), stringLit(prop))
 		}
 	}
@@ -1171,7 +1171,7 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 		// If the index is itself a JSValue (untyped local), use .Get() with PropertyKey
 		// to correctly handle Symbol keys.
 		if indexNode != nil && indexNode.Kind() == "identifier" && t.isUntypedLocal(indexNode.Utf8Text(t.source)) {
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			return callExpr(selectorExpr(obj, "Get"), callExpr(selectorExpr(ident("jsvalue"), "PropertyKey"), index))
 		}
 		// Typed locals could be strings (e.g. notFlagsArgv); use .Get() with fmt.Sprint.
@@ -1185,7 +1185,7 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 		}
 		// Everything else (call expressions, etc.) — use .Get() with PropertyKey
 		// in case the value is a Symbol.
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		return callExpr(selectorExpr(obj, "Get"), callExpr(selectorExpr(ident("jsvalue"), "PropertyKey"), index))
 	}
 	// Go slice indices must be integers; wrap float64 vars with int().
@@ -1197,7 +1197,7 @@ func (t *Transformer) transformSubscriptExpr(node *sitter.Node) ast.Expr {
 }
 
 func (t *Transformer) transformArrayLiteral(node *sitter.Node) ast.Expr {
-	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 
 	// Check if any element is a spread_element
 	hasSpread := false
@@ -1313,7 +1313,7 @@ func (t *Transformer) transformObjectLiteral(node *sitter.Node) ast.Expr {
 			args = append(args, stringLit(name), t.wrapAsJSValue(t.resolveIdentifier(name)))
 		}
 	}
-	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 	return callExpr(selectorExpr(ident("jsvalue"), "ObjectFrom"), args...)
 }
 
@@ -1542,7 +1542,7 @@ func (t *Transformer) wrapAsJSValue(expr ast.Expr) ast.Expr {
 	if isJSValueExpr(expr) {
 		return expr
 	}
-	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 	return callExpr(selectorExpr(ident("jsvalue"), "From"), expr)
 }
 
@@ -1672,7 +1672,7 @@ func (t *Transformer) transformTernary(node *sitter.Node) ast.Expr {
 	// Coerce branches whose type doesn't match the inferred result type.
 	if isJSValuePtrType(resultType) {
 		// JSValue result: wrap both branches with jsvalueWrapLit
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		cons = jsvalueWrapLit(cons)
 		alt = jsvalueWrapLit(alt)
 	} else if id, ok := resultType.(*ast.Ident); ok {
@@ -1735,7 +1735,7 @@ func (t *Transformer) transformTernary(node *sitter.Node) ast.Expr {
 func (t *Transformer) inferTernaryResultType(cons, alt *sitter.Node) ast.Expr {
 	// If either branch returns JSValue, the whole ternary should return JSValue.
 	if t.nodeReturnsJSValue(cons) || t.nodeReturnsJSValue(alt) {
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		return jsValuePtrType()
 	}
 	a := t.inferNodeResultType(cons)
@@ -1831,7 +1831,7 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 	} else if paramNode != nil {
 		pName := sanitizeIdent(paramNode.Utf8Text(t.source))
 		params = fieldList(field(pName, ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		paramNames = []string{pName}
 	} else {
 		params = fieldList()
@@ -1870,7 +1870,7 @@ func (t *Transformer) transformArrowFunc(node *sitter.Node) ast.Expr {
 	var results *ast.FieldList
 	if hasReturnValue(body) {
 		results = fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		wrapReturnsWithJSValue(body)
 	}
 
@@ -1924,7 +1924,7 @@ func (t *Transformer) transformFuncExpr(node *sitter.Node) ast.Expr {
 	if results == nil {
 		if hasReturnValue(body) {
 			results = fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			wrapReturnsWithJSValue(body)
 		}
 	}
@@ -1983,7 +1983,7 @@ func (t *Transformer) transformNewExpr(node *sitter.Node) ast.Expr {
 
 	// Default: new Foo(args) → Foo.Call(args...)
 	// Classes are JSValue constructor functions; .Call() creates an instance.
-	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 	for i, arg := range args {
 		args[i] = t.wrapAsJSValue(arg)
 	}

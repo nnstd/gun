@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/nnstd/gun/runtime/jsvalue"
+	"github.com/nnstd/gun/runtime/builtin"
 )
 
 // ReadFileSync reads the entire contents of a file.

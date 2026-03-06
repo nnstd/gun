@@ -3,7 +3,7 @@ package intl
 import (
 	"unicode/utf8"
 
-	"github.com/nnstd/gun/runtime/jsvalue"
+	"github.com/nnstd/gun/runtime/builtin"
 )
 
 // NewSegmenter creates a new Intl.Segmenter as a JSValue class.

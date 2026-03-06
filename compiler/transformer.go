@@ -118,9 +118,19 @@ func (t *Transformer) transform(root *sitter.Node) *ast.File {
 }
 
 func (t *Transformer) addImport(pkg string) {
-	// Auto-alias the object package to avoid collision with common "object" variable names
-	if pkg == "github.com/nnstd/gun/runtime/object" {
+	// Auto-alias packages whose directory name differs from their Go package name.
+	switch pkg {
+	case "github.com/nnstd/gun/runtime/object":
 		t.imports[pkg] = "jsobject"
+		return
+	case "github.com/nnstd/gun/runtime/builtin/error":
+		t.imports[pkg] = "jserror"
+		return
+	case "github.com/nnstd/gun/runtime/builtin/math":
+		t.imports[pkg] = "jsmath"
+		return
+	case "github.com/nnstd/gun/runtime/builtin/json":
+		t.imports[pkg] = "json"
 		return
 	}
 	if _, ok := t.imports[pkg]; !ok {
@@ -280,7 +290,7 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 				objText := objNode.Utf8Text(t.source)
 				propText := propNode.Utf8Text(t.source)
 				// Check if calling jsvalue package functions
-				if objText == "jsvalue" || (objNode.Kind() == "identifier" && t.importedNames[objText].goImportPath == "github.com/nnstd/gun/runtime/jsvalue") {
+				if objText == "jsvalue" || (objNode.Kind() == "identifier" && t.importedNames[objText].goImportPath == "github.com/nnstd/gun/runtime/builtin") {
 					// Check if this is a JSValue package function that returns *jsvalue.JSValue
 					if t.builtins.IsJSValuePackageFunction(propText) {
 						return true
@@ -476,7 +486,7 @@ func (t *Transformer) resolveGoName(tsName string) string {
 
 // jsValueType returns *jsvalue.JSValue and registers the import.
 func (t *Transformer) jsValueType() ast.Expr {
-	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 	return jsValuePtrType()
 }
 
@@ -900,7 +910,7 @@ func (t *Transformer) transformAnonFuncAsDefault(node *sitter.Node) *ast.FuncDec
 	if results == nil {
 		if hasReturnValue(body) {
 			results = fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue"))))
-			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			wrapReturnsWithJSValue(body)
 		}
 	}

@@ -3,7 +3,7 @@ package compiler
 import "go/ast"
 
 func transformMathCall(prop string, args []ast.Expr, addImport func(string)) ast.Expr {
-	addImport("github.com/nnstd/gun/runtime/jsmath")
+	addImport("github.com/nnstd/gun/runtime/builtin/math")
 
 	// Wrap literal args since runtime/math accepts *jsvalue.JSValue
 	wrappedArgs := make([]ast.Expr, len(args))

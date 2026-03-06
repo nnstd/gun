@@ -18,28 +18,28 @@ func TestMathFloor(t *testing.T) {
 	ts := `function f(x: number): number { return Math.floor(x); }`
 	out := compile(t, ts)
 	assertContains(t, out, "jsmath.Floor(")
-	assertContains(t, out, "runtime/jsmath")
+	assertContains(t, out, "runtime/builtin/math")
 }
 
 func TestMathRandom(t *testing.T) {
 	ts := `function r(): number { return Math.random(); }`
 	out := compile(t, ts)
 	assertContains(t, out, "jsmath.Random()")
-	assertContains(t, out, "runtime/jsmath")
+	assertContains(t, out, "runtime/builtin/math")
 }
 
 func TestJSONStringify(t *testing.T) {
 	ts := `function ser(x: any): any { return JSON.stringify(x); }`
 	out := compile(t, ts)
 	assertContains(t, out, "json.Stringify(x)")
-	assertContains(t, out, `runtime/json`)
+	assertContains(t, out, `runtime/builtin/json`)
 }
 
 func TestJSONParse(t *testing.T) {
 	ts := `function deser(s: string): any { return JSON.parse(s); }`
 	out := compile(t, ts)
 	assertContains(t, out, "json.Parse(s)")
-	assertContains(t, out, `runtime/json`)
+	assertContains(t, out, `runtime/builtin/json`)
 }
 
 func TestStringMethods(t *testing.T) {
@@ -403,7 +403,7 @@ func TestNewErrorUsesJserror(t *testing.T) {
 	ts := `function fail() { throw new Error("bad"); }`
 	out := compile(t, ts)
 	assertContains(t, out, `jserror.Error.Call(`)
-	assertContains(t, out, `runtime/jserror`)
+	assertContains(t, out, `runtime/builtin/error`)
 	assertNotContains(t, out, `errors.New`)
 }
 

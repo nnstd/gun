@@ -3,7 +3,7 @@ package json
 import (
 	stdjson "encoding/json"
 
-	"github.com/nnstd/gun/runtime/jsvalue"
+	"github.com/nnstd/gun/runtime/builtin"
 )
 
 func Stringify(v *jsvalue.JSValue) *jsvalue.JSValue {

@@ -4,7 +4,7 @@ import (
 	stdos "os"
 	"testing"
 
-	"github.com/nnstd/gun/runtime/jsvalue"
+	"github.com/nnstd/gun/runtime/builtin"
 )
 
 func TestHomedir(t *testing.T) {

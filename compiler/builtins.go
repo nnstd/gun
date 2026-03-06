@@ -64,11 +64,11 @@ func transformGlobalCall(name string, args []ast.Expr, t *Transformer) ast.Expr 
 		return basicLit(token.FLOAT, "0")
 	case "Array":
 		// Array(n) → jsvalue.NewArray() — creates empty array (length handled at runtime)
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewArray"))
 	case "Symbol":
 		// Symbol(desc) → jsvalue.NewSymbol(desc)
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		if len(args) > 0 {
 			t.addImport("fmt")
 			return callExpr(selectorExpr(ident("jsvalue"), "NewSymbol"),
@@ -78,7 +78,7 @@ func transformGlobalCall(name string, args []ast.Expr, t *Transformer) ast.Expr 
 	case "String":
 		// String(x) → jsvalue.NewString(fmt.Sprint(x))
 		t.addImport("fmt")
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		if len(args) > 0 {
 			return callExpr(selectorExpr(ident("jsvalue"), "NewString"),
 				callExpr(selectorExpr(ident("fmt"), "Sprint"), args[0]))
@@ -86,7 +86,7 @@ func transformGlobalCall(name string, args []ast.Expr, t *Transformer) ast.Expr 
 		return callExpr(selectorExpr(ident("jsvalue"), "NewString"), stringLit(""))
 	case "parseInt":
 		// parseInt(str, radix?) → jsvalue.ParseInt(str, radix)
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		if len(args) >= 2 {
 			return callExpr(selectorExpr(ident("jsvalue"), "ParseInt"), jsvalueWrapLit(args[0]), jsvalueWrapLit(args[1]))
 		}
@@ -96,7 +96,7 @@ func transformGlobalCall(name string, args []ast.Expr, t *Transformer) ast.Expr 
 		return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), floatLit("0"))
 	case "parseFloat":
 		// parseFloat(str) → jsvalue.ParseFloat(str)
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		if len(args) >= 1 {
 			return callExpr(selectorExpr(ident("jsvalue"), "ParseFloat"), jsvalueWrapLit(args[0]))
 		}
@@ -104,8 +104,8 @@ func transformGlobalCall(name string, args []ast.Expr, t *Transformer) ast.Expr 
 	}
 	if isErrorType(name) {
 		// Error("msg") → jserror.Error.Call(msg) — JS spec: Error() without new also creates Error
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jserror", "jserror")
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "jserror")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		for i, arg := range args {
 			args[i] = jsvalueWrapLit(arg)
 		}
@@ -122,27 +122,27 @@ func transformGlobalCall(name string, args []ast.Expr, t *Transformer) ast.Expr 
 func transformBuiltinNew(name string, args []ast.Expr, t *Transformer) ast.Expr {
 	switch name {
 	case "Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError":
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jserror", "jserror")
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "jserror")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		for i, arg := range args {
 			args[i] = jsvalueWrapLit(arg)
 		}
 		return callExpr(selectorExpr(selectorExpr(ident("jserror"), name), "Call"), args...)
 	case "Map", "WeakMap":
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewMap"))
 	case "Set", "WeakSet":
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewSet"))
 	case "Array":
 		// new Array(n) → jsvalue.NewArray() (size ignored, filled at runtime)
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewArray"))
 	case "Date":
 		t.addImport("time")
 		return callExpr(selectorExpr(ident("time"), "Now"))
 	case "RegExp":
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		pattern := ast.Expr(stringLit(""))
 		if len(args) > 0 {
 			// Always coerce to string — in all-JSValue mode all args are *jsvalue.JSValue
@@ -175,7 +175,7 @@ func transformBuiltinNew(name string, args []ast.Expr, t *Transformer) ast.Expr 
 		t.addImport("github.com/nnstd/gun/runtime/hono")
 		return callExpr(selectorExpr(ident("hono"), "New"))
 	case "IntlSegmenter":
-		t.addImport("github.com/nnstd/gun/runtime/intl")
+		t.addImport("github.com/nnstd/gun/runtime/builtin/intl")
 		return callExpr(selectorExpr(selectorExpr(ident("intl"), "Segmenter"), "Call"), args...)
 	}
 	return nil
@@ -221,7 +221,7 @@ func transformArrayCall(prop string, args []ast.Expr, addImport func(string)) as
 	case "isArray":
 		// Array.isArray(x) → jsvalue.IsArrayValue(x)
 		if len(args) > 0 {
-			addImport("github.com/nnstd/gun/runtime/jsvalue")
+			addImport("github.com/nnstd/gun/runtime/builtin")
 			return callExpr(selectorExpr(ident("jsvalue"), "IsArrayValue"), args[0])
 		}
 	}
@@ -278,23 +278,23 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 		return ident("nil")
 	case "Infinity":
 		addImport("math")
-		addImport("github.com/nnstd/gun/runtime/jsvalue")
+		addImport("github.com/nnstd/gun/runtime/builtin")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), callExpr(selectorExpr(ident("math"), "Inf"), intLit("1")))
 	case "NaN":
 		addImport("math")
-		addImport("github.com/nnstd/gun/runtime/jsvalue")
+		addImport("github.com/nnstd/gun/runtime/builtin")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), callExpr(selectorExpr(ident("math"), "NaN")))
 	case "console":
 		addImport("github.com/nnstd/gun/runtime/console")
 		return ident("console")
 	case "Math":
-		addImport("github.com/nnstd/gun/runtime/jsmath")
+		addImport("github.com/nnstd/gun/runtime/builtin/math")
 		return ident("jsmath")
 	case "JSON":
-		addImport("github.com/nnstd/gun/runtime/json")
+		addImport("github.com/nnstd/gun/runtime/builtin/json")
 		return ident("json")
 	case "Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError":
-		addImport("github.com/nnstd/gun/runtime/jserror")
+		addImport("github.com/nnstd/gun/runtime/builtin/error")
 		return selectorExpr(ident("jserror"), name)
 	case "Object":
 		addImport("github.com/nnstd/gun/runtime/object")
@@ -306,11 +306,11 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 		return callExpr(selectorExpr(ident("process"), "AsJSValue"))
 	case "Array":
 		// Array as standalone value (used for Array.prototype, Array.isArray, etc.)
-		addImport("github.com/nnstd/gun/runtime/jsvalue")
+		addImport("github.com/nnstd/gun/runtime/builtin")
 		return selectorExpr(ident("jsvalue"), "ArrayPrototype")
 	case "String":
 		// String as standalone value (e.g. passed as callback: arr.map(String))
-		addImport("github.com/nnstd/gun/runtime/jsvalue")
+		addImport("github.com/nnstd/gun/runtime/builtin")
 		addImport("fmt")
 		// Inline function that converts to string JSValue
 		return callExpr(selectorExpr(ident("jsvalue"), "NewFunction"), &ast.FuncLit{
@@ -323,13 +323,13 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 	case "Promise":
 		// Promise as standalone value (e.g. Promise.all, Promise.resolve)
 		// Return a JSValue object with .Get() for method dispatch
-		addImport("github.com/nnstd/gun/runtime/jsvalue")
+		addImport("github.com/nnstd/gun/runtime/builtin")
 		return callExpr(selectorExpr(ident("jsvalue"), "NewObject"))
 	case "Number":
 		// Number as standalone (used as Number(x) call) — identity for numeric values
 		return ident("float64")
 	case "Boolean":
-		addImport("github.com/nnstd/gun/runtime/jsvalue")
+		addImport("github.com/nnstd/gun/runtime/builtin")
 		return selectorExpr(ident("jsvalue"), "Truthy")
 	default:
 		return ident(sanitizeIdent(name))
@@ -338,7 +338,7 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 
 // transformErrorCall handles Error.X() static method calls (e.g. Error.captureStackTrace).
 func transformErrorCall(errType, prop string, args []ast.Expr, addImport func(string)) ast.Expr {
-	addImport("github.com/nnstd/gun/runtime/jserror")
+	addImport("github.com/nnstd/gun/runtime/builtin/error")
 	// Error.captureStackTrace(obj) → jserror.Error.Get("captureStackTrace").Call(obj)
 	// Other static methods: dispatch via .Get(prop).Call(args...)
 	for i, arg := range args {

@@ -1,6 +1,6 @@
 package assert
 
-import "github.com/nnstd/gun/runtime/jsvalue"
+import "github.com/nnstd/gun/runtime/builtin"
 
 // StrictEqual asserts that two values are strictly equal.
 func StrictEqual(actual, expected *jsvalue.JSValue) *jsvalue.JSValue {

@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/nnstd/gun/runtime/jsvalue"
+	"github.com/nnstd/gun/runtime/builtin"
 )
 
 // Argv follows Node.js convention: [runtime, script, ...args].

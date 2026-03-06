@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/nnstd/gun/runtime/jsvalue"
+	"github.com/nnstd/gun/runtime/builtin"
 )
 
 // Sep is the platform-specific path separator.

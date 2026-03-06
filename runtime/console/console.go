@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/nnstd/gun/runtime/jsvalue"
+	"github.com/nnstd/gun/runtime/builtin"
 )
 
 // spreadArgs handles the case where a []*jsvalue.JSValue slice is passed as

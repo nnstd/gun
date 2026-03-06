@@ -306,7 +306,7 @@ func (t *Transformer) resolveIdentifier(name string) ast.Expr {
 	// In class methods, _args[0] is `this`, so arguments = _args[1:].
 	// In regular functions, arguments = _args.
 	if name == "arguments" {
-		t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		var argsSlice ast.Expr
 		if t.inClassMethod {
 			argsSlice = &ast.SliceExpr{X: ident("_args"), Low: intLit("1")}

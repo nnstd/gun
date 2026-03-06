@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/nnstd/gun/runtime/jsvalue"
+	"github.com/nnstd/gun/runtime/builtin"
 )
 
 // EOL is the platform-specific end-of-line marker.

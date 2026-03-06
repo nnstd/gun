@@ -42,7 +42,7 @@ func (t *Transformer) transformClassDecl(node *sitter.Node) []ast.Decl {
 	}
 
 	className := t.resolveGoName(nameNode.Utf8Text(t.source))
-	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 
 	// Check for extends (inside class_heritage → extends_clause)
 	var parentExpr ast.Expr = ident("nil")
@@ -396,7 +396,7 @@ func (t *Transformer) buildMethodSetup(className, methodName string, node *sitte
 	// All methods wrapped in jsvalue.NewFunction must return *jsvalue.JSValue.
 	// Always wrap returns (both value returns and bare returns → nil).
 	results := fieldList(field("", jsValuePtrType()))
-	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 	wrapReturnsWithJSValue(body)
 	ensureTrailingReturn(body, results)
 
@@ -406,7 +406,7 @@ func (t *Transformer) buildMethodSetup(className, methodName string, node *sitte
 	}
 
 	// Wrap in jsvalue.NewFunction
-	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 	fnVal := callExpr(selectorExpr(ident("jsvalue"), "NewFunction"), fnLit)
 
 	// Build the .Set() call
@@ -501,7 +501,7 @@ func (t *Transformer) transformClassMethodWithDynamicName(className string, memb
 	body.List = append(argUnpackStmts, body.List...)
 
 	results := fieldList(field("", jsValuePtrType()))
-	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 	wrapReturnsWithJSValue(body)
 	ensureTrailingReturn(body, results)
 

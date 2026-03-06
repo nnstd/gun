@@ -3,7 +3,7 @@ package url
 import (
 	"strings"
 
-	"github.com/nnstd/gun/runtime/jsvalue"
+	"github.com/nnstd/gun/runtime/builtin"
 )
 
 // FileURLToPath converts a file:// URL to a local file path.

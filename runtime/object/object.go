@@ -3,7 +3,7 @@ package object
 import (
 	"fmt"
 
-	"github.com/nnstd/gun/runtime/jsvalue"
+	"github.com/nnstd/gun/runtime/builtin"
 )
 
 // Prototype is the Object.prototype singleton.

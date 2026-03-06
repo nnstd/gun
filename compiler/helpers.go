@@ -513,7 +513,7 @@ func (t *Transformer) fixInitCycles(decls []ast.Decl) []ast.Decl {
 				typ := vs.Type
 				if typ == nil {
 					typ = jsValuePtrType()
-					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+					t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 				}
 				result = append(result, varDecl(name, typ, nil))
 				initStmts = append(initStmts, assignStmt(
@@ -565,7 +565,7 @@ func (t *Transformer) funcDeclToJSValueVar(d *ast.FuncDecl) ast.Decl {
 // _args and calls the original, preserving its param handling (including
 // destructuring params with defaults and variadic params).
 func (t *Transformer) wrapFuncLitAsJSValue(fnLit *ast.FuncLit, paramNames []string) ast.Expr {
-	t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
+	t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 
 	// Ensure return type is *jsvalue.JSValue and all returns are wrapped
 	wrapReturnsWithJSValue(fnLit.Body)
