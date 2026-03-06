@@ -1286,16 +1286,26 @@ func (t *Transformer) transformObjectLiteral(node *sitter.Node) ast.Expr {
 			keyNode := child.ChildByFieldName("key")
 			valNode := child.ChildByFieldName("value")
 			if keyNode != nil && valNode != nil {
-				key := keyNode.Utf8Text(t.source)
-				// Strip quote characters from string-literal keys.
-				// JS: { 'short-option-groups': true } — the key is short-option-groups, not 'short-option-groups'.
-				if keyNode.Kind() == "string" || keyNode.Kind() == "string_fragment" {
-					if len(key) >= 2 && (key[0] == '\'' || key[0] == '"') {
-						key = key[1 : len(key)-1]
+				var keyExpr ast.Expr
+				if keyNode.Kind() == "computed_property_name" {
+					// Computed property: { [expr]: value } → key is evaluated at runtime
+					inner := keyNode.NamedChild(0)
+					if inner != nil {
+						keyExpr = callExpr(selectorExpr(ident("jsvalue"), "PropertyKey"), t.transformExpr(inner))
 					}
+				} else {
+					key := keyNode.Utf8Text(t.source)
+					// Strip quote characters from string-literal keys.
+					// JS: { 'short-option-groups': true } — the key is short-option-groups, not 'short-option-groups'.
+					if keyNode.Kind() == "string" || keyNode.Kind() == "string_fragment" {
+						if len(key) >= 2 && (key[0] == '\'' || key[0] == '"') {
+							key = key[1 : len(key)-1]
+						}
+					}
+					keyExpr = stringLit(key)
 				}
-				if val := t.transformExpr(valNode); val != nil {
-					args = append(args, stringLit(key), t.wrapAsJSValue(val))
+				if val := t.transformExpr(valNode); val != nil && keyExpr != nil {
+					args = append(args, keyExpr, t.wrapAsJSValue(val))
 				}
 			}
 		case "shorthand_property_identifier":

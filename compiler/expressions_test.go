@@ -13,6 +13,14 @@ func TestObjectLiteral(t *testing.T) {
 	assertContains(t, out, "jsvalue.ObjectFrom(")
 }
 
+func TestObjectLiteralComputedKey(t *testing.T) {
+	ts := `const KEY = "hello";
+const obj = { [KEY]: true };`
+	out := compile(t, ts)
+	assertContains(t, out, "jsvalue.PropertyKey(KEY)")
+	assertNotContains(t, out, `"[KEY]"`)
+}
+
 func TestTemplateString(t *testing.T) {
 	ts := "const msg = `hello ${name}`;"
 	out := compile(t, ts)

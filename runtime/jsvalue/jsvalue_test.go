@@ -631,3 +631,77 @@ func TestStringTrimLeftRightTabs(t *testing.T) {
 		t.Errorf("trimRight with tabs/newlines: got %q, want %q", r.String(), "\t\n hello")
 	}
 }
+
+func TestStringIndexAccess(t *testing.T) {
+	s := NewString("hello")
+	if s.Index(0).String() != "h" {
+		t.Errorf("Index(0): got %q, want %q", s.Index(0).String(), "h")
+	}
+	if s.Index(4).String() != "o" {
+		t.Errorf("Index(4): got %q, want %q", s.Index(4).String(), "o")
+	}
+	if TypeOf(s.Index(5)).String() != "undefined" {
+		t.Errorf("Index(5): expected undefined, got %v", s.Index(5))
+	}
+}
+
+func TestStringSliceMethod(t *testing.T) {
+	s := NewString("-u")
+
+	// slice(-1) should return "u"
+	r := s.MethodCall("slice", NewNumber(-1))
+	if r.String() != "u" {
+		t.Errorf("slice(-1): got %q, want %q", r.String(), "u")
+	}
+
+	// slice(1, -1) on a 2-char string should return ""
+	r = s.MethodCall("slice", NewNumber(1), NewNumber(-1))
+	if r.String() != "" {
+		t.Errorf("slice(1, -1): got %q, want %q", r.String(), "")
+	}
+}
+
+func TestFilterPassesArrayAsThirdArg(t *testing.T) {
+	arr := NewArray(NewString("a"), NewString("b"), NewString("a"), NewString("c"))
+	// Dedup using self.indexOf(v) === i
+	result := arr.MethodCall("filter", NewFunction(func(args ...*JSValue) *JSValue {
+		v := args[0]
+		i := args[1]
+		self := args[2]
+		return Eq(From(self.MethodCall("indexOf", From(v))), From(i))
+	}))
+	if result.Len() != 3 {
+		t.Errorf("dedup filter: got len %d, want 3", result.Len())
+	}
+	if result.Index(0).String() != "a" || result.Index(1).String() != "b" || result.Index(2).String() != "c" {
+		t.Errorf("dedup filter: got %v, want [a, b, c]", result)
+	}
+}
+
+func TestForEachPassesArrayAsThirdArg(t *testing.T) {
+	arr := NewArray(NewString("x"))
+	var gotSelf *JSValue
+	arr.MethodCall("forEach", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) > 2 {
+			gotSelf = args[2]
+		}
+		return nil
+	}))
+	if gotSelf == nil || gotSelf.Len() != 1 {
+		t.Errorf("forEach third arg: expected array, got %v", gotSelf)
+	}
+}
+
+func TestMapPassesArrayAsThirdArg(t *testing.T) {
+	arr := NewArray(NewNumber(1), NewNumber(2))
+	var gotSelf *JSValue
+	arr.MethodCall("map", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) > 2 {
+			gotSelf = args[2]
+		}
+		return args[0]
+	}))
+	if gotSelf == nil || gotSelf.Len() != 2 {
+		t.Errorf("map third arg: expected array, got %v", gotSelf)
+	}
+}

@@ -667,13 +667,14 @@ func init() {
 		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
 			return NewArray()
 		}
+		this := args[0]
 		fn := args[1]
 		if fn == nil || fn.funcVal == nil {
 			return NewArray()
 		}
-		results := make([]*JSValue, len(args[0].arrayVal))
-		for i, elem := range args[0].arrayVal {
-			results[i] = fn.funcVal(elem, NewNumber(float64(i)))
+		results := make([]*JSValue, len(this.arrayVal))
+		for i, elem := range this.arrayVal {
+			results[i] = fn.funcVal(elem, NewNumber(float64(i)), this)
 		}
 		return NewArray(results...)
 	})
@@ -683,13 +684,14 @@ func init() {
 		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
 			return NewArray()
 		}
+		this := args[0]
 		fn := args[1]
 		if fn == nil || fn.funcVal == nil {
 			return NewArray()
 		}
 		var results []*JSValue
-		for i, elem := range args[0].arrayVal {
-			r := fn.funcVal(elem, NewNumber(float64(i)))
+		for i, elem := range this.arrayVal {
+			r := fn.funcVal(elem, NewNumber(float64(i)), this)
 			if r != nil && r.Bool() {
 				results = append(results, elem)
 			}
@@ -702,12 +704,13 @@ func init() {
 		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
 			return NewUndefined()
 		}
+		this := args[0]
 		fn := args[1]
 		if fn == nil || fn.funcVal == nil {
 			return NewUndefined()
 		}
-		for i, elem := range args[0].arrayVal {
-			fn.funcVal(elem, NewNumber(float64(i)))
+		for i, elem := range this.arrayVal {
+			fn.funcVal(elem, NewNumber(float64(i)), this)
 		}
 		return NewUndefined()
 	})
