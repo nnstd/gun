@@ -591,3 +591,43 @@ func TestNumberToString(t *testing.T) {
 		t.Errorf("(42).toString(): got %q, want %q", result.String(), "42")
 	}
 }
+
+func TestStringTrimLeftRight(t *testing.T) {
+	s := NewString("  hello  ")
+
+	// trimLeft is an alias for trimStart
+	r := s.MethodCall("trimLeft")
+	if r.String() != "hello  " {
+		t.Errorf("trimLeft: got %q, want %q", r.String(), "hello  ")
+	}
+
+	// trimRight is an alias for trimEnd
+	r = s.MethodCall("trimRight")
+	if r.String() != "  hello" {
+		t.Errorf("trimRight: got %q, want %q", r.String(), "  hello")
+	}
+
+	// trimStart and trimEnd should produce the same results
+	r = s.MethodCall("trimStart")
+	if r.String() != "hello  " {
+		t.Errorf("trimStart: got %q, want %q", r.String(), "hello  ")
+	}
+	r = s.MethodCall("trimEnd")
+	if r.String() != "  hello" {
+		t.Errorf("trimEnd: got %q, want %q", r.String(), "  hello")
+	}
+}
+
+func TestStringTrimLeftRightTabs(t *testing.T) {
+	s := NewString("\t\n hello \t\n")
+
+	r := s.MethodCall("trimLeft")
+	if r.String() != "hello \t\n" {
+		t.Errorf("trimLeft with tabs/newlines: got %q, want %q", r.String(), "hello \t\n")
+	}
+
+	r = s.MethodCall("trimRight")
+	if r.String() != "\t\n hello" {
+		t.Errorf("trimRight with tabs/newlines: got %q, want %q", r.String(), "\t\n hello")
+	}
+}

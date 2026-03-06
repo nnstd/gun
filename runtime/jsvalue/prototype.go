@@ -229,7 +229,15 @@ func init() {
 		if len(args) < 1 || args[0] == nil { return NewString("") }
 		return NewString(strings.TrimLeft(args[0].String(), " \t\n\r"))
 	})
+	defMethod(StringPrototype, "trimLeft", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("") }
+		return NewString(strings.TrimLeft(args[0].String(), " \t\n\r"))
+	})
 	defMethod(StringPrototype, "trimEnd", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("") }
+		return NewString(strings.TrimRight(args[0].String(), " \t\n\r"))
+	})
+	defMethod(StringPrototype, "trimRight", func(args ...*JSValue) *JSValue {
 		if len(args) < 1 || args[0] == nil { return NewString("") }
 		return NewString(strings.TrimRight(args[0].String(), " \t\n\r"))
 	})
