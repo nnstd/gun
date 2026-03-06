@@ -1438,27 +1438,67 @@ func (t *Transformer) ensureBool(expr ast.Expr) ast.Expr {
 		}
 	}
 
-	// Pointers/interfaces that could be nil → != nil
-	// For JSValue variables, also check .Bool() for proper JS truthiness
-	// (e.g. a non-nil JSValue wrapping false/0/"" should be falsy).
+	// For JSValue expressions, use .Bool() for proper JS truthiness.
+	// nil and undefined are both falsy. Non-nil JSValue wrapping
+	// false/0/"" should also be falsy.
 	switch e := expr.(type) {
 	case *ast.Ident:
-		nilCheck := &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
-		if e.Name != "nil" && !t.isTypedLocal(e.Name) {
-			return &ast.BinaryExpr{
-				X:  nilCheck,
-				Op: token.LAND,
-				Y:  callExpr(selectorExpr(expr, "Bool")),
-			}
+		if e.Name == "nil" {
+			return expr
 		}
-		return nilCheck
-	case *ast.SelectorExpr, *ast.IndexExpr:
+		if t.isTypedLocal(e.Name) {
+			return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
+		}
+		// JSValue variable: nil check + .Bool()
+		return &ast.BinaryExpr{
+			X:  &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")},
+			Op: token.LAND,
+			Y:  callExpr(selectorExpr(expr, "Bool")),
+		}
+	case *ast.SelectorExpr:
+		// Property access: .Get("x") on JSValue returns *JSValue, use .Bool().
+		// But package.Function (Go selector) is not JSValue.
+		if sel := e.Sel.Name; sel == "Get" || sel == "Bool" || sel == "Len" {
+			return callExpr(selectorExpr(expr, "Bool"))
+		}
 		return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
+	case *ast.IndexExpr:
+		// Subscript access — result could be JSValue
+		return callExpr(selectorExpr(expr, "Bool"))
 	case *ast.CallExpr:
+		// Function/method call result — check if it returns JSValue
+		if isJSValueCallExpr(e) {
+			return callExpr(selectorExpr(expr, "Bool"))
+		}
 		return &ast.BinaryExpr{X: expr, Op: token.NEQ, Y: ident("nil")}
 	}
 
 	return expr
+}
+
+// isJSValueCallExpr checks if a Go AST call expression returns *jsvalue.JSValue.
+// Used to decide whether .Bool() is safe to call on the result.
+func isJSValueCallExpr(call *ast.CallExpr) bool {
+	// obj.Get("x"), obj.MethodCall("x"), obj.Call(...), obj.Index(n)
+	if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+		switch sel.Sel.Name {
+		case "Get", "MethodCall", "Call", "Index", "GetPrototype":
+			return true
+		}
+		// jsvalue.* package functions
+		if id, ok := sel.X.(*ast.Ident); ok && id.Name == "jsvalue" {
+			return true
+		}
+	}
+	// IIFE: func(...) *jsvalue.JSValue { ... }(args)
+	if fnLit, ok := call.Fun.(*ast.FuncLit); ok {
+		if fnLit.Type.Results != nil && len(fnLit.Type.Results.List) > 0 {
+			if isJSValuePtrType(fnLit.Type.Results.List[0].Type) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isJSValueExpr returns true if the Go AST expression is known to produce *jsvalue.JSValue.

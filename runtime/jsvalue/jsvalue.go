@@ -370,6 +370,9 @@ func (v *JSValue) Call(args ...*JSValue) *JSValue {
 // so the method can extract it from _args[0]. For plain functions, passes
 // args directly without prepending this.
 func (v *JSValue) MethodCall(method string, args ...*JSValue) *JSValue {
+	if v == nil {
+		return NewUndefined()
+	}
 	// Handle Function.prototype.apply(thisArg, argsArray) and .call(thisArg, ...args)
 	if v.typ == TypeFunction && method == "apply" && len(args) >= 2 {
 		argsArray := args[1]

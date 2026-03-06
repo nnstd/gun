@@ -40,13 +40,12 @@ func (v *JSValue) Get(name string) *JSValue {
 		return v.GetPrototype()
 	}
 	// For arrays, numeric string keys access arrayVal (JS: arr["0"] === arr[0])
-	// Returns nil for out-of-bounds so `!= nil` checks work like JS `!== undefined`.
 	if v.arrayVal != nil {
 		if idx, ok := parseArrayIndex(name); ok {
 			if idx < len(v.arrayVal) {
 				return v.arrayVal[idx]
 			}
-			return nil
+			return NewUndefined()
 		}
 	}
 	// Walk own properties, then prototype chain. For getters, pass the original
