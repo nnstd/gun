@@ -5,27 +5,27 @@ import (
 )
 
 func transformObjectCall(prop string, args []ast.Expr, addImport func(string)) ast.Expr {
-	addImport("github.com/nnstd/gun/runtime/object")
+	addImport("github.com/nnstd/gun/runtime/builtin")
 	switch prop {
 	case "keys":
 		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("jsobject"), "Keys"), args[0])
+			return callExpr(selectorExpr(ident("jsvalue"), "Keys"), args[0])
 		}
 	case "values":
 		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("jsobject"), "Values"), args[0])
+			return callExpr(selectorExpr(ident("jsvalue"), "Values"), args[0])
 		}
 	case "entries":
 		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("jsobject"), "Entries"), args[0])
+			return callExpr(selectorExpr(ident("jsvalue"), "Entries"), args[0])
 		}
 	case "assign":
 		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("jsobject"), "Assign"), args...)
+			return callExpr(selectorExpr(ident("jsvalue"), "Assign"), args...)
 		}
 	case "create":
 		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("jsobject"), "Create"), args[0])
+			return callExpr(selectorExpr(ident("jsvalue"), "Create"), args[0])
 		}
 	case "freeze":
 		if len(args) > 0 {
@@ -33,11 +33,11 @@ func transformObjectCall(prop string, args []ast.Expr, addImport func(string)) a
 		}
 	case "defineProperty":
 		if len(args) >= 3 {
-			return callExpr(selectorExpr(ident("jsobject"), "DefineProperty"), args...)
+			return callExpr(selectorExpr(ident("jsvalue"), "DefineProperty"), args...)
 		}
 	case "getOwnPropertyNames":
 		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("jsobject"), "Keys"), args[0])
+			return callExpr(selectorExpr(ident("jsvalue"), "Keys"), args[0])
 		}
 	case "getPrototypeOf":
 		if len(args) > 0 {

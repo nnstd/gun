@@ -116,14 +116,14 @@ func TestProcessExit(t *testing.T) {
 func TestObjectCreateNull(t *testing.T) {
 	ts := `const obj = Object.create(null);`
 	out := compile(t, ts)
-	assertContains(t, out, "jsobject.Create(jsvalue.NewNull())")
+	assertContains(t, out, "jsvalue.Create(jsvalue.NewNull())")
 	assertNotContains(t, out, "Object.Create")
 }
 
 func TestObjectKeysTransform(t *testing.T) {
 	ts := `function f(obj: any): any { return Object.keys(obj); }`
 	out := compile(t, ts)
-	assertContains(t, out, "object.Keys(obj)")
+	assertContains(t, out, "jsvalue.Keys(obj)")
 	assertNotContains(t, out, "Object")
 }
 
@@ -488,23 +488,22 @@ func TestPromiseGlobal(t *testing.T) {
 	assertNotContains(t, out, "undefined: Promise")
 }
 
-func TestObjectKeysUsesJsobjectAlias(t *testing.T) {
+func TestObjectKeysUsesJsvalue(t *testing.T) {
 	ts := `const keys = Object.keys({});`
 	out := compile(t, ts)
-	assertContains(t, out, "jsobject.Keys(")
-	assertContains(t, out, `jsobject "github.com/nnstd/gun/runtime/object"`)
+	assertContains(t, out, "jsvalue.Keys(")
 }
 
-func TestObjectValuesUsesJsobjectAlias(t *testing.T) {
+func TestObjectValuesUsesJsvalue(t *testing.T) {
 	ts := `const vals = Object.values({});`
 	out := compile(t, ts)
-	assertContains(t, out, "jsobject.Values(")
+	assertContains(t, out, "jsvalue.Values(")
 }
 
-func TestObjectEntriesUsesJsobjectAlias(t *testing.T) {
+func TestObjectEntriesUsesJsvalue(t *testing.T) {
 	ts := `const entries = Object.entries({});`
 	out := compile(t, ts)
-	assertContains(t, out, "jsobject.Entries(")
+	assertContains(t, out, "jsvalue.Entries(")
 }
 
 func TestToStringOnJSValueReturnsJSValue(t *testing.T) {

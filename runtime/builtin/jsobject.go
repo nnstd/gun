@@ -1,5 +1,7 @@
 package jsvalue
 
+import "fmt"
+
 // NewObject creates an empty object JSValue.
 func NewObject() *JSValue {
 	return &JSValue{
@@ -35,6 +37,99 @@ func Keys(obj *JSValue) *JSValue {
 		result[i] = NewString(key)
 	}
 	return NewArray(result...)
+}
+
+// Values returns the values of an object as a JSValue array.
+// Implements Object.values() semantics.
+func Values(obj *JSValue) *JSValue {
+	if obj == nil {
+		return NewArray()
+	}
+	keys := obj.OwnKeys()
+	result := make([]*JSValue, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, obj.Get(key))
+	}
+	return NewArray(result...)
+}
+
+// Entries returns the [key, value] pairs of an object as a JSValue array.
+// Implements Object.entries() semantics.
+func Entries(obj *JSValue) *JSValue {
+	if obj == nil {
+		return NewArray()
+	}
+	keys := obj.OwnKeys()
+	result := make([]*JSValue, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, NewArray(NewString(key), obj.Get(key)))
+	}
+	return NewArray(result...)
+}
+
+// Assign copies own properties from sources to target.
+// Implements Object.assign() semantics.
+func Assign(target any, sources ...any) *JSValue {
+	t := toJSValue(target)
+	for _, src := range sources {
+		s := toJSValue(src)
+		if s == nil {
+			continue
+		}
+		for _, key := range s.OwnKeys() {
+			t.Set(key, s.Get(key))
+		}
+	}
+	return t
+}
+
+func toJSValue(v any) *JSValue {
+	if v == nil {
+		return NewObject()
+	}
+	if jv, ok := v.(*JSValue); ok {
+		return jv
+	}
+	return From(v)
+}
+
+// Create creates a new object with the specified prototype.
+// Implements Object.create() semantics.
+func Create(proto *JSValue) *JSValue {
+	obj := NewObject()
+	if proto != nil {
+		obj.SetPrototype(proto)
+	}
+	return obj
+}
+
+// DefineProperty defines a property on an object from a descriptor.
+// Implements a simplified Object.defineProperty() semantics.
+func DefineProperty(obj any, prop any, desc any) *JSValue {
+	o := toJSValue(obj)
+	d := toJSValue(desc)
+	p := fmt.Sprint(prop)
+	if d != nil {
+		val := d.Get("value")
+		if val != nil {
+			o.Set(p, val)
+		}
+	}
+	return o
+}
+
+// DefineProperties defines multiple properties on an object at once.
+// props is an object where each key maps to a property descriptor.
+func DefineProperties(obj any, props any) *JSValue {
+	o := toJSValue(obj)
+	p := toJSValue(props)
+	if p == nil {
+		return o
+	}
+	for _, key := range p.OwnKeys() {
+		DefineProperty(o, key, p.Get(key))
+	}
+	return o
 }
 
 // NewClass creates a JS class: a constructor function with a prototype object.

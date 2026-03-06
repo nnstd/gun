@@ -297,8 +297,8 @@ func mapIdentifier(name string, addImport func(string)) ast.Expr {
 		addImport("github.com/nnstd/gun/runtime/builtin/error")
 		return selectorExpr(ident("jserror"), name)
 	case "Object":
-		addImport("github.com/nnstd/gun/runtime/object")
-		return ident("jsobject")
+		addImport("github.com/nnstd/gun/runtime/builtin")
+		return ident("jsvalue")
 	case "process":
 		// process as standalone value — return a JSValue object with process properties
 		// so process?.version, process?.versions etc. work through .Get()

@@ -120,9 +120,6 @@ func (t *Transformer) transform(root *sitter.Node) *ast.File {
 func (t *Transformer) addImport(pkg string) {
 	// Auto-alias packages whose directory name differs from their Go package name.
 	switch pkg {
-	case "github.com/nnstd/gun/runtime/object":
-		t.imports[pkg] = "jsobject"
-		return
 	case "github.com/nnstd/gun/runtime/builtin/error":
 		t.imports[pkg] = "jserror"
 		return
