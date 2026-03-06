@@ -283,20 +283,6 @@ func (t *Transformer) transformUnaryExpr(node *sitter.Node) ast.Expr {
 
 	switch opText {
 	case "!":
-		// !str.match(regex) / !str.exec(regex) → FindStringSubmatch(...) == nil
-		// These return []string in Go, not bool, so ! must become == nil.
-		if argNode != nil && argNode.Kind() == "call_expression" {
-			fnNode := argNode.ChildByFieldName("function")
-			if fnNode != nil && fnNode.Kind() == "member_expression" {
-				propNode := fnNode.ChildByFieldName("property")
-				if propNode != nil {
-					prop := propNode.Utf8Text(t.source)
-					if prop == "match" || prop == "exec" {
-						return &ast.BinaryExpr{X: arg, Op: token.EQL, Y: ident("nil")}
-					}
-				}
-			}
-		}
 		// !jsValue → jsvalue.Not(jsValue) — returns *JSValue boolean
 		if argNode != nil && t.nodeReturnsJSValue(argNode) {
 			t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")

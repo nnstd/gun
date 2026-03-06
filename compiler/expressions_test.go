@@ -338,15 +338,15 @@ func TestLocalVarPropertyAccessUsesGet(t *testing.T) {
 	assertNotContains(t, out, "result.Argv")
 }
 
-func TestNegatedMatchUsesNilCheck(t *testing.T) {
-	// !str.match(regex) should produce FindStringSubmatch(...) == nil, not !FindStringSubmatch(...)
+func TestNegatedMatchUsesNot(t *testing.T) {
+	// !str.match(regex) should use jsvalue.Not() since match returns *JSValue
 	ts := `function f(s: string) {
 	if (!s.match(/^hello/)) { return false; }
 	return true;
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "== nil")
-	assertNotContains(t, out, "!regexp")
+	assertContains(t, out, `jsvalue.Not(`)
+	assertContains(t, out, `MethodCall("match"`)
 }
 
 func TestMatchResultInBooleanContext(t *testing.T) {
