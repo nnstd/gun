@@ -447,6 +447,8 @@ func From(v any) *JSValue {
 		return NewNumber(val)
 	case bool:
 		return NewBool(val)
+	case []*JSValue:
+		return NewArray(val...)
 	case func(...*JSValue) *JSValue:
 		return NewFunction(val)
 	case map[string]*JSValue:

@@ -243,7 +243,7 @@ func TestAssignToUntypedLocalWrapsJSValue(t *testing.T) {
 	return s;
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.ToLowerCase(s)")
+	assertContains(t, out, `MethodCall("toLowerCase"`)
 }
 
 func TestNilInitVarGetsJSValueType(t *testing.T) {
@@ -275,7 +275,7 @@ func TestTypedLocalFromStringMethod(t *testing.T) {
 	return lower.indexOf("x");
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "strings.Index(fmt.Sprint(lower)")
+	assertContains(t, out, `MethodCall("indexOf"`)
 	assertNotContains(t, out, "lower.IndexOf")
 }
 

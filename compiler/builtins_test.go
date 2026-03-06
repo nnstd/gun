@@ -48,15 +48,15 @@ func TestStringMethods(t *testing.T) {
 		ts   string
 		want string
 	}{
-		{"split", `function f(s: string): any { return s.split(","); }`, `jsvalue.Split(s,`},
-		{"trim", `function f(s: string): any { return s.trim(); }`, `jsvalue.Trim(s)`},
-		{"toLowerCase", `function f(s: string): any { return s.toLowerCase(); }`, `jsvalue.ToLowerCase(s)`},
-		{"toUpperCase", `function f(s: string): any { return s.toUpperCase(); }`, `jsvalue.ToUpperCase(s)`},
-		{"startsWith", `function f(s: string): any { return s.startsWith("a"); }`, `jsvalue.StartsWith(s,`},
-		{"endsWith", `function f(s: string): any { return s.endsWith("z"); }`, `jsvalue.EndsWith(s,`},
-		{"repeat", `function f(s: string): any { return s.repeat(3); }`, `jsvalue.Repeat(s,`},
-		{"trimStart", `function f(s: string): any { return s.trimStart(); }`, `strings.TrimLeft(`},
-		{"trimEnd", `function f(s: string): any { return s.trimEnd(); }`, `strings.TrimRight(`},
+		{"split", `function f(s: string): any { return s.split(","); }`, `MethodCall("split"`},
+		{"trim", `function f(s: string): any { return s.trim(); }`, `MethodCall("trim"`},
+		{"toLowerCase", `function f(s: string): any { return s.toLowerCase(); }`, `MethodCall("toLowerCase"`},
+		{"toUpperCase", `function f(s: string): any { return s.toUpperCase(); }`, `MethodCall("toUpperCase"`},
+		{"startsWith", `function f(s: string): any { return s.startsWith("a"); }`, `MethodCall("startsWith"`},
+		{"endsWith", `function f(s: string): any { return s.endsWith("z"); }`, `MethodCall("endsWith"`},
+		{"repeat", `function f(s: string): any { return s.repeat(3); }`, `MethodCall("repeat"`},
+		{"trimStart", `function f(s: string): any { return s.trimStart(); }`, `MethodCall("trimStart"`},
+		{"trimEnd", `function f(s: string): any { return s.trimEnd(); }`, `MethodCall("trimEnd"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -259,21 +259,21 @@ func TestReplaceAcceptsRegexJSValue(t *testing.T) {
 	// jsvalue.Replace accepts *JSValue for pattern (string or regex).
 	ts := `function f(s) { return s.replace(/abc/, "xyz"); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.Replace(")
+	assertContains(t, out, `MethodCall("replace"`)
 	assertNotContains(t, out, "strings.Replace(")
 }
 
 func TestSplitAcceptsJSValueSeparator(t *testing.T) {
 	ts := `function f(key) { return key.split("."); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.Split(key,")
-	assertContains(t, out, `jsvalue.NewString(".")`)
+	assertContains(t, out, `MethodCall("split"`)
+	// args passed directly to .MethodCall()
 }
 
 func TestCharAtAcceptsJSValueIndex(t *testing.T) {
 	ts := `function f(s) { return s.charAt(0); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.CharAt(s,")
+	assertContains(t, out, `MethodCall("charAt"`)
 }
 
 func TestSliceAcceptsJSValueArgs(t *testing.T) {
@@ -285,7 +285,7 @@ func TestSliceAcceptsJSValueArgs(t *testing.T) {
 func TestLastIndexOfWrapsArgs(t *testing.T) {
 	ts := `function f(s) { return s.lastIndexOf("x"); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.LastIndexOf(s,")
+	assertContains(t, out, `MethodCall("lastIndexOf"`)
 }
 
 func TestJoinWrapsJSValueSeparator(t *testing.T) {
@@ -304,8 +304,8 @@ func TestMatchOnJSValueUsesRegexpCompile(t *testing.T) {
 	// arg.match(pattern) where both are JSValue compiles regex from pattern.
 	ts := `function f(arg, pattern) { return arg.match(pattern); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.CompileRegex(")
-	assertContains(t, out, "FindStringSubmatch")
+	assertContains(t, out, `MethodCall("match"`)
+	// match is now a prototype method call
 	assertNotContains(t, out, "pattern.FindStringSubmatch")
 }
 
@@ -363,8 +363,7 @@ func TestCodePointAtOnJSValueCoerces(t *testing.T) {
 	// codePointAt on JSValue receiver should coerce to string via fmt.Sprint.
 	ts := `function f(s) { return s.codePointAt(0); }`
 	out := compile(t, ts)
-	assertContains(t, out, "fmt.Sprint(s)")
-	assertContains(t, out, "[]rune(")
+	assertContains(t, out, `MethodCall("codePointAt"`)
 }
 
 func TestRegexTestOnJSValueRegex(t *testing.T) {

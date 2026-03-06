@@ -636,75 +636,11 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 				return r
 			}
 
-			// Method transforms on arbitrary receivers (string/collection methods)
-			// Skip if the object is a namespace import (it's a package, not a value)
-			isUntypedLocal := objNode.Kind() == "identifier" && t.isUntypedLocal(objText)
-			if _, isNsImport := t.importedNames[objText]; !isNsImport {
-				obj := t.transformExpr(objNode)
-
-				// When the receiver returns JSValue (untyped local or JSValue-returning expression) and the method is a regex method,
-				// call the package-level function (e.g., pattern.test(s) → jsvalue.MatchString(pattern, s))
-				if (isUntypedLocal || t.nodeReturnsJSValue(objNode)) && t.builtins.IsRegexMethod(prop) {
+			// Regex method dispatch (pattern.test(s), pattern.exec(s))
+			if (objNode.Kind() == "identifier" && t.isUntypedLocal(objText)) || t.nodeReturnsJSValue(objNode) {
+				if t.builtins.IsRegexMethod(prop) {
+					obj := t.transformExpr(objNode)
 					if r := transformRegexpMethod(obj, prop, args, t.addImport); r != nil {
-						return r
-					}
-				}
-
-				// For JSValue receivers, try JSValue string/collection wrapper methods first.
-				if isUntypedLocal || t.nodeReturnsJSValue(objNode) {
-					if hasJSValueStringWrapper(prop) {
-						if r := transformStringMethod(obj, prop, args, t.addImport, true); r != nil {
-							return r
-						}
-					}
-					}
-
-				// When the receiver returns JSValue (untyped local or JSValue-returning expression),
-				// coerce it to string for string methods, but not for array methods.
-				// Wrap the result in JSValue to maintain type consistency.
-				if (isUntypedLocal || t.nodeReturnsJSValue(objNode)) && !t.builtins.IsArrayMethod(prop) && !t.builtins.IsRegexMethod(prop) {
-					t.addImport("fmt")
-					t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
-					coercedObj := callExpr(selectorExpr(ident("fmt"), "Sprint"), obj)
-					coercedArgs := make([]ast.Expr, len(args))
-					copy(coercedArgs, args)
-					for i, arg := range coercedArgs {
-						// Skip coercion for arguments that should remain as their original types
-						if shouldCoerceArg(prop, i, arg) {
-							coercedArgs[i] = callExpr(selectorExpr(ident("fmt"), "Sprint"), arg)
-						}
-					}
-					if r := transformBuiltinMethod(coercedObj, prop, coercedArgs, t.addImport); r != nil {
-						// Wrap result in JSValue based on return type
-						switch prop {
-						case "split":
-							// split returns []string → wrap with FromStrings
-							return callExpr(selectorExpr(ident("jsvalue"), "FromStrings"), r)
-						case "indexOf", "lastIndexOf", "search":
-							// These return int → wrap with NewNumber
-							return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), callExpr(ident("float64"), r))
-						case "startsWith", "endsWith", "includes":
-							// These return bool → wrap with NewBool
-							return callExpr(selectorExpr(ident("jsvalue"), "NewBool"), r)
-						case "match":
-							// match returns special handling - might already be wrapped
-							return r
-						default:
-							// String methods (charAt, toLowerCase, toUpperCase, trim, replace, etc.) → wrap with NewString
-							return callExpr(selectorExpr(ident("jsvalue"), "NewString"), r)
-						}
-					}
-				} else if !isUntypedLocal && !t.nodeReturnsJSValue(objNode) {
-					// Non-JSValue receivers: handle with typed Go array/string methods.
-					// JSValue receivers fall through to .MethodCall() below.
-					// [].concat(x) → just x; skip coercion so JSValue args stay as-is.
-					if prop == "concat" {
-						if cl, ok := obj.(*ast.CompositeLit); ok && len(cl.Elts) == 0 && len(args) > 0 {
-							return args[0]
-						}
-					}
-					coercedArgs := t.coerceJSValueArgs(args, argsNode)
-					if r := transformBuiltinMethod(obj, prop, coercedArgs, t.addImport); r != nil {
 						return r
 					}
 				}
@@ -719,13 +655,10 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 				}
 				t.addAliasedImport("github.com/nnstd/gun/runtime/jsvalue", "jsvalue")
 				obj := t.transformExpr(objNode)
-				// Wrap []*jsvalue.JSValue slice locals in NewArray() for .MethodCall()
+				// Wrap []*jsvalue.JSValue rest params with From() so .MethodCall() works.
+				// From() handles both *JSValue (pass-through) and []*JSValue (→ NewArray).
 				if objNode.Kind() == "identifier" && t.jsvalueSliceLocals[objText] {
-					obj = &ast.CallExpr{
-						Fun:      selectorExpr(ident("jsvalue"), "NewArray"),
-						Args:     []ast.Expr{obj},
-						Ellipsis: 1,
-					}
+					obj = callExpr(selectorExpr(ident("jsvalue"), "From"), obj)
 				}
 				for i, arg := range args {
 					args[i] = t.wrapAsJSValue(arg)
@@ -934,8 +867,18 @@ func isRuntimePackage(name string) bool {
 
 // spreadArgInfo tracks whether an argument came from a spread element.
 type spreadArgInfo struct {
-	expr     ast.Expr
-	isSpread bool
+	expr       ast.Expr
+	isSpread   bool
+	isSlice    bool // true if expr is already []*JSValue (rest param), skip .Array()
+}
+
+// spreadToSlice converts a spread expression to []*JSValue for variadic calls.
+// For *JSValue: calls .Array(). For []*JSValue (rest params): uses directly.
+func spreadToSlice(info spreadArgInfo) ast.Expr {
+	if info.isSlice {
+		return info.expr
+	}
+	return callExpr(selectorExpr(info.expr, "Array"))
 }
 
 func (t *Transformer) transformArgsWithSpread(node *sitter.Node) []spreadArgInfo {
@@ -947,8 +890,10 @@ func (t *Transformer) transformArgsWithSpread(node *sitter.Node) []spreadArgInfo
 		child := node.NamedChild(i)
 		if child.Kind() == "spread_element" {
 			if child.NamedChildCount() > 0 {
-				if inner := t.transformExpr(child.NamedChild(0)); inner != nil {
-					args = append(args, spreadArgInfo{expr: inner, isSpread: true})
+				innerNode := child.NamedChild(0)
+				if inner := t.transformExpr(innerNode); inner != nil {
+					isSlice := innerNode.Kind() == "identifier" && t.jsvalueSliceLocals[innerNode.Utf8Text(t.source)]
+					args = append(args, spreadArgInfo{expr: inner, isSpread: true, isSlice: isSlice})
 				}
 			}
 		} else {
@@ -992,10 +937,9 @@ func (t *Transformer) generateMethodCallWithSpread(obj ast.Expr, method string, 
 	// For a simple case where all args are a single spread, optimize:
 	// obj.MethodCall("method", arr.Array()...)
 	if len(infos) == 1 && infos[0].isSpread {
-		spreadExpr := infos[0].expr
 		return &ast.CallExpr{
 			Fun:      selectorExpr(obj, "MethodCall"),
-			Args:     []ast.Expr{stringLit(method), callExpr(selectorExpr(spreadExpr, "Array"))},
+			Args:     []ast.Expr{stringLit(method), spreadToSlice(infos[0])},
 			Ellipsis: 1,
 		}
 	}
@@ -1018,7 +962,7 @@ func (t *Transformer) generateMethodCallWithSpread(obj ast.Expr, method string, 
 	for _, info := range infos {
 		if info.isSpread {
 			flushLiterals()
-			parts = append(parts, callExpr(selectorExpr(info.expr, "Array")))
+			parts = append(parts, spreadToSlice(info))
 		} else {
 			wrapped := info.expr
 			if wrapFn != nil {
@@ -1057,10 +1001,9 @@ func (t *Transformer) generateCallWithSpread(fn ast.Expr, argsNode *sitter.Node,
 	infos := t.transformArgsWithSpread(argsNode)
 
 	if len(infos) == 1 && infos[0].isSpread {
-		spreadExpr := infos[0].expr
 		return &ast.CallExpr{
 			Fun:      selectorExpr(fn, "Call"),
-			Args:     []ast.Expr{callExpr(selectorExpr(spreadExpr, "Array"))},
+			Args:     []ast.Expr{spreadToSlice(infos[0])},
 			Ellipsis: 1,
 		}
 	}
@@ -1082,7 +1025,7 @@ func (t *Transformer) generateCallWithSpread(fn ast.Expr, argsNode *sitter.Node,
 	for _, info := range infos {
 		if info.isSpread {
 			flushLiterals()
-			parts = append(parts, callExpr(selectorExpr(info.expr, "Array")))
+			parts = append(parts, spreadToSlice(info))
 		} else {
 			wrapped := info.expr
 			if wrapFn != nil {
@@ -1372,47 +1315,9 @@ func (t *Transformer) transformObjectLiteral(node *sitter.Node) ast.Expr {
 }
 
 
-// shouldCoerceArg returns true if the argument should be coerced to string for the given method.
-// Some methods expect specific argument types (regex, integer) that should not be coerced.
-func shouldCoerceArg(method string, argIndex int, arg ast.Expr) bool {
-	// Skip coercion for literal arguments
-	if _, isLit := arg.(*ast.BasicLit); isLit {
-		return false
-	}
-
-	// Methods that expect regex arguments (don't coerce)
-	if method == "match" && argIndex == 0 {
-		return false
-	}
-
-	// Methods that expect integer index arguments (don't coerce)
-	if (method == "charAt" || method == "charCodeAt" || method == "codePointAt" ||
-		method == "substring" || method == "substr") && argIndex == 0 {
-		return false
-	}
-
-	// Methods that expect integer arguments for both start and end positions
-	if method == "substring" && argIndex == 1 {
-		return false
-	}
-
-	// Default: coerce to string
-	return true
-}
 
 
 
-// hasJSValueStringWrapper reports whether a string method has a dedicated jsvalue.* wrapper.
-func hasJSValueStringWrapper(prop string) bool {
-	switch prop {
-	case "substring", "lastIndexOf", "indexOf", "split", "trim", "repeat",
-		"toLowerCase", "toUpperCase", "startsWith", "endsWith",
-		"charAt", "replace", "replaceAll", "match",
-		"codePointAt", "charCodeAt", "toString":
-		return true
-	}
-	return false
-}
 
 func isStringLitNode(node *sitter.Node) bool {
 	if node == nil {
@@ -1586,23 +1491,6 @@ func isJSValueExpr(expr ast.Expr) bool {
 }
 
 
-// coerceJSValueArgs wraps JSValue identifier args with fmt.Sprint() so they
-// can be passed to functions expecting string (e.g. regexp.MatchString).
-func (t *Transformer) coerceJSValueArgs(args []ast.Expr, argsNode *sitter.Node) []ast.Expr {
-	if argsNode == nil {
-		return args
-	}
-	out := make([]ast.Expr, len(args))
-	copy(out, args)
-	for i := uint(0); i < argsNode.NamedChildCount() && int(i) < len(out); i++ {
-		argNode := argsNode.NamedChild(i)
-		if argNode != nil && argNode.Kind() == "identifier" && t.isUntypedLocal(argNode.Utf8Text(t.source)) {
-			t.addImport("fmt")
-			out[i] = callExpr(selectorExpr(ident("fmt"), "Sprint"), out[i])
-		}
-	}
-	return out
-}
 
 // wrapAsJSValue wraps an expression with jsvalue.From() so it can be used
 // as a *jsvalue.JSValue value in map literals. Expressions that are already

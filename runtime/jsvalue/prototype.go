@@ -1,6 +1,15 @@
 package jsvalue
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
+
+// safeArg returns args[i] or nil if out of bounds.
+func safeArg(args []*JSValue, i int) *JSValue {
+	if i < len(args) { return args[i] }
+	return nil
+}
 
 // Global prototype singletons.
 var (
@@ -188,6 +197,140 @@ func init() {
 		Writable:     true,
 		Enumerable:   false,
 		Configurable: true,
+	})
+
+	// Helper for defining prototype methods.
+	defMethod := func(proto *JSValue, name string, fn func(args ...*JSValue) *JSValue) {
+		proto.DefineProperty(name, &PropertyDescriptor{
+			Value: NewFunction(fn).MarkAsMethod(), Writable: true, Enumerable: false, Configurable: true,
+		})
+	}
+	defGetter := func(proto *JSValue, name string, fn func(this *JSValue) *JSValue) {
+		proto.DefineProperty(name, &PropertyDescriptor{
+			Get: fn, Enumerable: false, Configurable: true,
+		})
+	}
+
+	// --- StringPrototype methods ---
+
+	defMethod(StringPrototype, "toLowerCase", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("") }
+		return NewString(strings.ToLower(args[0].String()))
+	})
+	defMethod(StringPrototype, "toUpperCase", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("") }
+		return NewString(strings.ToUpper(args[0].String()))
+	})
+	defMethod(StringPrototype, "trim", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("") }
+		return NewString(strings.TrimSpace(args[0].String()))
+	})
+	defMethod(StringPrototype, "trimStart", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("") }
+		return NewString(strings.TrimLeft(args[0].String(), " \t\n\r"))
+	})
+	defMethod(StringPrototype, "trimEnd", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("") }
+		return NewString(strings.TrimRight(args[0].String(), " \t\n\r"))
+	})
+	defMethod(StringPrototype, "split", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewArray() }
+		return Split(args[0], safeArg(args, 1))
+	})
+	defMethod(StringPrototype, "replace", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("") }
+		return Replace(args[0], safeArg(args, 1), safeArg(args, 2))
+	})
+	defMethod(StringPrototype, "replaceAll", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("") }
+		return Replace(args[0], safeArg(args, 1), safeArg(args, 2))
+	})
+	defMethod(StringPrototype, "charAt", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("") }
+		return CharAt(args[0], safeArg(args, 1))
+	})
+	defMethod(StringPrototype, "indexOf", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil { return NewNumber(-1) }
+		s := args[0].String()
+		sub := args[1].String()
+		return NewNumber(float64(strings.Index(s, sub)))
+	})
+	defMethod(StringPrototype, "lastIndexOf", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewNumber(-1) }
+		return LastIndexOf(args[0], safeArg(args, 1))
+	})
+	defMethod(StringPrototype, "substring", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("") }
+		extras := args[2:]
+		return Substring(args[0], safeArg(args, 1), extras...)
+	})
+	defMethod(StringPrototype, "startsWith", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewBool(false) }
+		return StartsWith(args[0], safeArg(args, 1))
+	})
+	defMethod(StringPrototype, "endsWith", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewBool(false) }
+		return EndsWith(args[0], safeArg(args, 1))
+	})
+	defMethod(StringPrototype, "includes", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewBool(false) }
+		return Includes(args[0], safeArg(args, 1))
+	})
+	defMethod(StringPrototype, "repeat", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewString("") }
+		return Repeat(args[0], safeArg(args, 1))
+	})
+	defMethod(StringPrototype, "match", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil { return NewUndefined() }
+		return RegexExec(safeArg(args, 1), args[0])
+	})
+	defMethod(StringPrototype, "search", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil { return NewNumber(-1) }
+		pattern := safeArg(args, 1)
+		if pattern != nil && pattern.typ == TypeRegex && pattern.regexVal != nil {
+			if re, ok := pattern.regexVal.(interface{ FindStringIndex(string) []int }); ok {
+				loc := re.FindStringIndex(args[0].String())
+				if loc != nil { return NewNumber(float64(loc[0])) }
+			}
+		}
+		if pattern != nil {
+			return NewNumber(float64(strings.Index(args[0].String(), pattern.String())))
+		}
+		return NewNumber(-1)
+	})
+	defMethod(StringPrototype, "padStart", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil { return args[0] }
+		s := args[0].String()
+		targetLen := int(args[1].Number())
+		pad := " "
+		if len(args) > 2 && args[2] != nil { pad = args[2].String() }
+		for len([]rune(s)) < targetLen { s = pad + s }
+		return NewString(string([]rune(s)[:targetLen]))
+	})
+	defMethod(StringPrototype, "padEnd", func(args ...*JSValue) *JSValue {
+		if len(args) < 2 || args[0] == nil { return args[0] }
+		s := args[0].String()
+		targetLen := int(args[1].Number())
+		pad := " "
+		if len(args) > 2 && args[2] != nil { pad = args[2].String() }
+		for len([]rune(s)) < targetLen { s = s + pad }
+		return NewString(string([]rune(s)[:targetLen]))
+	})
+	defMethod(StringPrototype, "codePointAt", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewUndefined() }
+		runes := []rune(args[0].String())
+		idx := 0
+		if len(args) > 1 && args[1] != nil { idx = int(args[1].Number()) }
+		if idx < 0 || idx >= len(runes) { return NewUndefined() }
+		return NewNumber(float64(runes[idx]))
+	})
+	defMethod(StringPrototype, "charCodeAt", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil { return NewNumber(0) }
+		runes := []rune(args[0].String())
+		idx := 0
+		if len(args) > 1 && args[1] != nil { idx = int(args[1].Number()) }
+		if idx < 0 || idx >= len(runes) { return NewNumber(0) }
+		return NewNumber(float64(runes[idx]))
 	})
 
 	// NumberPrototype toString returns the number as string.
@@ -388,18 +531,7 @@ func init() {
 		Configurable: true,
 	})
 
-	// --- Additional ArrayPrototype methods (moved from package-level functions) ---
-
-	defMethod := func(proto *JSValue, name string, fn func(args ...*JSValue) *JSValue) {
-		proto.DefineProperty(name, &PropertyDescriptor{
-			Value: NewFunction(fn).MarkAsMethod(), Writable: true, Enumerable: false, Configurable: true,
-		})
-	}
-	defGetter := func(proto *JSValue, name string, fn func(this *JSValue) *JSValue) {
-		proto.DefineProperty(name, &PropertyDescriptor{
-			Get: fn, Enumerable: false, Configurable: true,
-		})
-	}
+	// --- Additional ArrayPrototype methods ---
 
 	// arr.push(...items) — mutates, returns new length
 	defMethod(ArrayPrototype, "push", func(args ...*JSValue) *JSValue {

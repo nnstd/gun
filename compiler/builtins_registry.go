@@ -158,11 +158,10 @@ func (r *BuiltinRegistry) registerJSValuePackageFunctions() {
 		"From", "FromStrings",
 		// Object methods
 		"Keys",
-		// Array/string helper functions (kept as package-level)
+		// Helper functions (kept as package-level)
 		"Slice", "Concat", "Join", "Includes",
-		// String wrapper functions
-		"ToLowerCase", "ToUpperCase", "Trim",
 		"Split", "Replace", "CharAt",
+		"ToLowerCase", "ToUpperCase", "Trim",
 		"StartsWith", "EndsWith", "Repeat",
 		// Logical operators
 		"OrDefault", "And", "Or", "Not", "Nullish",

@@ -479,7 +479,7 @@ func TestJSValueSliceLocalAssignedFromSlice(t *testing.T) {
 func TestSplitOnJSValueReturnsJSValue(t *testing.T) {
 	ts := `function f(key) { return key.split("."); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.Split(key,")
+	assertContains(t, out, `MethodCall("split"`)
 }
 
 func TestLenInBoolContext(t *testing.T) {
@@ -759,7 +759,7 @@ func TestForOfDestructuringPreRegistersNames(t *testing.T) {
 	}
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "fmt.Sprint(character)")
+	assertContains(t, out, `MethodCall("codePointAt"`)
 	assertContains(t, out, `_item.Get("segment")`)
 }
 

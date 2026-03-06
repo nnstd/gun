@@ -204,14 +204,14 @@ func TestCharAtOnJSValueUsesRuntime(t *testing.T) {
 	// charAt on a JSValue param should use jsvalue.CharAt wrapper.
 	ts := `function f(s) { return s.charAt(0); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.CharAt(s,")
+	assertContains(t, out, `MethodCall("charAt"`)
 }
 
 func TestCharAtOnStringUsesBuiltin(t *testing.T) {
 	// All-JSValue: even `: string` params are JSValue, so charAt uses jsvalue.CharAt
 	ts := `function f(s: string): string { return s.charAt(0); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.CharAt(s,")
+	assertContains(t, out, `MethodCall("charAt"`)
 }
 
 func TestArrowFuncTrailingReturn(t *testing.T) {
@@ -326,7 +326,7 @@ func TestJSValueComparedWithOwnStringMethod(t *testing.T) {
 	// str !== str.toLowerCase() where str is JSValue should use jsvalue wrappers.
 	ts := `function f(str) { return str !== str.toLowerCase(); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.NEq(jsvalue.From(str), jsvalue.ToLowerCase(str))")
+	assertContains(t, out, `MethodCall("toLowerCase"`)
 }
 
 func TestLocalVarPropertyAccessUsesGet(t *testing.T) {
@@ -358,8 +358,8 @@ func TestMatchResultInBooleanContext(t *testing.T) {
 	return false;
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "FindStringSubmatch")
-	assertContains(t, out, "!= nil")
+	assertContains(t, out, `MethodCall("match"`)
+	// match result handled by prototype method
 	assertNotContains(t, out, ".String()")
 }
 
@@ -373,7 +373,7 @@ func TestMatchResultNotTreatedAsJSValue(t *testing.T) {
 	return "";
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "FindStringSubmatch")
+	assertContains(t, out, `MethodCall("match"`)
 	assertContains(t, out, "m != nil && m.Bool()")
 	assertContains(t, out, "m.Index(0)")
 	// Should not treat match result as JSValue

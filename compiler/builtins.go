@@ -116,19 +116,6 @@ func transformGlobalCall(name string, args []ast.Expr, t *Transformer) ast.Expr 
 
 // transformBuiltinMethod dispatches method calls on arbitrary receivers (e.g. x.push, x.split).
 // Returns nil if the method is not a known builtin.
-func transformBuiltinMethod(obj ast.Expr, prop string, args []ast.Expr, addImport func(string)) ast.Expr {
-	if r := transformStringMethod(obj, prop, args, addImport); r != nil {
-		return r
-	}
-	if r := transformCollectionMethod(obj, prop, args, addImport, false); r != nil {
-		return r
-	}
-	// For typed regex values (not JSValue), use method form directly
-	// JSValue regex is handled separately in expressions.go
-	// regex.test() and regex.exec() are now handled by the JSValue dispatch
-	// path since regex literals are *jsvalue.JSValue with test/exec methods.
-	return nil
-}
 
 // transformBuiltinNew handles `new X(args)` for known builtin types.
 // Returns nil if the type is not a known builtin.

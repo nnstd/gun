@@ -150,9 +150,14 @@ func (t *Transformer) pushTypedScope(names map[string]bool) {
 	t.localScopes = append(t.localScopes, names)
 }
 
-// popScope removes the most recent local scope.
+// popScope removes the most recent local scope and cleans up
+// jsvalueSliceLocals entries that were added in this scope.
 func (t *Transformer) popScope() {
 	if len(t.localScopes) > 0 {
+		scope := t.localScopes[len(t.localScopes)-1]
+		for name := range scope {
+			delete(t.jsvalueSliceLocals, name)
+		}
 		t.localScopes = t.localScopes[:len(t.localScopes)-1]
 	}
 }
