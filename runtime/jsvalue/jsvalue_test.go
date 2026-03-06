@@ -69,11 +69,8 @@ func TestAdd(t *testing.T) {
 	if r.String() != "n=42" {
 		t.Errorf("Add string+num: got %q", r.String())
 	}
-	// Nil safety
-	r = Add(nil, NewNumber(5))
-	if math.IsNaN(r.Number()) {
-		// undefined + 5 = NaN in JS
-	}
+	// Nil safety: Add with nil doesn't panic
+	_ = Add(nil, NewNumber(5))
 }
 
 func TestSub(t *testing.T) {

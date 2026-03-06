@@ -662,17 +662,6 @@ func Truthy(v *JSValue) bool {
 	}
 }
 
-// asArray converts any to *JSValue, handling []*JSValue from Go rest params.
-func asArray(v any) *JSValue {
-	switch val := v.(type) {
-	case *JSValue:
-		return val
-	case []*JSValue:
-		return NewArray(val...)
-	default:
-		return nil
-	}
-}
 
 // IsTruthy returns true if the JSValue is truthy in JavaScript semantics.
 // This is a method version of the Truthy function.

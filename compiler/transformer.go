@@ -446,19 +446,6 @@ func (t *Transformer) isUntypedLocal(name string) bool {
 }
 
 
-// isCrossFileExport checks if goName is declared in another file of the same package.
-func (t *Transformer) isCrossFileExport(goName string) bool {
-	return t.crossFileExports[goName]
-}
-
-// isCrossFileFunction checks if goName is declared as a function in another
-// file of the same package (via cross-file exports from CompilePackage).
-func (t *Transformer) isCrossFileFunction(goName string) bool {
-	if _, ok := t.funcParamCounts[goName]; ok {
-		return true
-	}
-	return false
-}
 
 // registerGoName registers a finalized Go name and returns it.
 // If the name collides with an already-registered name, appends a numeric suffix.

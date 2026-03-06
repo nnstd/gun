@@ -202,10 +202,6 @@ func sliceType(elt ast.Expr) *ast.ArrayType {
 }
 
 
-func compositeLit(typ ast.Expr, elts ...ast.Expr) *ast.CompositeLit {
-	return &ast.CompositeLit{Type: typ, Elts: elts}
-}
-
 // hasReturnValue reports whether the block contains at least one return
 // statement that carries a value.
 // nodeHasReturnValue checks a tree-sitter node for return_statement nodes

@@ -909,44 +909,6 @@ func transpileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string,
 	return allPaths, nil
 }
 
-// transpileNodeModuleRelativeImports transpiles relative imports within a node_module package.
-func transpileNodeModuleRelativeImports(entryFile, outDir, moduleName, pkgName string, verbose bool) ([]string, error) {
-	visited := map[string]bool{}
-	var transpiled []string
-	absEntry, _ := filepath.Abs(entryFile)
-	visited[absEntry] = true
-
-	var walk func(string) error
-	walk = func(tsFile string) error {
-		source, err := os.ReadFile(tsFile)
-		if err != nil {
-			return err
-		}
-		for _, imp := range findRelativeImports(source) {
-			resolved, err := resolveImportFile(imp, filepath.Dir(tsFile))
-			if err != nil {
-				return err
-			}
-			absResolved, _ := filepath.Abs(resolved)
-			if visited[absResolved] {
-				continue
-			}
-			visited[absResolved] = true
-			transpiled = append(transpiled, absResolved)
-
-			outFile := filepath.Join(outDir, strings.TrimSuffix(filepath.Base(resolved), filepath.Ext(resolved))+".go")
-			if err := transpileFile(resolved, outFile, pkgName, moduleName, verbose, true); err != nil {
-				return err
-			}
-			if err := walk(resolved); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-
-	return transpiled, walk(entryFile)
-}
 
 // detectModuleName walks up from the input file to find a go.mod and returns
 // the module name. Returns empty string if not found.
