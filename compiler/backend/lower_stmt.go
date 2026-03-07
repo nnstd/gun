@@ -30,6 +30,14 @@ func (l *Lowerer) lowerStmt(s hir.Stmt) ast.Stmt {
 	}
 	switch s := s.(type) {
 	case *hir.ExprStmt:
+		// Check for assignment expressions that need special handling
+		if assign, ok := s.Expr.(*hir.AssignExpr); ok {
+			return l.lowerAssignStmt(assign)
+		}
+		// Check for update expressions as statements
+		if update, ok := s.Expr.(*hir.UpdateExpr); ok {
+			return l.lowerUpdateStmt(update)
+		}
 		expr := l.lowerExpr(s.Expr)
 		if expr == nil {
 			return nil
@@ -107,8 +115,13 @@ func (l *Lowerer) lowerStmt(s hir.Stmt) ast.Stmt {
 }
 
 func (l *Lowerer) lowerLocalVarDecl(d *hir.VarDecl) ast.Stmt {
-	// Local variable declarations become := assignments
+	var stmts []ast.Stmt
 	for _, decl := range d.Declarators {
+		// Destructuring pattern
+		if decl.Pattern != nil && decl.Init != nil {
+			stmts = append(stmts, l.lowerDestructuring(decl.Pattern, l.lowerExpr(decl.Init))...)
+			continue
+		}
 		if decl.Symbol == nil {
 			continue
 		}
@@ -120,12 +133,118 @@ func (l *Lowerer) lowerLocalVarDecl(d *hir.VarDecl) ast.Stmt {
 		} else {
 			value = goIdent("nil")
 		}
-		return assignDefine(
+		stmts = append(stmts, assignDefine(
 			[]ast.Expr{goIdent(name)},
 			[]ast.Expr{value},
-		)
+		))
+	}
+	if len(stmts) == 1 {
+		return stmts[0]
+	}
+	if len(stmts) > 1 {
+		return &ast.BlockStmt{List: stmts}
 	}
 	return nil
+}
+
+// lowerDestructuring generates assignment statements for a destructuring pattern.
+func (l *Lowerer) lowerDestructuring(pat hir.Pattern, init ast.Expr) []ast.Stmt {
+	l.jsvalueImport()
+	switch p := pat.(type) {
+	case *hir.ObjectPattern:
+		return l.lowerObjectDestructuring(p, init)
+	case *hir.ArrayPattern:
+		return l.lowerArrayDestructuring(p, init)
+	}
+	return nil
+}
+
+func (l *Lowerer) lowerObjectDestructuring(pat *hir.ObjectPattern, init ast.Expr) []ast.Stmt {
+	var stmts []ast.Stmt
+	// Assign init to a temp if it's complex
+	tmpName := "_obj"
+	stmts = append(stmts, assignDefine(
+		[]ast.Expr{goIdent(tmpName)},
+		[]ast.Expr{jsvalueWrapLit(init)},
+	))
+	for _, prop := range pat.Properties {
+		if prop.Value == nil {
+			continue
+		}
+		name := l.emitName(prop.Value)
+		getter := callExpr(selectorExpr(goIdent(tmpName), "Get"), stringLit(prop.Key))
+		stmts = append(stmts, assignDefine(
+			[]ast.Expr{goIdent(name)},
+			[]ast.Expr{getter},
+		))
+		// Default value
+		if prop.Default != nil {
+			defVal := l.lowerExpr(prop.Default)
+			defVal = jsvalueWrapLit(defVal)
+			stmts = append(stmts, &ast.IfStmt{
+				Cond: &ast.BinaryExpr{
+					X: goIdent(name), Op: token.EQL, Y: goIdent("nil"),
+				},
+				Body: blockStmt(assignStmt(
+					[]ast.Expr{goIdent(name)},
+					[]ast.Expr{defVal},
+				)),
+			})
+		}
+	}
+	if pat.Rest != nil {
+		// rest := spread remaining keys (not implemented yet — placeholder)
+		name := l.emitName(pat.Rest)
+		stmts = append(stmts, assignDefine(
+			[]ast.Expr{goIdent(name)},
+			[]ast.Expr{goIdent(tmpName)},
+		))
+	}
+	return stmts
+}
+
+func (l *Lowerer) lowerArrayDestructuring(pat *hir.ArrayPattern, init ast.Expr) []ast.Stmt {
+	var stmts []ast.Stmt
+	tmpName := "_arr"
+	stmts = append(stmts, assignDefine(
+		[]ast.Expr{goIdent(tmpName)},
+		[]ast.Expr{jsvalueWrapLit(init)},
+	))
+	for i, elem := range pat.Elements {
+		if elem == nil || elem.Symbol == nil {
+			continue
+		}
+		name := l.emitName(elem.Symbol)
+		idx := callExpr(selectorExpr(goIdent(tmpName), "Index"), intLit(itoa(i)))
+		stmts = append(stmts, assignDefine(
+			[]ast.Expr{goIdent(name)},
+			[]ast.Expr{idx},
+		))
+		if elem.Default != nil {
+			defVal := l.lowerExpr(elem.Default)
+			defVal = jsvalueWrapLit(defVal)
+			stmts = append(stmts, &ast.IfStmt{
+				Cond: &ast.BinaryExpr{
+					X: goIdent(name), Op: token.EQL, Y: goIdent("nil"),
+				},
+				Body: blockStmt(assignStmt(
+					[]ast.Expr{goIdent(name)},
+					[]ast.Expr{defVal},
+				)),
+			})
+		}
+	}
+	if pat.Rest != nil {
+		name := l.emitName(pat.Rest)
+		stmts = append(stmts, assignDefine(
+			[]ast.Expr{goIdent(name)},
+			[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "Slice"),
+				goIdent(tmpName),
+				callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"),
+					callExpr(goIdent("float64"), intLit(itoa(len(pat.Elements))))))},
+		))
+	}
+	return stmts
 }
 
 func (l *Lowerer) lowerIfStmt(s *hir.IfStmt) *ast.IfStmt {
@@ -334,6 +453,67 @@ func (l *Lowerer) lowerTryCatchStmt(s *hir.TryCatchStmt) ast.Stmt {
 	}
 
 	return &ast.BlockStmt{List: stmts}
+}
+
+// lowerAssignStmt handles assignment expressions as statements.
+// Member assignments: obj.prop = val → obj.Set("prop", val)
+// Subscript assignments: obj[key] = val → obj.Set(key, val)
+// Simple assignments: x = val → x = val
+func (l *Lowerer) lowerAssignStmt(assign *hir.AssignExpr) ast.Stmt {
+	right := l.lowerExpr(assign.Right)
+
+	// Member assignment: obj.prop = val → obj.Set("prop", wrappedVal)
+	if mem, ok := assign.Left.(*hir.MemberExpr); ok {
+		if l.exprIsJSValue(mem.Object) {
+			l.jsvalueImport()
+			obj := l.lowerExpr(mem.Object)
+			val := l.wrapAsJSValue(right)
+			if assign.Op != hir.OpAssign {
+				// Augmented: obj.prop += val → obj.Set("prop", jsvalue.Add(obj.Get("prop"), val))
+				helperName := mapAssignOpToJSValue(assign.Op)
+				current := callExpr(selectorExpr(obj, "Get"), stringLit(mem.Property))
+				val = callExpr(selectorExpr(goIdent("jsvalue"), helperName), current, val)
+			}
+			return exprStmt(callExpr(selectorExpr(obj, "Set"), stringLit(mem.Property), val))
+		}
+	}
+
+	// Subscript assignment: obj[key] = val → obj.Set(fmt.Sprint(key), wrappedVal)
+	if comp, ok := assign.Left.(*hir.ComputedMemberExpr); ok {
+		if l.exprIsJSValue(comp.Object) {
+			l.jsvalueImport()
+			l.addImport("fmt")
+			obj := l.lowerExpr(comp.Object)
+			key := l.lowerExpr(comp.Property)
+			val := l.wrapAsJSValue(right)
+			return exprStmt(callExpr(selectorExpr(obj, "Set"),
+				callExpr(selectorExpr(goIdent("fmt"), "Sprint"), key), val))
+		}
+	}
+
+	// Simple variable assignment
+	left := l.lowerExpr(assign.Left)
+	if assign.Op == hir.OpAssign {
+		return assignStmt([]ast.Expr{left}, []ast.Expr{jsvalueWrapLit(right)})
+	}
+	// Augmented assignment: x += val → x = jsvalue.Add(x, val)
+	l.jsvalueImport()
+	helperName := mapAssignOpToJSValue(assign.Op)
+	computed := callExpr(selectorExpr(goIdent("jsvalue"), helperName),
+		jsvalueWrapLit(left), jsvalueWrapLit(right))
+	return assignStmt([]ast.Expr{left}, []ast.Expr{computed})
+}
+
+// lowerUpdateStmt handles update expressions (x++, x--) as statements.
+func (l *Lowerer) lowerUpdateStmt(update *hir.UpdateExpr) ast.Stmt {
+	l.jsvalueImport()
+	operand := l.lowerExpr(update.Operand)
+	if update.Op == hir.OpInc {
+		return assignStmt([]ast.Expr{operand},
+			[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "Inc"), operand)})
+	}
+	return assignStmt([]ast.Expr{operand},
+		[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "Dec"), operand)})
 }
 
 // ensureBool wraps a JSValue expression with .Bool() for use in Go conditions.

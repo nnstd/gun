@@ -551,14 +551,26 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 				},
 			})
 		} else {
-			// name := _args[i]
-			idx := &ast.IndexExpr{X: goIdent("_args"), Index: intLit(itoa(i))}
-			stmts = append(stmts, assignDefine(
-				[]ast.Expr{goIdent(name)},
-				[]ast.Expr{idx},
-			))
+			// Bounds-checked unpacking:
+			// var name *jsvalue.JSValue
+			// if len(_args) > i { name = _args[i] }
+			l.jsvalueImport()
+			stmts = append(stmts, &ast.DeclStmt{
+				Decl: varDecl(name, jsValuePtrType(), nil),
+			})
+			stmts = append(stmts, &ast.IfStmt{
+				Cond: &ast.BinaryExpr{
+					X:  callExpr(goIdent("len"), goIdent("_args")),
+					Op: token.GTR,
+					Y:  intLit(itoa(i)),
+				},
+				Body: blockStmt(assignStmt(
+					[]ast.Expr{goIdent(name)},
+					[]ast.Expr{&ast.IndexExpr{X: goIdent("_args"), Index: intLit(itoa(i))}},
+				)),
+			})
 
-			// Default value handling
+			// Default value or nil→undefined handling
 			if p.Default != nil {
 				defVal := l.lowerExpr(p.Default)
 				defVal = jsvalueWrapLit(defVal)
@@ -568,11 +580,10 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 						Op: token.EQL,
 						Y:  goIdent("nil"),
 					},
-					Body: blockStmt(&ast.AssignStmt{
-						Lhs: []ast.Expr{goIdent(name)},
-						Tok: token.ASSIGN,
-						Rhs: []ast.Expr{defVal},
-					}),
+					Body: blockStmt(assignStmt(
+						[]ast.Expr{goIdent(name)},
+						[]ast.Expr{defVal},
+					)),
 				})
 			}
 		}
