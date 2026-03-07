@@ -353,5 +353,9 @@ func (t *Transformer) resolveIdentifier(name string) ast.Expr {
 		// Named import — return pkg.Symbol
 		return selectorExpr(ident(imp.goPkgName), imp.goSymbol)
 	}
-	return mapIdentifier(name, t.addImport)
+	// Try context-registered identifiers first, fall back to mapIdentifier
+	if expr := t.ctx.TransformIdentifier(name, t); expr != nil {
+		return expr
+	}
+	return ident(sanitizeIdent(name))
 }

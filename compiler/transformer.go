@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	tcontext "github.com/nnstd/gun/compiler/context"
 	sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -39,9 +40,13 @@ type Transformer struct {
 	inClassMethod      bool                       // true when transforming a class method body (arguments offset by 1 for this)
 	currentClassParent ast.Expr                   // parent class expression for super() calls in constructors
 	builtins           *BuiltinRegistry           // registry of built-in methods and their metadata
+	ctx                *tcontext.TranspilerContext // unified registry for builtins, globals, modules
 }
 
 func newTransformer(source []byte, pkgName, moduleName string, samePackageImports bool) *Transformer {
+	ctx := tcontext.New()
+	registerDefaultBuiltins(ctx)
+
 	return &Transformer{
 		source:             source,
 		pkgName:            pkgName,
@@ -63,6 +68,7 @@ func newTransformer(source []byte, pkgName, moduleName string, samePackageImport
 		goNameRemap:        make(map[string]string),
 		immutableLocals:    make(map[string]bool),
 		builtins:           NewBuiltinRegistry(),
+		ctx:                ctx,
 	}
 }
 
@@ -137,6 +143,16 @@ func (t *Transformer) addImport(pkg string) {
 
 func (t *Transformer) addAliasedImport(pkg, alias string) {
 	t.imports[pkg] = alias
+}
+
+// AddImport implements context.Imports.
+func (t *Transformer) AddImport(pkg string) {
+	t.addImport(pkg)
+}
+
+// AddAliasedImport implements context.Imports.
+func (t *Transformer) AddAliasedImport(pkg, alias string) {
+	t.addAliasedImport(pkg, alias)
 }
 
 // pushScope starts a new local scope (e.g. when entering a function body).

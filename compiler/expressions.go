@@ -618,7 +618,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			}
 
 			// Known global objects (console, Math, JSON, Object)
-			if r := transformBuiltinCall(objText, prop, args, t.addImport); r != nil {
+			if r := t.ctx.TransformBuiltinCall(objText, prop, args, t); r != nil {
 				return r
 			}
 
@@ -713,7 +713,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 	if fnNode.Kind() == "identifier" {
 		name := fnNode.Utf8Text(t.source)
 		args := t.transformArgs(argsNode)
-		if r := transformGlobalCall(name, args, t); r != nil {
+		if r := t.ctx.TransformGlobalCall(name, args, t); r != nil {
 			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			return r
 		}
@@ -809,19 +809,8 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 	return callExpr(fun, args...)
 }
 
-// isKnownGlobalObject returns true if the name is a known JS/Go global object
-// (console, Math, JSON, Object, process, etc.) that should NOT get .Get() dispatch.
-func isKnownGlobalObject(name string) bool {
-	switch name {
-	case "console", "Math", "JSON", "Object", "Array", "Number", "Boolean",
-		"Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError",
-		"Date", "RegExp", "Symbol",
-		"process", "module", "require", "globalThis",
-		"undefined", "null", "NaN", "Infinity":
-		return true
-	}
-	return false
-}
+// NOTE: isKnownGlobalObject has been replaced by t.ctx.IsKnownGlobal().
+// All known globals are registered via registerDefaultBuiltins() in context_defaults.go.
 
 // isObjectPrototypeHasOwnProperty checks if a tree-sitter node represents
 // the pattern Object.prototype.hasOwnProperty (a 3-level member chain).
@@ -1068,9 +1057,9 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 		}
 	}
 
-	// process.X → Go equivalents
-	if objNode.Kind() == "identifier" && objNode.Utf8Text(t.source) == "process" {
-		if r := transformProcessMember(prop, t.addImport); r != nil {
+	// Global object member access (e.g. process.env, process.argv)
+	if objNode.Kind() == "identifier" {
+		if r := t.ctx.TransformBuiltinMember(objNode.Utf8Text(t.source), prop, t); r != nil {
 			return r
 		}
 	}
@@ -1136,7 +1125,7 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 		name := objNode.Utf8Text(t.source)
 		_, isImported := t.importedNames[name]
 		_, isOwnPkgVar := t.pkgVarTyped[name]
-		isKnownGlobal := isKnownGlobalObject(name)
+		isKnownGlobal := t.ctx.IsKnownGlobal(name)
 		if !isImported && !isKnownGlobal && !t.isLocalName(name) && !isOwnPkgVar {
 			t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			return callExpr(selectorExpr(obj, "Get"), stringLit(prop))
@@ -1977,7 +1966,7 @@ func (t *Transformer) transformNewExpr(node *sitter.Node) ast.Expr {
 	args := t.transformArgs(argsNode)
 
 	// Try builtin new expressions first
-	if r := transformBuiltinNew(name, args, t); r != nil {
+	if r := t.ctx.TransformBuiltinNew(name, args, t); r != nil {
 		return r
 	}
 
