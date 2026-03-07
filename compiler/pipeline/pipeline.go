@@ -69,7 +69,8 @@ func NewWithContext(level OptLevel, ctx *context.TranspilerContext) *Pipeline {
 
 // CompileTree compiles a parsed tree-sitter CST into Go source code.
 // This is the full pipeline: CST → HIR → MIR → SSA → Passes → De-SSA → Backend → Codegen.
-func (p *Pipeline) CompileTree(root *sitter.Node, source []byte, pkgName string) ([]byte, error) {
+// moduleName is the Go module name for resolving relative imports.
+func (p *Pipeline) CompileTree(root *sitter.Node, source []byte, pkgName, moduleName string, samePackageImports bool) ([]byte, error) {
 	// Stage 1: Build HIR
 	hirMod := hir.BuildModule(root, source, pkgName)
 	if p.OnHIR != nil {
@@ -103,14 +104,14 @@ func (p *Pipeline) CompileTree(root *sitter.Node, source []byte, pkgName string)
 	// Stage 6: Backend lowering (HIR → Go AST)
 	// Note: currently the backend lowers from HIR directly.
 	// Once MIR→Go lowering is implemented, this will use mirMod instead.
-	goFile := backend.Lower(hirMod, p.Ctx)
+	goFile := backend.Lower(hirMod, p.Ctx, moduleName, samePackageImports)
 
 	// Stage 7: Codegen
 	return backend.Generate(goFile)
 }
 
 // CompileHIR compiles from an already-built HIR module.
-func (p *Pipeline) CompileHIR(hirMod *hir.Module) ([]byte, error) {
-	goFile := backend.Lower(hirMod, p.Ctx)
+func (p *Pipeline) CompileHIR(hirMod *hir.Module, moduleName string, samePackageImports bool) ([]byte, error) {
+	goFile := backend.Lower(hirMod, p.Ctx, moduleName, samePackageImports)
 	return backend.Generate(goFile)
 }

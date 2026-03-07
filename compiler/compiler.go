@@ -65,7 +65,7 @@ func CompileWithExports(source []byte, pkgName, moduleName, currentFile string, 
 // CompileNewPipeline transpiles TypeScript source using the new multi-stage pipeline
 // (HIR → MIR → SSA → Passes → Backend). This is the experimental path that uses
 // hygienic symbol IDs and the full optimization pipeline.
-func CompileNewPipeline(source []byte, pkgName string, optLevel int) ([]byte, error) {
+func CompileNewPipeline(source []byte, pkgName, moduleName string, optLevel int) ([]byte, error) {
 	tree, err := parseTypeScript(source)
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
@@ -78,7 +78,7 @@ func CompileNewPipeline(source []byte, pkgName string, optLevel int) ([]byte, er
 	level := pipeline.OptLevel(optLevel)
 	p := pipeline.NewWithContext(level, ctx)
 
-	return p.CompileTree(tree.RootNode(), source, pkgName)
+	return p.CompileTree(tree.RootNode(), source, pkgName, moduleName, false)
 }
 
 // CompilePackage transpiles multiple TypeScript files that belong to the

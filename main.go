@@ -220,13 +220,14 @@ func transpileFile(inputPath, outputPath, pkgName, moduleName string, verbose, s
 		fmt.Fprintf(os.Stderr, "compiling %s\n", inputPath)
 	}
 
+	if moduleName == "" {
+		moduleName = detectModuleName(inputPath)
+	}
+
 	var result []byte
 	if usePipeline {
-		result, err = compiler.CompileNewPipeline(source, pkgName, optLevel)
+		result, err = compiler.CompileNewPipeline(source, pkgName, moduleName, optLevel)
 	} else {
-		if moduleName == "" {
-			moduleName = detectModuleName(inputPath)
-		}
 		result, err = compiler.Compile(source, pkgName, moduleName, samePackageImports)
 	}
 	if err != nil {

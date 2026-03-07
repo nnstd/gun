@@ -32,7 +32,7 @@ func compile(t *testing.T, source string, level OptLevel) string {
 	tree := parseTS(t, source)
 	defer tree.Close()
 	p := New(level)
-	out, err := p.CompileTree(tree.RootNode(), []byte(source), "main")
+	out, err := p.CompileTree(tree.RootNode(), []byte(source), "main", "", false)
 	if err != nil {
 		t.Fatalf("compile failed: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestHooks(t *testing.T) {
 	p.OnMIR = func(mod *mir.Module) { mirCalled = true }
 	p.OnSSA = func(mod *ssa.Module) { ssaCalled = true }
 
-	_, err := p.CompileTree(tree.RootNode(), []byte(`const x = 42;`), "main")
+	_, err := p.CompileTree(tree.RootNode(), []byte(`const x = 42;`), "main", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestCompileHIR(t *testing.T) {
 
 	hirMod := hir.BuildModule(tree.RootNode(), []byte(`const x = 42;`), "main")
 	p := New(O0)
-	out, err := p.CompileHIR(hirMod)
+	out, err := p.CompileHIR(hirMod, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

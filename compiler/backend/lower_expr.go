@@ -3,9 +3,11 @@ package backend
 import (
 	"go/ast"
 	"go/token"
+	"path"
 	"strings"
 
 	"github.com/nnstd/gun/compiler/hir"
+	"github.com/nnstd/gun/compiler/symbol"
 )
 
 // --------------------------------------------------------------------
@@ -114,7 +116,32 @@ func (l *Lowerer) lowerExpr(e hir.Expr) ast.Expr {
 }
 
 func (l *Lowerer) lowerIdentifier(e *hir.Identifier) ast.Expr {
+	// Check imported symbols first
 	if e.Sym != nil {
+		if res, ok := l.importedSyms[e.Sym]; ok {
+			// Add the import
+			if res.goImportPath != "" {
+				if res.goPkgName != "" && res.goPkgName != path.Base(res.goImportPath) {
+					l.addAliasedImport(res.goImportPath, res.goPkgName)
+				} else if res.goImportPath != "" {
+					l.addImport(res.goImportPath)
+				}
+			}
+			// Namespace import (no goSymbol)
+			if res.goSymbol == "" {
+				if res.goPkgName == "" {
+					return goIdent(e.Sym.OriginalName)
+				}
+				return goIdent(res.goPkgName)
+			}
+			// Same-package reference
+			if res.goPkgName == "" {
+				return goIdent(res.goSymbol)
+			}
+			// Named import: pkg.Symbol
+			return selectorExpr(goIdent(res.goPkgName), res.goSymbol)
+		}
+		// Non-imported symbol — use emitName
 		return goIdent(l.emitName(e.Sym))
 	}
 	// Unresolved — check context for known identifiers
@@ -314,6 +341,32 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 				}
 			}
 		}
+
+		// JSValue method dispatch: obj.method(args) → obj.MethodCall("method", wrappedArgs...)
+		if l.exprIsJSValue(mem.Object) {
+			l.jsvalueImport()
+			obj := l.lowerExpr(mem.Object)
+			var wrappedArgs []ast.Expr
+			wrappedArgs = append(wrappedArgs, stringLit(mem.Property))
+			for _, a := range e.Args {
+				wrappedArgs = append(wrappedArgs, l.wrapAsJSValue(l.lowerExpr(a)))
+			}
+			// For complex receivers, wrap in IIFE to evaluate once
+			if !l.isSimpleExpr(obj) {
+				recv := goIdent("_recv")
+				recvArgs := make([]ast.Expr, len(wrappedArgs))
+				copy(recvArgs, wrappedArgs)
+				innerCall := callExpr(selectorExpr(recv, "MethodCall"), recvArgs...)
+				return callExpr(&ast.FuncLit{
+					Type: &ast.FuncType{
+						Params:  fieldList(goField("_recv", jsValuePtrType())),
+						Results: fieldList(goField("", jsValuePtrType())),
+					},
+					Body: blockStmt(returnStmt(innerCall)),
+				}, obj)
+			}
+			return callExpr(selectorExpr(obj, "MethodCall"), wrappedArgs...)
+		}
 	}
 
 	// Check for bare global function calls: parseInt(), isNaN(), etc.
@@ -331,6 +384,25 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 				return result
 			}
 		}
+
+		// JSValue function call: fn(args) → fn.Call(wrappedArgs...)
+		if id.Sym != nil {
+			isJSValueFunc := false
+			if res, ok := l.importedSyms[id.Sym]; ok && res.isTranspiled {
+				isJSValueFunc = true
+			} else if id.Sym.Kind == symbol.KindVariable || id.Sym.Kind == symbol.KindParameter {
+				isJSValueFunc = true
+			}
+			if isJSValueFunc {
+				l.jsvalueImport()
+				fn := l.lowerIdentifier(id)
+				var wrappedArgs []ast.Expr
+				for _, a := range e.Args {
+					wrappedArgs = append(wrappedArgs, l.wrapAsJSValue(l.lowerExpr(a)))
+				}
+				return callExpr(selectorExpr(fn, "Call"), wrappedArgs...)
+			}
+		}
 	}
 
 	fn := l.lowerExpr(e.Func)
@@ -338,7 +410,37 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 	for _, a := range e.Args {
 		args = append(args, l.lowerExpr(a))
 	}
+
+	// If the lowered function expression is already JSValue (e.g. .Get() result),
+	// use .Call() to invoke it
+	if isAlreadyJSValue(fn) {
+		l.jsvalueImport()
+		for i, a := range args {
+			args[i] = jsvalueWrapLit(a)
+		}
+		return callExpr(selectorExpr(fn, "Call"), args...)
+	}
+
 	return callExpr(fn, args...)
+}
+
+// wrapAsJSValue wraps an expression to ensure it's *jsvalue.JSValue.
+func (l *Lowerer) wrapAsJSValue(expr ast.Expr) ast.Expr {
+	if isAlreadyJSValue(expr) {
+		return expr
+	}
+	return jsvalueWrapLit(expr)
+}
+
+// isSimpleExpr returns true if the expression is safe to duplicate (ident or selector).
+func (l *Lowerer) isSimpleExpr(expr ast.Expr) bool {
+	switch expr.(type) {
+	case *ast.Ident:
+		return true
+	case *ast.SelectorExpr:
+		return true
+	}
+	return false
 }
 
 func (l *Lowerer) lowerNewExpr(e *hir.NewExpr) ast.Expr {
@@ -371,9 +473,7 @@ func (l *Lowerer) lowerNewExpr(e *hir.NewExpr) ast.Expr {
 }
 
 func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
-	obj := l.lowerExpr(e.Object)
-
-	// Check for builtin member access through context
+	// Check for builtin member access through context (e.g. process.env)
 	if id, ok := e.Object.(*hir.Identifier); ok {
 		name := id.Name
 		if id.Sym != nil {
@@ -386,8 +486,71 @@ func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 		}
 	}
 
-	// Default: obj.Get("prop")
+	obj := l.lowerExpr(e.Object)
+
+	// .length → .Len() for JSValue, len() for typed
+	if e.Property == "length" {
+		if l.exprIsJSValue(e.Object) {
+			return callExpr(selectorExpr(obj, "Len"))
+		}
+		return callExpr(goIdent("len"), obj)
+	}
+
+	// JSValue receivers → .Get("prop")
+	if l.exprIsJSValue(e.Object) {
+		l.jsvalueImport()
+		return callExpr(selectorExpr(obj, "Get"), stringLit(e.Property))
+	}
+
+	// Known globals (console, Math, etc.) → capitalize
+	if id, ok := e.Object.(*hir.Identifier); ok {
+		name := id.Name
+		if id.Sym != nil {
+			name = id.Sym.OriginalName
+		}
+		if l.ctx != nil && l.ctx.IsKnownGlobal(name) {
+			return selectorExpr(obj, symbol.Capitalize(e.Property))
+		}
+		// Imported known-module symbols → capitalize
+		if id.Sym != nil {
+			if res, ok := l.importedSyms[id.Sym]; ok && !res.isTranspiled {
+				return selectorExpr(obj, symbol.Capitalize(e.Property))
+			}
+		}
+	}
+
+	// Default for unknown: use .Get() (safer — assumes JSValue)
+	l.jsvalueImport()
 	return callExpr(selectorExpr(obj, "Get"), stringLit(e.Property))
+}
+
+// exprIsJSValue returns true if the HIR expression is known to produce *jsvalue.JSValue.
+func (l *Lowerer) exprIsJSValue(e hir.Expr) bool {
+	switch e := e.(type) {
+	case *hir.Identifier:
+		if e.Sym == nil {
+			if l.ctx != nil && l.ctx.IsKnownGlobal(e.Name) {
+				return false
+			}
+			return true
+		}
+		if res, ok := l.importedSyms[e.Sym]; ok {
+			return res.isTranspiled
+		}
+		if e.Sym.Kind == symbol.KindParameter || e.Sym.Kind == symbol.KindVariable {
+			return true
+		}
+		return false
+	case *hir.ThisExpr, *hir.CallExpr, *hir.NewExpr, *hir.MemberExpr,
+		*hir.ComputedMemberExpr, *hir.ArrayLiteral, *hir.ObjectLiteral,
+		*hir.BinaryExpr, *hir.UnaryExpr, *hir.ArrowFunc, *hir.FuncExpr,
+		*hir.TernaryExpr, *hir.TemplateLiteral:
+		return true
+	case *hir.Literal:
+		return false
+	default:
+		return true
+	}
 }
 
 func (l *Lowerer) lowerTernaryExpr(e *hir.TernaryExpr) ast.Expr {

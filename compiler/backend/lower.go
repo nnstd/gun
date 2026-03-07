@@ -4,26 +4,42 @@ import (
 	"go/ast"
 	"go/token"
 	"path"
+	"path/filepath"
+	"strings"
 
 	"github.com/nnstd/gun/compiler/context"
 	"github.com/nnstd/gun/compiler/hir"
 	"github.com/nnstd/gun/compiler/symbol"
 )
 
+// importResolution describes how an imported symbol maps to Go.
+type importResolution struct {
+	goImportPath string
+	goPkgName    string
+	goSymbol     string
+	isTranspiled bool
+}
+
 // Lowerer converts an HIR Module into a go/ast.File.
 type Lowerer struct {
-	symtab  *symbol.Table
-	ctx     *context.TranspilerContext
-	imports map[string]string // Go import path → alias
-	decls   []ast.Decl
+	symtab       *symbol.Table
+	ctx          *context.TranspilerContext
+	imports      map[string]string                    // Go import path → alias
+	decls        []ast.Decl
+	importedSyms map[*symbol.Symbol]importResolution  // how each imported symbol resolves to Go
+	moduleName   string                               // Go module name for relative import resolution
+	samePackage  bool                                 // treat relative imports as same-package refs
 }
 
 // Lower converts an HIR module to a Go AST file.
-func Lower(mod *hir.Module, ctx *context.TranspilerContext) *ast.File {
+func Lower(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool) *ast.File {
 	l := &Lowerer{
-		symtab:  mod.SymbolTable,
-		ctx:     ctx,
-		imports: make(map[string]string),
+		symtab:       mod.SymbolTable,
+		ctx:          ctx,
+		imports:      make(map[string]string),
+		importedSyms: make(map[*symbol.Symbol]importResolution),
+		moduleName:   moduleName,
+		samePackage:  samePackageImports,
 	}
 
 	// Lower all declarations
@@ -353,18 +369,136 @@ func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 }
 
 func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
-	if l.ctx == nil {
-		return
-	}
-	// Resolve module through the context
-	mod := l.ctx.LookupModule(d.ModulePath)
-	if mod != nil {
-		if mod.GoPkgName != "" && mod.GoPkgName != path.Base(mod.GoImportPath) {
-			l.addAliasedImport(mod.GoImportPath, mod.GoPkgName)
-		} else if mod.GoImportPath != "" {
-			l.addImport(mod.GoImportPath)
+	// Resolve the module path to Go import path + package name
+	goImportPath, goPkgName, isKnown := l.resolveModule(d.ModulePath)
+
+	// Look up symbol overrides for known modules
+	var overrides map[string]context.SymbolOverride
+	if l.ctx != nil {
+		if mod := l.ctx.LookupModule(d.ModulePath); mod != nil {
+			overrides = mod.SymbolOverrides
 		}
 	}
+
+	// Process default import
+	if d.Default != nil && d.Default.Symbol != nil {
+		if isKnown {
+			// Default import from known module acts as namespace: import fs from "fs" → package alias
+			l.importedSyms[d.Default.Symbol] = importResolution{
+				goImportPath: goImportPath,
+				goPkgName:    goPkgName,
+				goSymbol:     "", // empty = namespace
+				isTranspiled: false,
+			}
+		} else {
+			goSym := "Default"
+			if l.samePackage && isRelativeImport(d.ModulePath) && !strings.HasPrefix(d.ModulePath, "..") {
+				goSym = fileSpecificDefaultName(d.ModulePath)
+			}
+			if overrides != nil {
+				if ov, ok := overrides["default"]; ok {
+					goSym = ov.GoSymbol
+				}
+			}
+			l.importedSyms[d.Default.Symbol] = importResolution{
+				goImportPath: goImportPath,
+				goPkgName:    goPkgName,
+				goSymbol:     goSym,
+				isTranspiled: true,
+			}
+		}
+	}
+
+	// Process named imports
+	for _, n := range d.Named {
+		if n.Symbol == nil {
+			continue
+		}
+		goSym := symbol.Capitalize(n.OriginalName)
+		if overrides != nil {
+			if ov, ok := overrides[n.OriginalName]; ok {
+				goSym = ov.GoSymbol
+			}
+		}
+		l.importedSyms[n.Symbol] = importResolution{
+			goImportPath: goImportPath,
+			goPkgName:    goPkgName,
+			goSymbol:     goSym,
+			isTranspiled: !isKnown,
+		}
+	}
+
+	// Process namespace import
+	if d.Namespace != nil && d.Namespace.Symbol != nil {
+		l.importedSyms[d.Namespace.Symbol] = importResolution{
+			goImportPath: goImportPath,
+			goPkgName:    goPkgName,
+			goSymbol:     "", // empty = namespace
+			isTranspiled: !isKnown,
+		}
+	}
+}
+
+// resolveModule resolves a TS module path to Go import path and package name.
+func (l *Lowerer) resolveModule(modulePath string) (goImportPath, goPkgName string, isKnown bool) {
+	// Check context-registered known modules
+	if l.ctx != nil {
+		if mod := l.ctx.LookupModule(modulePath); mod != nil {
+			return mod.GoImportPath, mod.GoPkgName, true
+		}
+	}
+
+	// Transpiled module — compute Go path
+	if isRelativeImport(modulePath) {
+		if l.samePackage {
+			return "", "", false
+		}
+		clean := strings.TrimSuffix(modulePath, ".ts")
+		clean = strings.TrimSuffix(clean, ".js")
+		clean = strings.TrimSuffix(clean, ".mjs")
+		pkgName := filepath.Base(clean)
+		modName := l.moduleName
+		if modName == "" {
+			modName = "main"
+		}
+		goPath := path.Clean(modName + "/" + strings.TrimPrefix(clean, "./"))
+		return goPath, pkgName, false
+	}
+
+	// Third-party package
+	pkgName := sanitizeGoPkgName(modulePath)
+	if l.moduleName != "" {
+		return l.moduleName + "/" + pkgName, pkgName, false
+	}
+	return pkgName, pkgName, false
+}
+
+func isRelativeImport(p string) bool {
+	return strings.HasPrefix(p, ".")
+}
+
+func sanitizeGoPkgName(npmName string) string {
+	name := strings.TrimPrefix(npmName, "@")
+	name = strings.ReplaceAll(name, "/", "_")
+	name = strings.ReplaceAll(name, "-", "_")
+	return name
+}
+
+func fileSpecificDefaultName(modulePath string) string {
+	base := path.Base(modulePath)
+	base = strings.TrimSuffix(base, path.Ext(base))
+	name := ""
+	for _, r := range base {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			name += string(r)
+		} else {
+			name += "_"
+		}
+	}
+	if name == "" {
+		name = "FileDefault"
+	}
+	return strings.ToUpper(name[:1]) + name[1:] + "Default"
 }
 
 func (l *Lowerer) lowerTopLevelStmt(d *hir.TopLevelStmt) {

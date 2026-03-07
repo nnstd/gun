@@ -34,7 +34,7 @@ func lowerTS(t *testing.T, source string) string {
 
 	mod := hir.BuildModule(tree.RootNode(), []byte(source), "main")
 	ctx := context.New()
-	file := Lower(mod, ctx)
+	file := Lower(mod, ctx, "", false)
 	out, err := Generate(file)
 	if err != nil {
 		t.Fatalf("generate failed: %v", err)
@@ -91,7 +91,7 @@ func TestLowerFuncDecl(t *testing.T) {
 		},
 	}
 
-	file := Lower(mod, context.New())
+	file := Lower(mod, context.New(), "", false)
 	out, err := Generate(file)
 	if err != nil {
 		t.Fatalf("generate failed: %v", err)
@@ -119,7 +119,7 @@ func TestLowerVarDecl(t *testing.T) {
 		},
 	}
 
-	file := Lower(mod, context.New())
+	file := Lower(mod, context.New(), "", false)
 	out, err := Generate(file)
 	if err != nil {
 		t.Fatalf("generate failed: %v", err)
@@ -145,7 +145,7 @@ func TestLowerMainFunc(t *testing.T) {
 		},
 	}
 
-	file := Lower(mod, context.New())
+	file := Lower(mod, context.New(), "", false)
 	out, err := Generate(file)
 	if err != nil {
 		t.Fatalf("generate failed: %v", err)
@@ -184,7 +184,7 @@ func TestLowerIfStatement(t *testing.T) {
 		},
 	}
 
-	file := Lower(mod, context.New())
+	file := Lower(mod, context.New(), "", false)
 	out, err := Generate(file)
 	if err != nil {
 		t.Fatalf("generate failed: %v", err)
@@ -222,7 +222,7 @@ func TestLowerClassDecl(t *testing.T) {
 		},
 	}
 
-	file := Lower(mod, context.New())
+	file := Lower(mod, context.New(), "", false)
 	out, err := Generate(file)
 	if err != nil {
 		t.Fatalf("generate failed: %v", err)
@@ -253,7 +253,7 @@ func TestLowerEnumDecl(t *testing.T) {
 		},
 	}
 
-	file := Lower(mod, context.New())
+	file := Lower(mod, context.New(), "", false)
 	out, err := Generate(file)
 	if err != nil {
 		t.Fatalf("generate failed: %v", err)
@@ -377,7 +377,7 @@ func TestGenerateProducesValidGo(t *testing.T) {
 	for _, ts := range snippets {
 		tree := parseTS(t, ts)
 		mod := hir.BuildModule(tree.RootNode(), []byte(ts), "main")
-		file := Lower(mod, context.New())
+		file := Lower(mod, context.New(), "", false)
 		_, err := Generate(file)
 		tree.Close()
 		if err != nil {
