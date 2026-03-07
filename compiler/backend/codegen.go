@@ -21,9 +21,10 @@ func Generate(file *ast.File) ([]byte, error) {
 
 	var buf bytes.Buffer
 	if err := format.Node(&buf, fset, file); err != nil {
-		// Fallback: use raw printer (less pretty but valid Go)
+		// Fallback: use raw printer with explicit line breaks
 		buf.Reset()
-		if err2 := printer.Fprint(&buf, fset, file); err2 != nil {
+		cfg := &printer.Config{Mode: printer.TabIndent, Tabwidth: 4}
+		if err2 := cfg.Fprint(&buf, fset, file); err2 != nil {
 			return nil, err2
 		}
 		return buf.Bytes(), nil

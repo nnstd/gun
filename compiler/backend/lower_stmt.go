@@ -575,6 +575,13 @@ func (l *Lowerer) isNativeBool(expr ast.Expr) bool {
 		if e.Op == token.NOT {
 			return true
 		}
+	case *ast.ParenExpr:
+		return l.isNativeBool(e.X)
+	case *ast.CallExpr:
+		// .Bool() itself returns bool
+		if sel, ok := e.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Bool" {
+			return true
+		}
 	}
 	return false
 }

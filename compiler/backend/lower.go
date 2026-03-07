@@ -241,11 +241,12 @@ func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 		Body: ctorBody,
 	}
 
-	// jsvalue.NewClass(ctorFn, parent?)
-	classArgs := []ast.Expr{ctorLit}
+	// jsvalue.NewClass(ctorFn, parent) — parent is nil if no extends
+	var parentExpr ast.Expr = goIdent("nil")
 	if d.Parent != nil {
-		classArgs = append(classArgs, l.lowerExpr(d.Parent))
+		parentExpr = l.lowerExpr(d.Parent)
 	}
+	classArgs := []ast.Expr{ctorLit, parentExpr}
 	newClassCall := callExpr(selectorExpr(goIdent("jsvalue"), "NewClass"), classArgs...)
 	l.decls = append(l.decls, varDecl(name, nil, newClassCall))
 
@@ -503,6 +504,10 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 			continue
 		}
 		goSym := symbol.Capitalize(n.OriginalName)
+		// Same-package imports: don't capitalize (both files in same Go package)
+		if goImportPath == "" {
+			goSym = n.OriginalName
+		}
 		if overrides != nil {
 			if ov, ok := overrides[n.OriginalName]; ok {
 				goSym = ov.GoSymbol
@@ -613,6 +618,13 @@ func (l *Lowerer) getOrCreateMain() *ast.FuncDecl {
 // prescan collects metadata from HIR declarations before lowering.
 // Records function param counts and marks exported names.
 func (l *Lowerer) prescan(mod *hir.Module) {
+	// Mark symbols as exported if they appear in cross-file exports.
+	// This ensures that e.g. getCategory in lookup.js gets capitalized to GetCategory
+	// when index.js re-exports it.
+	if len(l.crossFileExports) > 0 {
+		l.markCrossFileExported(mod)
+	}
+
 	for _, d := range mod.Declarations {
 		switch d := d.(type) {
 		case *hir.FuncDecl:
@@ -634,6 +646,28 @@ func (l *Lowerer) prescan(mod *hir.Module) {
 				if cd, ok := d.Decl.(*hir.ClassDecl); ok && cd.Symbol != nil {
 					cd.Symbol.Exported = true
 				}
+			}
+		}
+	}
+}
+
+// markCrossFileExported marks symbols whose capitalized name matches a cross-file export.
+func (l *Lowerer) markCrossFileExported(mod *hir.Module) {
+	for _, d := range mod.Declarations {
+		switch d := d.(type) {
+		case *hir.FuncDecl:
+			if d.Symbol != nil && l.crossFileExports[symbol.Capitalize(d.Symbol.OriginalName)] {
+				d.Symbol.Exported = true
+			}
+		case *hir.VarDecl:
+			for _, decl := range d.Declarators {
+				if decl.Symbol != nil && l.crossFileExports[symbol.Capitalize(decl.Symbol.OriginalName)] {
+					decl.Symbol.Exported = true
+				}
+			}
+		case *hir.ClassDecl:
+			if d.Symbol != nil && l.crossFileExports[symbol.Capitalize(d.Symbol.OriginalName)] {
+				d.Symbol.Exported = true
 			}
 		}
 	}
