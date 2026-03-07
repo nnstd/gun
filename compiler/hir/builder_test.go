@@ -440,6 +440,128 @@ func TestPrinterModule(t *testing.T) {
 	assertHIRContains(t, out, "Function process#")
 }
 
+// --- Optional chaining ---
+
+func TestOptionalChainingFlag(t *testing.T) {
+	mod := buildHIR(t, `function f() { return a?.b; }`)
+	// Find the MemberExpr with Optional=true
+	found := false
+	for _, d := range mod.Declarations {
+		fd, ok := d.(*FuncDecl)
+		if !ok || fd.Body == nil {
+			continue
+		}
+		for _, s := range fd.Body.Stmts {
+			rs, ok := s.(*ReturnStmt)
+			if !ok || rs.Value == nil {
+				continue
+			}
+			if me, ok := rs.Value.(*MemberExpr); ok {
+				if me.Optional {
+					found = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected MemberExpr with Optional=true for a?.b")
+	}
+}
+
+func TestNonOptionalMemberFlag(t *testing.T) {
+	mod := buildHIR(t, `function f() { return a.b; }`)
+	for _, d := range mod.Declarations {
+		fd, ok := d.(*FuncDecl)
+		if !ok || fd.Body == nil {
+			continue
+		}
+		for _, s := range fd.Body.Stmts {
+			rs, ok := s.(*ReturnStmt)
+			if !ok || rs.Value == nil {
+				continue
+			}
+			if me, ok := rs.Value.(*MemberExpr); ok {
+				if me.Optional {
+					t.Fatal("a.b should NOT have Optional=true")
+				}
+			}
+		}
+	}
+}
+
+// --- For-of destructuring ---
+
+func TestForOfArrayDestructuring(t *testing.T) {
+	mod := buildHIR(t, `function f() { for (const [k, v] of entries) {} }`)
+	for _, d := range mod.Declarations {
+		fd, ok := d.(*FuncDecl)
+		if !ok || fd.Body == nil {
+			continue
+		}
+		for _, s := range fd.Body.Stmts {
+			fof, ok := s.(*ForOfStmt)
+			if !ok {
+				continue
+			}
+			if fof.Pattern == nil {
+				t.Fatal("expected Pattern on ForOfStmt for [k, v] destructuring")
+			}
+			ap, ok := fof.Pattern.(*ArrayPattern)
+			if !ok {
+				t.Fatalf("expected ArrayPattern, got %T", fof.Pattern)
+			}
+			if len(ap.Elements) != 2 {
+				t.Fatalf("expected 2 elements, got %d", len(ap.Elements))
+			}
+			return
+		}
+	}
+	t.Fatal("did not find ForOfStmt")
+}
+
+func TestForOfObjectDestructuring(t *testing.T) {
+	mod := buildHIR(t, `function f() { for (const { name, age } of people) {} }`)
+	for _, d := range mod.Declarations {
+		fd, ok := d.(*FuncDecl)
+		if !ok || fd.Body == nil {
+			continue
+		}
+		for _, s := range fd.Body.Stmts {
+			fof, ok := s.(*ForOfStmt)
+			if !ok {
+				continue
+			}
+			if fof.Pattern == nil {
+				t.Fatal("expected Pattern on ForOfStmt for { name, age } destructuring")
+			}
+			op, ok := fof.Pattern.(*ObjectPattern)
+			if !ok {
+				t.Fatalf("expected ObjectPattern, got %T", fof.Pattern)
+			}
+			if len(op.Properties) != 2 {
+				t.Fatalf("expected 2 properties, got %d", len(op.Properties))
+			}
+			return
+		}
+	}
+	t.Fatal("did not find ForOfStmt")
+}
+
+// --- Top-level statement ---
+
+func TestTopLevelStatement(t *testing.T) {
+	mod := buildHIR(t, `console.log("hello");`)
+	found := false
+	for _, d := range mod.Declarations {
+		if _, ok := d.(*TopLevelStmt); ok {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected TopLevelStmt for console.log at top level")
+	}
+}
+
 func TestPrinterNested(t *testing.T) {
 	out := hirString(t, `
 		function outer() {

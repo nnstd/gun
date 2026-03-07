@@ -364,6 +364,176 @@ func TestRoundTripEnum(t *testing.T) {
 	assertContains(t, out, "iota")
 }
 
+// --- Optional chaining tests ---
+
+func TestRoundTripOptionalChaining(t *testing.T) {
+	out := lowerTS(t, `function f() { return a?.b; }`)
+	assertContains(t, out, "jsvalue.Eq")
+	assertContains(t, out, "jsvalue.NewNull()")
+	assertContains(t, out, "jsvalue.NewUndefined()")
+	assertContains(t, out, `.Get("b")`)
+}
+
+func TestRoundTripOptionalChainingChained(t *testing.T) {
+	out := lowerTS(t, `function f() { return a?.b?.c; }`)
+	// Should have nested null checks
+	assertContains(t, out, "jsvalue.Eq")
+	assertContains(t, out, "jsvalue.NewUndefined()")
+}
+
+func TestRoundTripNonOptionalMember(t *testing.T) {
+	out := lowerTS(t, `function f() { return a.b; }`)
+	// Should NOT have null check
+	assertNotContains(t, out, "jsvalue.Eq")
+	assertContains(t, out, `.Get("b")`)
+}
+
+// --- Spread tests ---
+
+func TestRoundTripSpreadInCall(t *testing.T) {
+	out := lowerTS(t, `function f() { fn(...args); }`)
+	assertContains(t, out, ".Array()...")
+}
+
+func TestRoundTripSpreadInMethodCall(t *testing.T) {
+	out := lowerTS(t, `function f() { obj.method(...args); }`)
+	assertContains(t, out, "MethodCall")
+	assertContains(t, out, ".Array()...")
+}
+
+func TestRoundTripSpreadArray(t *testing.T) {
+	out := lowerTS(t, `const a = [...b, 1];`)
+	assertContains(t, out, "jsvalue.NewArray")
+}
+
+// --- For-of destructuring tests ---
+
+func TestRoundTripForOfArrayDestructure(t *testing.T) {
+	out := lowerTS(t, `function f() { for (const [k, v] of entries) { console.log(k, v); } }`)
+	assertContains(t, out, "_item")
+	assertContains(t, out, ".Index(0)")
+	assertContains(t, out, ".Index(1)")
+	assertContains(t, out, "range")
+}
+
+func TestRoundTripForOfObjectDestructure(t *testing.T) {
+	out := lowerTS(t, `function f() { for (const { name, age } of people) {} }`)
+	assertContains(t, out, "_item")
+	assertContains(t, out, `.Get("name")`)
+	assertContains(t, out, `.Get("age")`)
+}
+
+func TestRoundTripForOfSimple(t *testing.T) {
+	out := lowerTS(t, `function f() { for (const x of arr) { console.log(x); } }`)
+	// Simple for-of should NOT use _item destructuring
+	assertNotContains(t, out, "_item")
+	assertContains(t, out, "range")
+	assertContains(t, out, ".Array()")
+}
+
+// --- Regex flag tests ---
+
+func TestRoundTripRegexNoFlags(t *testing.T) {
+	out := lowerTS(t, `const re = /hello/;`)
+	assertContains(t, out, "jsvalue.NewRegex")
+	assertContains(t, out, "CompileRegex")
+	assertNotContains(t, out, "NewRegexWithFlags")
+}
+
+func TestRoundTripRegexWithFlags(t *testing.T) {
+	out := lowerTS(t, `const re = /hello/gi;`)
+	assertContains(t, out, "NewRegexWithFlags")
+	assertContains(t, out, `"gi"`)
+}
+
+// --- Tagged template tests ---
+
+func TestRoundTripTaggedTemplate(t *testing.T) {
+	out := lowerTS(t, "const x = tag`hello ${name} world`;")
+	// tree-sitter parses tagged templates as call_expression(tag, template_string)
+	// so the output is tag(template_parts...)
+	assertContains(t, out, "tag")
+	assertContains(t, out, "hello")
+}
+
+// --- Destructuring tests ---
+
+func TestRoundTripObjectDestructuring(t *testing.T) {
+	out := lowerTS(t, `function f() { const { a, b } = obj; return a; }`)
+	assertContains(t, out, `.Get("a")`)
+	assertContains(t, out, `.Get("b")`)
+}
+
+func TestRoundTripArrayDestructuring(t *testing.T) {
+	out := lowerTS(t, `function f() { const [x, y] = arr; return x; }`)
+	assertContains(t, out, ".Index(0)")
+	assertContains(t, out, ".Index(1)")
+}
+
+// --- Member assignment tests ---
+
+func TestRoundTripMemberAssignment(t *testing.T) {
+	out := lowerTS(t, `function f() { obj.name = "test"; }`)
+	assertContains(t, out, `.Set("name"`)
+}
+
+func TestRoundTripAugmentedAssignment(t *testing.T) {
+	out := lowerTS(t, `function f() { obj.count += 1; }`)
+	assertContains(t, out, `.Set("count"`)
+	assertContains(t, out, "jsvalue.Add")
+}
+
+func TestRoundTripUpdateStatement(t *testing.T) {
+	out := lowerTS(t, `function f() { x++; }`)
+	assertContains(t, out, "jsvalue.Inc")
+}
+
+// --- Nil-padding tests ---
+
+func TestRoundTripNilPadding(t *testing.T) {
+	out := lowerTS(t, `function f(a, b) { return a; }`)
+	assertContains(t, out, "var a *jsvalue.JSValue")
+	assertContains(t, out, "if len(_args) > 0")
+	assertContains(t, out, "var b *jsvalue.JSValue")
+	assertContains(t, out, "if len(_args) > 1")
+}
+
+// --- Import resolution tests ---
+
+func TestRoundTripImportDefault(t *testing.T) {
+	// Note: lowerTS uses empty context, so "fs" is not a known module.
+	// It gets treated as a transpiled module. Test via CLI for full resolution.
+	out := lowerTS(t, `import fs from "fs"; const d = fs.readFileSync("x");`)
+	assertContains(t, out, `"fs"`)   // import path present
+	assertContains(t, out, "fs")     // package name used
+}
+
+func TestRoundTripImportNamed(t *testing.T) {
+	out := lowerTS(t, `import { readFileSync } from "fs"; const d = readFileSync("x");`)
+	assertContains(t, out, "ReadFileSync") // capitalized
+}
+
+// --- Export default tests ---
+
+func TestRoundTripExportDefaultExpr(t *testing.T) {
+	out := lowerTS(t, `export default 42;`)
+	assertContains(t, out, "var Default")
+	assertContains(t, out, "42")
+}
+
+func TestRoundTripExportDefaultFunction(t *testing.T) {
+	out := lowerTS(t, `export default function greet() { return "hi"; }`)
+	assertContains(t, out, "var Greet")
+	assertContains(t, out, "var Default = Greet")
+}
+
+// --- Main function creation ---
+
+func TestRoundTripMainCreated(t *testing.T) {
+	out := lowerTS(t, `const x = 42;`)
+	assertContains(t, out, "func main()")
+}
+
 func TestGenerateProducesValidGo(t *testing.T) {
 	// Verify the output is valid Go (Generate succeeds)
 	snippets := []string{
