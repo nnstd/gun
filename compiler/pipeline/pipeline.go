@@ -7,6 +7,8 @@ package pipeline
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/nnstd/gun/compiler/backend"
 	"github.com/nnstd/gun/compiler/context"
@@ -120,8 +122,10 @@ func (p *Pipeline) CompileHIR(hirMod *hir.Module, moduleName string, samePackage
 // CompilePackage compiles multiple TypeScript files that belong to the same Go package.
 // It scans all files for exports first, then compiles each with cross-file knowledge.
 func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, entryFile string) (map[string][]byte, error) {
-	// Phase 1: Parse all files into HIR to discover exports
+	// Phase 1: Parse all files into HIR and scan exports
 	hirModules := make(map[string]*hir.Module)
+	allExports := make(map[string][]backend.CrossFileExport)
+
 	for name, source := range files {
 		tree, err := parseTypeScript(source)
 		if err != nil {
@@ -130,20 +134,77 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 		hirMod := hir.BuildModule(tree.RootNode(), source, pkgName)
 		tree.Close()
 		hirModules[name] = hirMod
+		allExports[name] = backend.ScanHIRExports(hirMod)
 	}
 
-	// Phase 2: Compile each file
+	// Phase 2: Detect conflicting Default exports
+	var defaultFiles []string
+	for name, exps := range allExports {
+		for _, exp := range exps {
+			if exp.GoName == "Default" {
+				defaultFiles = append(defaultFiles, name)
+			}
+		}
+	}
+	renameDefault := make(map[string]bool)
+	if len(defaultFiles) > 1 {
+		for _, name := range defaultFiles {
+			if name != entryFile {
+				renameDefault[name] = true
+			}
+		}
+	}
+
+	// Phase 3: Compile each file with cross-file export knowledge
 	results := make(map[string][]byte)
 	for name, hirMod := range hirModules {
-		goFile := backend.Lower(hirMod, p.Ctx, moduleName, true)
+		// Collect exports from OTHER files (not this one)
+		var crossExports []backend.CrossFileExport
+		for otherFile, exps := range allExports {
+			if otherFile == name {
+				continue
+			}
+			crossExports = append(crossExports, exps...)
+		}
+
+		goFile := backend.LowerWithExports(hirMod, p.Ctx, moduleName, true, crossExports)
 		out, err := backend.Generate(goFile)
 		if err != nil {
 			return nil, fmt.Errorf("compile %s: %w", name, err)
 		}
+
+		// Rename Default in non-entry files to avoid conflicts
+		if renameDefault[name] {
+			out = renameDefaultExport(out, name)
+		}
+
 		results[name] = out
 	}
 
 	return results, nil
+}
+
+// renameDefaultExport replaces "Default" in compiled output with a file-specific name.
+func renameDefaultExport(source []byte, fileName string) []byte {
+	base := filepath.Base(fileName)
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	name := ""
+	for _, r := range base {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			name += string(r)
+		} else {
+			name += "_"
+		}
+	}
+	if name == "" {
+		name = "FileDefault"
+	}
+	name = strings.ToUpper(name[:1]) + name[1:] + "Default"
+
+	s := string(source)
+	s = strings.ReplaceAll(s, "var Default ", "var "+name+" ")
+	s = strings.ReplaceAll(s, "var Default\n", "var "+name+"\n")
+	return []byte(s)
 }
 
 // parseTypeScript is a helper to parse TypeScript source into a tree-sitter tree.

@@ -73,7 +73,7 @@ func CompileNewPipeline(source []byte, pkgName, moduleName string, optLevel int)
 	defer tree.Close()
 
 	ctx := tcontext.New()
-	registerDefaultBuiltins(ctx)
+	RegisterDefaultBuiltins(ctx)
 
 	level := pipeline.OptLevel(optLevel)
 	p := pipeline.NewWithContext(level, ctx)

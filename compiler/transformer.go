@@ -45,7 +45,7 @@ type Transformer struct {
 
 func newTransformer(source []byte, pkgName, moduleName string, samePackageImports bool) *Transformer {
 	ctx := tcontext.New()
-	registerDefaultBuiltins(ctx)
+	RegisterDefaultBuiltins(ctx)
 
 	return &Transformer{
 		source:             source,

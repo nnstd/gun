@@ -810,7 +810,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 }
 
 // NOTE: isKnownGlobalObject has been replaced by t.ctx.IsKnownGlobal().
-// All known globals are registered via registerDefaultBuiltins() in context_defaults.go.
+// All known globals are registered via RegisterDefaultBuiltins() in context_defaults.go.
 
 // isObjectPrototypeHasOwnProperty checks if a tree-sitter node represents
 // the pattern Object.prototype.hasOwnProperty (a 3-level member chain).

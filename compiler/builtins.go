@@ -15,7 +15,7 @@ func isErrorType(name string) bool {
 
 // NOTE: The old transformBuiltinCall, transformGlobalCall, and transformBuiltinNew
 // dispatch functions have been replaced by context-based dispatch. The actual
-// transform implementations below are registered via registerDefaultBuiltins()
+// transform implementations below are registered via RegisterDefaultBuiltins()
 // in context_defaults.go.
 
 // transformNumberCall handles Number.X() calls.

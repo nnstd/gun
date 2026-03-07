@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/nnstd/gun/compiler"
+	"github.com/nnstd/gun/compiler/context"
+	"github.com/nnstd/gun/compiler/pipeline"
 
 	"github.com/alecthomas/kong"
 )
@@ -71,11 +73,7 @@ func (cmd *TranspileCmd) Run() error {
 		return transpileFile(cmd.Input, "", cmd.Pkg, "", cmd.Verbose, false, cmd.Pipeline, cmd.OptLevel)
 	}
 
-	if cmd.Pipeline {
-		return transpileFile(cmd.Input, "", cmd.Pkg, "", cmd.Verbose, false, true, cmd.OptLevel)
-	}
-
-	return transpileProject(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose)
+	return transpileProject(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose, cmd.Pipeline, cmd.OptLevel)
 }
 
 func (cmd *BuildCmd) Run() error {
@@ -93,7 +91,7 @@ func (cmd *BuildCmd) Run() error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	if err := transpileProject(cmd.Input, tmpDir, cmd.Pkg, cmd.Verbose); err != nil {
+	if err := transpileProject(cmd.Input, tmpDir, cmd.Pkg, cmd.Verbose, false, 0); err != nil {
 		return err
 	}
 
@@ -121,7 +119,7 @@ func (cmd *RunCmd) Run() error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	if err := transpileProject(cmd.Input, tmpDir, cmd.Pkg, cmd.Verbose); err != nil {
+	if err := transpileProject(cmd.Input, tmpDir, cmd.Pkg, cmd.Verbose, false, 0); err != nil {
 		return err
 	}
 
@@ -149,14 +147,14 @@ func (cmd *RunCmd) Run() error {
 
 // transpileProject transpiles a .ts entry file and all its relative imports
 // into outDir, then scaffolds a go.mod so the result is go-buildable.
-func transpileProject(input, outDir, pkg string, verbose bool) error {
+func transpileProject(input, outDir, pkg string, verbose, usePipeline bool, optLevel int) error {
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		return err
 	}
 
 	moduleName := "gunrun"
 	goFile := filepath.Join(outDir, strings.TrimSuffix(filepath.Base(input), ".ts")+".go")
-	if err := transpileFile(input, goFile, pkg, moduleName, verbose, false, false, 0); err != nil {
+	if err := transpileFile(input, goFile, pkg, moduleName, verbose, false, usePipeline, optLevel); err != nil {
 		return err
 	}
 
@@ -164,11 +162,11 @@ func transpileProject(input, outDir, pkg string, verbose bool) error {
 	if inputDir == "" {
 		inputDir = "."
 	}
-	if err := transpileRelativeImports(input, inputDir, outDir, moduleName, verbose); err != nil {
+	if err := transpileRelativeImports(input, inputDir, outDir, moduleName, verbose, usePipeline, optLevel); err != nil {
 		return err
 	}
 
-	if err := transpileNodeModuleImports(input, inputDir, outDir, moduleName, verbose); err != nil {
+	if err := transpileNodeModuleImports(input, inputDir, outDir, moduleName, verbose, usePipeline, optLevel); err != nil {
 		return err
 	}
 
@@ -436,16 +434,16 @@ func resolveImportFile(importPath, fromDir string) (string, error) {
 
 // transpileRelativeImports recursively discovers and transpiles relative imports
 // from a TS entry file into the correct subdirectories of tmpDir.
-func transpileRelativeImports(entryFile, inputDir, tmpDir, moduleName string, verbose bool) error {
+func transpileRelativeImports(entryFile, inputDir, tmpDir, moduleName string, verbose, usePipeline bool, optLevel int) error {
 	absInputDir, err := filepath.Abs(inputDir)
 	if err != nil {
 		return err
 	}
 	visited := map[string]bool{}
-	return walkImports(entryFile, absInputDir, absInputDir, tmpDir, moduleName, verbose, visited)
+	return walkImports(entryFile, absInputDir, absInputDir, tmpDir, moduleName, verbose, visited, usePipeline, optLevel)
 }
 
-func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose bool, visited map[string]bool) error {
+func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose bool, visited map[string]bool, usePipeline bool, optLevel int) error {
 	absFile, _ := filepath.Abs(tsFile)
 	if visited[absFile] {
 		return nil
@@ -492,12 +490,12 @@ func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose b
 		}
 
 		outFile := filepath.Join(outDir, filepath.Base(strings.TrimSuffix(resolved, ".ts"))+".go")
-		if err := transpileFile(resolved, outFile, pkgName, moduleName, verbose, false, false, 0); err != nil {
+		if err := transpileFile(resolved, outFile, pkgName, moduleName, verbose, false, usePipeline, optLevel); err != nil {
 			return err
 		}
 
 		// Recurse into this file's imports
-		if err := walkImports(resolved, inputDir, baseDir, tmpDir, moduleName, verbose, visited); err != nil {
+		if err := walkImports(resolved, inputDir, baseDir, tmpDir, moduleName, verbose, visited, usePipeline, optLevel); err != nil {
 			return err
 		}
 	}
@@ -742,14 +740,14 @@ func splitPkgSubpath(pkgName string) (string, string) {
 
 // transpileNodeModuleImports discovers and transpiles node_modules dependencies
 // from the entry file and all its relative imports.
-func transpileNodeModuleImports(entryFile, inputDir, tmpDir, moduleName string, verbose bool) error {
+func transpileNodeModuleImports(entryFile, inputDir, tmpDir, moduleName string, verbose, usePipeline bool, optLevel int) error {
 	absInputDir, _ := filepath.Abs(inputDir)
 
 	// Collect all source files (entry + relative imports) to scan
 	sourceFiles := collectAllSourceFiles(entryFile)
 
 	visited := map[string]bool{}
-	return processNodeModuleImports(sourceFiles, absInputDir, tmpDir, moduleName, verbose, visited)
+	return processNodeModuleImports(sourceFiles, absInputDir, tmpDir, moduleName, verbose, visited, usePipeline, optLevel)
 }
 
 // collectAllSourceFiles returns the entry file plus all transitively-imported relative files.
@@ -780,7 +778,7 @@ func collectAllSourceFiles(entryFile string) []string {
 	return files
 }
 
-func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName string, verbose bool, visited map[string]bool) error {
+func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName string, verbose bool, visited map[string]bool, usePipeline bool, optLevel int) error {
 	var newSourceFiles []string
 
 	for _, srcFile := range sourceFiles {
@@ -819,7 +817,7 @@ func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName
 			}
 
 			// Discover all files in this package and compile together
-			allPkgFiles, err := transpileNodeModuleAsPackage(entryPath, outDir, moduleName, sanitized, verbose)
+			allPkgFiles, err := transpileNodeModuleAsPackage(entryPath, outDir, moduleName, sanitized, verbose, usePipeline, optLevel)
 			if err != nil {
 				return fmt.Errorf("transpile node_module %s: %w", pkgName, err)
 			}
@@ -829,14 +827,14 @@ func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName
 
 	// Recursively process any node_module imports found in the newly transpiled packages
 	if len(newSourceFiles) > 0 {
-		return processNodeModuleImports(newSourceFiles, inputDir, tmpDir, moduleName, verbose, visited)
+		return processNodeModuleImports(newSourceFiles, inputDir, tmpDir, moduleName, verbose, visited, usePipeline, optLevel)
 	}
 	return nil
 }
 
 // transpileNodeModuleAsPackage discovers all files in an npm package and compiles
 // them together using CompilePackage, so cross-file exports are shared.
-func transpileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string, verbose bool) ([]string, error) {
+func transpileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string, verbose, usePipeline bool, optLevel int) ([]string, error) {
 	// Phase 1: Discover all files in the package
 	files := map[string][]byte{}
 	allPaths := []string{}
@@ -887,7 +885,15 @@ func transpileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string,
 	}
 
 	// Phase 2: Compile all files together
-	results, err := compiler.CompilePackage(files, pkgName, moduleName, absEntry)
+	var results map[string][]byte
+	if usePipeline {
+		tcontext := context.New()
+		compiler.RegisterDefaultBuiltins(tcontext)
+		p := pipeline.NewWithContext(pipeline.OptLevel(optLevel), tcontext)
+		results, err = p.CompilePackage(files, pkgName, moduleName, absEntry)
+	} else {
+		results, err = compiler.CompilePackage(files, pkgName, moduleName, absEntry)
+	}
 	if err != nil {
 		return nil, err
 	}

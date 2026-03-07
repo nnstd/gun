@@ -7,12 +7,12 @@ import (
 	tcontext "github.com/nnstd/gun/compiler/context"
 )
 
-// registerDefaultBuiltins populates a TranspilerContext with all known JavaScript
+// RegisterDefaultBuiltins populates a TranspilerContext with all known JavaScript
 // global objects, functions, constructors, identifiers, and modules.
 //
 // This replaces the previously hardcoded switch/case dispatchers scattered across
 // builtins.go, imports.go, and expressions.go with a unified registration.
-func registerDefaultBuiltins(ctx *tcontext.TranspilerContext) {
+func RegisterDefaultBuiltins(ctx *tcontext.TranspilerContext) {
 	registerGlobalObjects(ctx)
 	registerGlobalFunctions(ctx)
 	registerConstructors(ctx)

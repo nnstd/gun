@@ -20,27 +20,45 @@ type importResolution struct {
 	isTranspiled bool
 }
 
+// CrossFileExport describes a symbol exported from another file in the same package.
+type CrossFileExport struct {
+	GoName    string
+	IsJSValue bool
+}
+
 // Lowerer converts an HIR Module into a go/ast.File.
 type Lowerer struct {
-	symtab       *symbol.Table
-	ctx          *context.TranspilerContext
-	imports      map[string]string                    // Go import path → alias
-	decls        []ast.Decl
-	importedSyms map[*symbol.Symbol]importResolution  // how each imported symbol resolves to Go
-	moduleName   string                               // Go module name for relative import resolution
-	samePackage  bool                                 // treat relative imports as same-package refs
-	varTypes     map[string]string                    // variable name → module type (e.g. "hono")
+	symtab           *symbol.Table
+	ctx              *context.TranspilerContext
+	imports          map[string]string                    // Go import path → alias
+	decls            []ast.Decl
+	importedSyms     map[*symbol.Symbol]importResolution  // how each imported symbol resolves to Go
+	moduleName       string                               // Go module name for relative import resolution
+	samePackage      bool                                 // treat relative imports as same-package refs
+	varTypes         map[string]string                    // variable name → module type (e.g. "hono")
+	crossFileExports map[string]bool                      // Go names from other files (prevents .Get() dispatch)
 }
 
 // Lower converts an HIR module to a Go AST file.
 func Lower(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool) *ast.File {
+	return LowerWithExports(mod, ctx, moduleName, samePackageImports, nil)
+}
+
+// LowerWithExports converts an HIR module to a Go AST file with knowledge of
+// symbols exported from other files in the same package.
+func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport) *ast.File {
+	cfe := make(map[string]bool)
+	for _, exp := range crossFileExports {
+		cfe[exp.GoName] = true
+	}
 	l := &Lowerer{
-		symtab:       mod.SymbolTable,
-		ctx:          ctx,
-		imports:      make(map[string]string),
-		importedSyms: make(map[*symbol.Symbol]importResolution),
-		moduleName:   moduleName,
-		samePackage:  samePackageImports,
+		symtab:           mod.SymbolTable,
+		ctx:              ctx,
+		imports:          make(map[string]string),
+		importedSyms:     make(map[*symbol.Symbol]importResolution),
+		moduleName:       moduleName,
+		samePackage:      samePackageImports,
+		crossFileExports: cfe,
 		varTypes:     make(map[string]string),
 	}
 
