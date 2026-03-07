@@ -114,6 +114,18 @@ func (l *Lowerer) lowerExpr(e hir.Expr) ast.Expr {
 }
 
 func (l *Lowerer) lowerIdentifier(e *hir.Identifier) ast.Expr {
+	// JS `arguments` keyword → jsvalue.NewArray(_args...)
+	name := e.Name
+	if e.Sym != nil {
+		name = e.Sym.OriginalName
+	}
+	if name == "arguments" {
+		l.jsvalueImport()
+		c := callExpr(selectorExpr(goIdent("jsvalue"), "NewArray"), goIdent("_args"))
+		c.Ellipsis = 1
+		return c
+	}
+
 	// Check imported symbols first
 	if e.Sym != nil {
 		if res, ok := l.importedSyms[e.Sym]; ok {
