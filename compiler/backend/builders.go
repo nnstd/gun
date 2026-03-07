@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"strings"
 )
 
 // Go AST builder primitives.
@@ -26,6 +27,16 @@ func intLit(s string) *ast.BasicLit {
 
 func floatLit(s string) *ast.BasicLit {
 	return basicLit(token.FLOAT, s)
+}
+
+// rawStringLit creates a backtick-quoted raw string literal (no escape processing).
+func rawStringLit(s string) *ast.BasicLit {
+	// If the pattern contains backticks, fall back to double-quoted with escaping
+	if strings.Contains(s, "`") {
+		escaped := strings.ReplaceAll(s, `\`, `\\`)
+		return basicLit(token.STRING, `"`+escaped+`"`)
+	}
+	return basicLit(token.STRING, "`"+s+"`")
 }
 
 func goField(name string, typ ast.Expr) *ast.Field {

@@ -115,9 +115,19 @@ func (b *Builder) buildStmt(node *sitter.Node) Stmt {
 		return &EmptyStmt{}
 
 	case "function_declaration":
-		// Hoisted function in block
+		// Function declaration inside a block — treat as local function variable
 		if d := b.buildFuncDecl(node, false); d != nil {
-			return &ExprStmt{Expr: &Identifier{Name: "(hoisted-func)"}}
+			// Convert to a VarDecl with function value
+			return &VarDecl{
+				Kind: VarLet,
+				Declarators: []*Declarator{{
+					Symbol: d.Symbol,
+					Init: &ArrowFunc{
+						Params: d.Params,
+						Body:   d.Body,
+					},
+				}},
+			}
 		}
 		return nil
 

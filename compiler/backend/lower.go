@@ -195,7 +195,13 @@ func (l *Lowerer) lowerVarDecl(d *hir.VarDecl) {
 			value = l.lowerExpr(decl.Init)
 			value = jsvalueWrapLit(value)
 		}
-		l.decls = append(l.decls, varDecl(name, nil, value))
+		if value == nil {
+			// Uninitialized var needs a type: var x *jsvalue.JSValue
+			l.jsvalueImport()
+			l.decls = append(l.decls, varDecl(name, jsValuePtrType(), nil))
+		} else {
+			l.decls = append(l.decls, varDecl(name, nil, value))
+		}
 	}
 }
 
@@ -658,9 +664,14 @@ func (l *Lowerer) fixInitCycles(decls []ast.Decl) []ast.Decl {
 		}
 		if hasCycle {
 			// Split: forward declare + init() assignment
+			l.jsvalueImport()
 			for _, spec := range gd.Specs {
 				vs := spec.(*ast.ValueSpec)
-				fwd := varDecl(vs.Names[0].Name, vs.Type, nil)
+				typ := vs.Type
+				if typ == nil {
+					typ = jsValuePtrType()
+				}
+				fwd := varDecl(vs.Names[0].Name, typ, nil)
 				result = append(result, fwd)
 				if len(vs.Values) > 0 {
 					initStmts = append(initStmts, assignStmt(

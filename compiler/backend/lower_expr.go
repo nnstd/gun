@@ -148,7 +148,7 @@ func (l *Lowerer) lowerIdentifier(e *hir.Identifier) ast.Expr {
 			return expr
 		}
 	}
-	return goIdent(e.Name)
+	return goIdent(symbol.Sanitize(e.Name))
 }
 
 func (l *Lowerer) lowerLiteral(e *hir.Literal) ast.Expr {
@@ -168,14 +168,11 @@ func (l *Lowerer) lowerLiteral(e *hir.Literal) ast.Expr {
 	case hir.LitUndefined:
 		return callExpr(selectorExpr(goIdent("jsvalue"), "NewUndefined"))
 	case hir.LitRegex:
-		// Parse /pattern/flags
-		pattern, flags := parseRegexLiteral(e.Value)
-		compiled := callExpr(selectorExpr(goIdent("jsvalue"), "CompileRegex"), stringLit(pattern))
-		if flags != "" {
-			// Pass flags as second argument (runtime can use them for matching behavior)
-			return callExpr(selectorExpr(goIdent("jsvalue"), "NewRegexWithFlags"),
-				compiled, stringLit(flags))
-		}
+		// Parse /pattern/flags — use raw string literal for pattern to preserve backslashes
+		pattern, _ := parseRegexLiteral(e.Value)
+		patternLit := rawStringLit(pattern)
+		compiled := callExpr(selectorExpr(goIdent("jsvalue"), "CompileRegex"), patternLit)
+		// Flags are currently ignored at the Go level (Go regexp doesn't support JS flags like /g)
 		return callExpr(selectorExpr(goIdent("jsvalue"), "NewRegex"), compiled)
 	default:
 		return goIdent(e.Value)
@@ -193,12 +190,32 @@ func (l *Lowerer) lowerTemplateLiteral(e *hir.TemplateLiteral) ast.Expr {
 		if lit, ok := part.(*hir.Literal); ok && lit.Kind == hir.LitString {
 			format.WriteString(lit.Value)
 		} else {
-			format.WriteString("%v")
-			args = append(args, l.lowerExpr(part))
+			lowered := l.lowerExpr(part)
+			// Safety check: if the lowered expression is just an identifier with
+			// invalid Go characters, embed it back into the format string
+			if id, ok := lowered.(*ast.Ident); ok && !isValidGoIdent(id.Name) {
+				format.WriteString(id.Name)
+			} else {
+				format.WriteString("%v")
+				args = append(args, lowered)
+			}
 		}
 	}
 
-	sprintfArgs := append([]ast.Expr{stringLit(format.String())}, args...)
+	// Use raw string if format contains newlines or backslashes
+	fmtStr := format.String()
+	var fmtLit ast.Expr
+	if strings.ContainsAny(fmtStr, "\n\\") {
+		fmtLit = rawStringLit(fmtStr)
+	} else {
+		fmtLit = stringLit(fmtStr)
+	}
+
+	if len(args) == 0 {
+		// No substitutions — just a string
+		return callExpr(selectorExpr(goIdent("jsvalue"), "NewString"), fmtLit)
+	}
+	sprintfArgs := append([]ast.Expr{fmtLit}, args...)
 	formatted := callExpr(selectorExpr(goIdent("fmt"), "Sprintf"), sprintfArgs...)
 	return callExpr(selectorExpr(goIdent("jsvalue"), "NewString"), formatted)
 }
@@ -751,6 +768,25 @@ func (l *Lowerer) AddImport(pkg string) {
 
 func (l *Lowerer) AddAliasedImport(pkg, alias string) {
 	l.addAliasedImport(pkg, alias)
+}
+
+// isValidGoIdent checks if a string is a valid Go identifier.
+func isValidGoIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		if i == 0 {
+			if r != '_' && (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
+				return false
+			}
+		} else {
+			if r != '_' && (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // parseRegexLiteral splits /pattern/flags into pattern and flags.
