@@ -401,7 +401,8 @@ func TestRoundTripNonOptionalMember(t *testing.T) {
 
 func TestRoundTripSpreadInCall(t *testing.T) {
 	out := lowerTS(t, `function f() { fn(...args); }`)
-	assertContains(t, out, ".Array()...")
+	assertContains(t, out, ".Call(")
+	assertContains(t, out, "...")
 }
 
 func TestRoundTripSpreadInMethodCall(t *testing.T) {

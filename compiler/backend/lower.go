@@ -37,6 +37,7 @@ type Lowerer struct {
 	samePackage      bool                                 // treat relative imports as same-package refs
 	varTypes         map[string]string                    // variable name → module type (e.g. "hono")
 	crossFileExports map[string]bool                      // Go names from other files (prevents .Get() dispatch)
+	initStmts        []ast.Stmt                           // statements for init() function
 }
 
 // Lower converts an HIR module to a Go AST file.
@@ -79,6 +80,11 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 	// Ensure main() exists for runnable packages
 	if mod.Package == "main" {
 		l.getOrCreateMain()
+	}
+
+	// Emit init() for collected setup statements (class methods, enum members, etc.)
+	if len(l.initStmts) > 0 {
+		l.decls = append(l.decls, funcDecl("init", fieldList(), nil, &ast.BlockStmt{List: l.initStmts}))
 	}
 
 	file := &ast.File{
@@ -220,7 +226,20 @@ func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 	}
 	// Ensure constructor returns nil (constructors return this implicitly)
 	ctorBody.List = append(ctorBody.List, returnStmt(goIdent("nil")))
-	ctorLit := l.wrapAsJSValueFunc(nil, ctorBody)
+	// Constructor has signature: func(this *jsvalue.JSValue, _args ...*jsvalue.JSValue) *jsvalue.JSValue
+	ctorLit := &ast.FuncLit{
+		Type: &ast.FuncType{
+			Params: fieldList(
+				goField("this", jsValuePtrType()),
+				&ast.Field{
+					Names: []*ast.Ident{goIdent("_args")},
+					Type:  &ast.Ellipsis{Elt: jsValuePtrType()},
+				},
+			),
+			Results: fieldList(goField("", jsValuePtrType())),
+		},
+		Body: ctorBody,
+	}
 
 	// jsvalue.NewClass(ctorFn, parent?)
 	classArgs := []ast.Expr{ctorLit}
@@ -238,13 +257,7 @@ func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 		val := l.lowerExpr(prop.Value)
 		val = jsvalueWrapLit(val)
 		setCall := callExpr(selectorExpr(goIdent(name), "Set"), stringLit(prop.Name), val)
-		l.decls = append(l.decls, &ast.GenDecl{
-			Tok: token.VAR,
-			Specs: []ast.Spec{&ast.ValueSpec{
-				Names:  []*ast.Ident{goIdent("_")},
-				Values: []ast.Expr{setCall},
-			}},
-		})
+		l.initStmts = append(l.initStmts, exprStmt(setCall))
 	}
 
 	// Methods: ClassName.Get("prototype").Set("method", jsvalue.NewFunction(...))
@@ -267,13 +280,7 @@ func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 			proto := callExpr(selectorExpr(goIdent(name), "Get"), stringLit("prototype"))
 			setCall = callExpr(selectorExpr(proto, "Set"), stringLit(m.Name), methodFn)
 		}
-		l.decls = append(l.decls, &ast.GenDecl{
-			Tok: token.VAR,
-			Specs: []ast.Spec{&ast.ValueSpec{
-				Names:  []*ast.Ident{goIdent("_")},
-				Values: []ast.Expr{setCall},
-			}},
-		})
+		l.initStmts = append(l.initStmts, exprStmt(setCall))
 	}
 }
 
@@ -298,13 +305,7 @@ func (l *Lowerer) lowerEnumDecl(d *hir.EnumDecl) {
 		}
 		setCall := callExpr(selectorExpr(goIdent(name), "Set"),
 			stringLit(m.Name), val)
-		l.decls = append(l.decls, &ast.GenDecl{
-			Tok: token.VAR,
-			Specs: []ast.Spec{&ast.ValueSpec{
-				Names:  []*ast.Ident{goIdent("_")},
-				Values: []ast.Expr{setCall},
-			}},
-		})
+		l.initStmts = append(l.initStmts, exprStmt(setCall))
 	}
 }
 
@@ -776,14 +777,51 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 		}
 	}
 
-	// Lower body statements
+	// Lower body statements, flattening inline blocks (multi-declarator VarDecl)
 	for _, s := range body.Stmts {
-		if gs := l.lowerStmt(s); gs != nil {
-			stmts = append(stmts, gs)
+		gs := l.lowerStmt(s)
+		if gs == nil {
+			continue
 		}
+		if block, ok := gs.(*ast.BlockStmt); ok {
+			if _, isHIRBlock := s.(*hir.BlockStmt); !isHIRBlock {
+				stmts = append(stmts, block.List...)
+				continue
+			}
+		}
+		stmts = append(stmts, gs)
+	}
+
+	// Ensure trailing return nil if function body doesn't end with a return
+	if !endsWithReturn(stmts) {
+		stmts = append(stmts, returnStmt(goIdent("nil")))
 	}
 
 	return &ast.BlockStmt{List: stmts}
+}
+
+// endsWithReturn checks if a statement list ends with a return statement.
+func endsWithReturn(stmts []ast.Stmt) bool {
+	if len(stmts) == 0 {
+		return false
+	}
+	last := stmts[len(stmts)-1]
+	switch s := last.(type) {
+	case *ast.ReturnStmt:
+		return true
+	case *ast.IfStmt:
+		// if-else where both branches return
+		if s.Else != nil && s.Body != nil {
+			if !endsWithReturn(s.Body.List) {
+				return false
+			}
+			switch e := s.Else.(type) {
+			case *ast.BlockStmt:
+				return endsWithReturn(e.List)
+			}
+		}
+	}
+	return false
 }
 
 // lowerMethodBody is like lowerFuncBody but prepends `this := _args[0]`
@@ -830,11 +868,24 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 		})
 	}
 
-	// Lower body statements
+	// Lower body statements, flattening inline blocks
 	for _, s := range body.Stmts {
-		if gs := l.lowerStmt(s); gs != nil {
-			stmts = append(stmts, gs)
+		gs := l.lowerStmt(s)
+		if gs == nil {
+			continue
 		}
+		if block, ok := gs.(*ast.BlockStmt); ok {
+			if _, isHIRBlock := s.(*hir.BlockStmt); !isHIRBlock {
+				stmts = append(stmts, block.List...)
+				continue
+			}
+		}
+		stmts = append(stmts, gs)
+	}
+
+	// Ensure trailing return nil
+	if !endsWithReturn(stmts) {
+		stmts = append(stmts, returnStmt(goIdent("nil")))
 	}
 
 	return &ast.BlockStmt{List: stmts}

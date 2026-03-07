@@ -17,9 +17,20 @@ func (l *Lowerer) lowerBlock(b *hir.BlockStmt) *ast.BlockStmt {
 	}
 	var stmts []ast.Stmt
 	for _, s := range b.Stmts {
-		if gs := l.lowerStmt(s); gs != nil {
-			stmts = append(stmts, gs)
+		gs := l.lowerStmt(s)
+		if gs == nil {
+			continue
 		}
+		// Flatten inline BlockStmt (from multi-declarator VarDecl) to avoid scoping
+		if block, ok := gs.(*ast.BlockStmt); ok {
+			// Only flatten if this looks like an inline block (from VarDecl),
+			// not a real control-flow block
+			if _, isHIRBlock := s.(*hir.BlockStmt); !isHIRBlock {
+				stmts = append(stmts, block.List...)
+				continue
+			}
+		}
+		stmts = append(stmts, gs)
 	}
 	return &ast.BlockStmt{List: stmts}
 }
@@ -56,7 +67,14 @@ func (l *Lowerer) lowerStmt(s hir.Stmt) ast.Stmt {
 		return l.lowerBlock(s)
 
 	case *hir.VarDecl:
-		return l.lowerLocalVarDecl(s)
+		// VarDecl may produce multiple statements (multi-declarator).
+		// Inline them to avoid creating a Go block scope.
+		stmts := l.lowerLocalVarStmts(s)
+		if len(stmts) == 1 {
+			return stmts[0]
+		}
+		// Return a block, but the caller (lowerBlock) will inline it
+		return &ast.BlockStmt{List: stmts}
 
 	case *hir.IfStmt:
 		return l.lowerIfStmt(s)
@@ -114,7 +132,7 @@ func (l *Lowerer) lowerStmt(s hir.Stmt) ast.Stmt {
 	}
 }
 
-func (l *Lowerer) lowerLocalVarDecl(d *hir.VarDecl) ast.Stmt {
+func (l *Lowerer) lowerLocalVarStmts(d *hir.VarDecl) []ast.Stmt {
 	var stmts []ast.Stmt
 	for _, decl := range d.Declarators {
 		// Destructuring pattern
@@ -141,13 +159,7 @@ func (l *Lowerer) lowerLocalVarDecl(d *hir.VarDecl) ast.Stmt {
 			})
 		}
 	}
-	if len(stmts) == 1 {
-		return stmts[0]
-	}
-	if len(stmts) > 1 {
-		return &ast.BlockStmt{List: stmts}
-	}
-	return nil
+	return stmts
 }
 
 // lowerDestructuring generates assignment statements for a destructuring pattern.

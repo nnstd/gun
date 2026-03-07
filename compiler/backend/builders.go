@@ -156,6 +156,10 @@ func jsvalueWrapLit(expr ast.Expr) ast.Expr {
 			return callExpr(selectorExpr(goIdent("jsvalue"), "NewNull"))
 		}
 	}
+	// Safety: don't wrap nil expressions
+	if expr == nil {
+		return callExpr(selectorExpr(goIdent("jsvalue"), "NewNull"))
+	}
 	return callExpr(selectorExpr(goIdent("jsvalue"), "From"), expr)
 }
 

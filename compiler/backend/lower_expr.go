@@ -458,6 +458,25 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 		return buildCallWithSpread(selectorExpr(fn, "Call"), args, hasSpread)
 	}
 
+	// If the function is a bare identifier (not pkg.Func), it's likely a JSValue
+	// variable being called. Use .Call() to be safe.
+	if id, ok := fn.(*ast.Ident); ok {
+		// Don't wrap Go builtins or known function names
+		if id.Name != "len" && id.Name != "cap" && id.Name != "make" &&
+			id.Name != "append" && id.Name != "panic" && id.Name != "recover" &&
+			id.Name != "float64" && id.Name != "int" && id.Name != "string" &&
+			id.Name != "fmt" && id.Name != "nil" {
+			// Check if this could be a JSValue function
+			if l.exprIsJSValue(e.Func) {
+				l.jsvalueImport()
+				for i, a := range args {
+					args[i] = l.wrapAsJSValue(a)
+				}
+				return buildCallWithSpread(selectorExpr(fn, "Call"), args, hasSpread)
+			}
+		}
+	}
+
 	return buildCallWithSpread(fn, args, hasSpread)
 }
 
@@ -586,14 +605,22 @@ func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 		return callExpr(selectorExpr(obj, "Get"), stringLit(e.Property))
 	}
 
-	// Known globals (console, Math, etc.) → capitalize
+	// Known globals — check if the resolved expression is a package ident (typed)
+	// or a JSValue expression (needs .Get())
 	if id, ok := e.Object.(*hir.Identifier); ok {
 		name := id.Name
 		if id.Sym != nil {
 			name = id.Sym.OriginalName
 		}
 		if l.ctx != nil && l.ctx.IsKnownGlobal(name) {
-			return selectorExpr(obj, symbol.Capitalize(e.Property))
+			// If the resolved identifier is a bare Go identifier (package name),
+			// use capitalized selector. If it's something else (jsvalue expression),
+			// use .Get() instead.
+			if _, isIdent := obj.(*ast.Ident); isIdent {
+				return selectorExpr(obj, symbol.Capitalize(e.Property))
+			}
+			// Not a bare ident — it's a JSValue expression (e.g. jserror.Error)
+			return callExpr(selectorExpr(obj, "Get"), stringLit(e.Property))
 		}
 		// Imported known-module symbols → capitalize
 		if id.Sym != nil {
@@ -655,6 +682,16 @@ func (l *Lowerer) exprIsJSValue(e hir.Expr) bool {
 	case *hir.Identifier:
 		if e.Sym == nil {
 			if l.ctx != nil && l.ctx.IsKnownGlobal(e.Name) {
+				// Known global — check if it resolves to a JSValue or a typed Go entity.
+				// Bare idents like "jsvalue", "console", "jsmath" are Go packages (not JSValue).
+				// SelectorExprs like jserror.Error are JSValue references.
+				if l.ctx.LookupIdentifier(e.Name) != nil {
+					resolved := l.ctx.TransformIdentifier(e.Name, l)
+					if _, isIdent := resolved.(*ast.Ident); isIdent {
+						return false // Go package or type, not JSValue
+					}
+					return true // selector or call — it's a JSValue
+				}
 				return false
 			}
 			return true
