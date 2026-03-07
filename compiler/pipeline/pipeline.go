@@ -16,6 +16,7 @@ import (
 	"github.com/nnstd/gun/compiler/ssa"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
+	typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 )
 
 // OptLevel controls the optimization aggressiveness.
@@ -114,4 +115,48 @@ func (p *Pipeline) CompileTree(root *sitter.Node, source []byte, pkgName, module
 func (p *Pipeline) CompileHIR(hirMod *hir.Module, moduleName string, samePackageImports bool) ([]byte, error) {
 	goFile := backend.Lower(hirMod, p.Ctx, moduleName, samePackageImports)
 	return backend.Generate(goFile)
+}
+
+// CompilePackage compiles multiple TypeScript files that belong to the same Go package.
+// It scans all files for exports first, then compiles each with cross-file knowledge.
+func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, entryFile string) (map[string][]byte, error) {
+	// Phase 1: Parse all files into HIR to discover exports
+	hirModules := make(map[string]*hir.Module)
+	for name, source := range files {
+		tree, err := parseTypeScript(source)
+		if err != nil {
+			continue
+		}
+		hirMod := hir.BuildModule(tree.RootNode(), source, pkgName)
+		tree.Close()
+		hirModules[name] = hirMod
+	}
+
+	// Phase 2: Compile each file
+	results := make(map[string][]byte)
+	for name, hirMod := range hirModules {
+		goFile := backend.Lower(hirMod, p.Ctx, moduleName, true)
+		out, err := backend.Generate(goFile)
+		if err != nil {
+			return nil, fmt.Errorf("compile %s: %w", name, err)
+		}
+		results[name] = out
+	}
+
+	return results, nil
+}
+
+// parseTypeScript is a helper to parse TypeScript source into a tree-sitter tree.
+func parseTypeScript(source []byte) (*sitter.Tree, error) {
+	parser := sitter.NewParser()
+	defer parser.Close()
+	lang := sitter.NewLanguage(typescript.LanguageTypescript())
+	if err := parser.SetLanguage(lang); err != nil {
+		return nil, err
+	}
+	tree := parser.Parse(source, nil)
+	if tree == nil {
+		return nil, fmt.Errorf("failed to parse TypeScript source")
+	}
+	return tree, nil
 }

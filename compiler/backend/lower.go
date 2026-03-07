@@ -29,6 +29,7 @@ type Lowerer struct {
 	importedSyms map[*symbol.Symbol]importResolution  // how each imported symbol resolves to Go
 	moduleName   string                               // Go module name for relative import resolution
 	samePackage  bool                                 // treat relative imports as same-package refs
+	varTypes     map[string]string                    // variable name → module type (e.g. "hono")
 }
 
 // Lower converts an HIR module to a Go AST file.
@@ -40,7 +41,11 @@ func Lower(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, s
 		importedSyms: make(map[*symbol.Symbol]importResolution),
 		moduleName:   moduleName,
 		samePackage:  samePackageImports,
+		varTypes:     make(map[string]string),
 	}
+
+	// Pre-scan: collect function param counts for nil-padding callers
+	l.prescan(mod)
 
 	// Lower all declarations
 	for _, d := range mod.Imports {
@@ -49,6 +54,9 @@ func Lower(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, s
 	for _, d := range mod.Declarations {
 		l.lowerDecl(d)
 	}
+
+	// Fix init cycles: split self-referencing vars into forward decl + init()
+	l.decls = l.fixInitCycles(l.decls)
 
 	file := &ast.File{
 		Name:  goIdent(mod.Package),
@@ -147,6 +155,20 @@ func (l *Lowerer) lowerVarDecl(d *hir.VarDecl) {
 		name := l.emitName(decl.Symbol)
 		var value ast.Expr
 		if decl.Init != nil {
+			// Track varTypes for module-specific dispatch (e.g. new Hono() → "hono")
+			if newExpr, ok := decl.Init.(*hir.NewExpr); ok {
+				if id, ok := newExpr.Callee.(*hir.Identifier); ok {
+					ctorName := id.Name
+					if id.Sym != nil {
+						ctorName = id.Sym.OriginalName
+					}
+					modType := strings.ToLower(ctorName)
+					l.varTypes[name] = modType
+					if decl.Symbol != nil {
+						decl.Symbol.ModuleType = modType
+					}
+				}
+			}
 			value = l.lowerExpr(decl.Init)
 			value = jsvalueWrapLit(value)
 		}
@@ -158,26 +180,54 @@ func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 	l.jsvalueImport()
 	name := l.emitName(d.Symbol)
 
-	// Build constructor function
+	// Build constructor function body
+	// Constructor signature: func(this *jsvalue.JSValue, _args ...*jsvalue.JSValue) *jsvalue.JSValue
+	// Parameters are unpacked from _args (offset 0, since 'this' is separate in NewClass)
 	var ctorBody *ast.BlockStmt
 	if d.Constructor != nil {
 		ctorBody = l.lowerFuncBody(d.Constructor.Params, d.Constructor.Body)
 	} else {
 		ctorBody = blockStmt()
 	}
+	// Ensure constructor returns nil (constructors return this implicitly)
+	ctorBody.List = append(ctorBody.List, returnStmt(goIdent("nil")))
 	ctorLit := l.wrapAsJSValueFunc(nil, ctorBody)
 
 	// jsvalue.NewClass(ctorFn, parent?)
-	args := []ast.Expr{ctorLit}
+	classArgs := []ast.Expr{ctorLit}
 	if d.Parent != nil {
-		args = append(args, l.lowerExpr(d.Parent))
+		classArgs = append(classArgs, l.lowerExpr(d.Parent))
 	}
-	newClassCall := callExpr(selectorExpr(goIdent("jsvalue"), "NewClass"), args...)
+	newClassCall := callExpr(selectorExpr(goIdent("jsvalue"), "NewClass"), classArgs...)
 	l.decls = append(l.decls, varDecl(name, nil, newClassCall))
+
+	// Static properties
+	for _, prop := range d.Properties {
+		if !prop.IsStatic || prop.Value == nil {
+			continue
+		}
+		val := l.lowerExpr(prop.Value)
+		val = jsvalueWrapLit(val)
+		setCall := callExpr(selectorExpr(goIdent(name), "Set"), stringLit(prop.Name), val)
+		l.decls = append(l.decls, &ast.GenDecl{
+			Tok: token.VAR,
+			Specs: []ast.Spec{&ast.ValueSpec{
+				Names:  []*ast.Ident{goIdent("_")},
+				Values: []ast.Expr{setCall},
+			}},
+		})
+	}
 
 	// Methods: ClassName.Get("prototype").Set("method", jsvalue.NewFunction(...))
 	for _, m := range d.Methods {
-		methodBody := l.lowerFuncBody(m.Params, m.Body)
+		// Instance methods: first _args element is 'this'
+		var methodBody *ast.BlockStmt
+		if !m.IsStatic {
+			// Prepend: this := _args[0]; remaining params from _args[1:]
+			methodBody = l.lowerMethodBody(m.Params, m.Body)
+		} else {
+			methodBody = l.lowerFuncBody(m.Params, m.Body)
+		}
 		methodLit := l.wrapAsJSValueFunc(m.Params, methodBody)
 		methodFn := callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), methodLit)
 
@@ -327,6 +377,10 @@ func (l *Lowerer) lowerTypeAliasDecl(d *hir.TypeAliasDecl) {
 }
 
 func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
+	if d.IsDefault {
+		l.lowerExportDefault(d)
+		return
+	}
 	if d.Decl != nil {
 		// Export wraps a declaration — mark its symbol as exported and lower it
 		switch inner := d.Decl.(type) {
@@ -365,6 +419,41 @@ func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 		default:
 			l.lowerDecl(d.Decl)
 		}
+	}
+}
+
+// lowerExportDefault handles `export default ...` declarations.
+func (l *Lowerer) lowerExportDefault(d *hir.ExportDecl) {
+	if d.Decl == nil {
+		return
+	}
+	switch inner := d.Decl.(type) {
+	case *hir.FuncDecl:
+		if inner.Symbol != nil {
+			inner.Symbol.Exported = true
+			l.lowerFuncDecl(inner)
+			// Create Default alias pointing to the capitalized name
+			goName := l.emitName(inner.Symbol)
+			l.decls = append(l.decls, varDecl("Default", nil, goIdent(goName)))
+		}
+	case *hir.ClassDecl:
+		if inner.Symbol != nil {
+			inner.Symbol.Exported = true
+		}
+		l.lowerClassDecl(inner)
+	case *hir.VarDecl:
+		// export default expr → var Default = expr
+		for _, decl := range inner.Declarators {
+			var value ast.Expr
+			if decl.Init != nil {
+				value = l.lowerExpr(decl.Init)
+				value = jsvalueWrapLit(value)
+			}
+			l.decls = append(l.decls, varDecl("Default", nil, value))
+			return
+		}
+	default:
+		l.lowerDecl(d.Decl)
 	}
 }
 
@@ -522,6 +611,101 @@ func (l *Lowerer) getOrCreateMain() *ast.FuncDecl {
 	return fd
 }
 
+// prescan collects metadata from HIR declarations before lowering.
+// Records function param counts and marks exported names.
+func (l *Lowerer) prescan(mod *hir.Module) {
+	for _, d := range mod.Declarations {
+		switch d := d.(type) {
+		case *hir.FuncDecl:
+			if d.Symbol != nil && d.Symbol.FuncInfo != nil {
+				// Already captured by HIR builder
+			}
+		case *hir.ExportDecl:
+			if d.Decl != nil {
+				if fd, ok := d.Decl.(*hir.FuncDecl); ok && fd.Symbol != nil {
+					fd.Symbol.Exported = true
+				}
+				if vd, ok := d.Decl.(*hir.VarDecl); ok {
+					for _, decl := range vd.Declarators {
+						if decl.Symbol != nil {
+							decl.Symbol.Exported = true
+						}
+					}
+				}
+				if cd, ok := d.Decl.(*hir.ClassDecl); ok && cd.Symbol != nil {
+					cd.Symbol.Exported = true
+				}
+			}
+		}
+	}
+}
+
+// fixInitCycles detects self-referencing package-level variable initializers
+// and splits them into forward declarations + init() assignments.
+func (l *Lowerer) fixInitCycles(decls []ast.Decl) []ast.Decl {
+	var result []ast.Decl
+	var initStmts []ast.Stmt
+
+	for _, d := range decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || gd.Tok != token.VAR {
+			result = append(result, d)
+			continue
+		}
+		hasCycle := false
+		for _, spec := range gd.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok || len(vs.Names) == 0 || len(vs.Values) == 0 {
+				continue
+			}
+			name := vs.Names[0].Name
+			if exprReferencesIdent(vs.Values[0], name) {
+				hasCycle = true
+				break
+			}
+		}
+		if hasCycle {
+			// Split: forward declare + init() assignment
+			for _, spec := range gd.Specs {
+				vs := spec.(*ast.ValueSpec)
+				fwd := varDecl(vs.Names[0].Name, vs.Type, nil)
+				result = append(result, fwd)
+				if len(vs.Values) > 0 {
+					initStmts = append(initStmts, assignStmt(
+						[]ast.Expr{goIdent(vs.Names[0].Name)},
+						[]ast.Expr{vs.Values[0]},
+					))
+				}
+			}
+		} else {
+			result = append(result, d)
+		}
+	}
+
+	if len(initStmts) > 0 {
+		initFn := funcDecl("init", fieldList(), nil, &ast.BlockStmt{List: initStmts})
+		result = append(result, initFn)
+	}
+
+	return result
+}
+
+// exprReferencesIdent checks if an AST expression references an identifier by name.
+func exprReferencesIdent(expr ast.Expr, name string) bool {
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		if id, ok := n.(*ast.Ident); ok && id.Name == name {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
 // --------------------------------------------------------------------
 // Function helpers
 // --------------------------------------------------------------------
@@ -587,6 +771,60 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 				})
 			}
 		}
+	}
+
+	// Lower body statements
+	for _, s := range body.Stmts {
+		if gs := l.lowerStmt(s); gs != nil {
+			stmts = append(stmts, gs)
+		}
+	}
+
+	return &ast.BlockStmt{List: stmts}
+}
+
+// lowerMethodBody is like lowerFuncBody but prepends `this := _args[0]`
+// and unpacks remaining params from _args[1:] offset.
+func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast.BlockStmt {
+	if body == nil {
+		return blockStmt()
+	}
+	var stmts []ast.Stmt
+	l.jsvalueImport()
+
+	// this := _args[0]
+	stmts = append(stmts, &ast.DeclStmt{
+		Decl: varDecl("this", jsValuePtrType(), nil),
+	})
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: &ast.BinaryExpr{
+			X: callExpr(goIdent("len"), goIdent("_args")), Op: token.GTR, Y: intLit("0"),
+		},
+		Body: blockStmt(assignStmt(
+			[]ast.Expr{goIdent("this")},
+			[]ast.Expr{&ast.IndexExpr{X: goIdent("_args"), Index: intLit("0")}},
+		)),
+	})
+
+	// Unpack named params from _args[1+i]
+	for i, p := range params {
+		if p.Symbol == nil {
+			continue
+		}
+		name := l.emitName(p.Symbol)
+		idx := i + 1 // offset by 1 for 'this'
+		stmts = append(stmts, &ast.DeclStmt{
+			Decl: varDecl(name, jsValuePtrType(), nil),
+		})
+		stmts = append(stmts, &ast.IfStmt{
+			Cond: &ast.BinaryExpr{
+				X: callExpr(goIdent("len"), goIdent("_args")), Op: token.GTR, Y: intLit(itoa(idx)),
+			},
+			Body: blockStmt(assignStmt(
+				[]ast.Expr{goIdent(name)},
+				[]ast.Expr{&ast.IndexExpr{X: goIdent("_args"), Index: intLit(itoa(idx))}},
+			)),
+		})
 	}
 
 	// Lower body statements
