@@ -106,9 +106,7 @@ func (l *Lowerer) lowerExpr(e hir.Expr) ast.Expr {
 		return goIdent("nil")
 
 	case *hir.TaggedTemplateLiteral:
-		tag := l.lowerExpr(e.Tag)
-		tmpl := l.lowerExpr(e.Template)
-		return callExpr(tag, tmpl)
+		return l.lowerTaggedTemplate(e)
 
 	default:
 		return goIdent("nil")
@@ -170,8 +168,15 @@ func (l *Lowerer) lowerLiteral(e *hir.Literal) ast.Expr {
 	case hir.LitUndefined:
 		return callExpr(selectorExpr(goIdent("jsvalue"), "NewUndefined"))
 	case hir.LitRegex:
-		return callExpr(selectorExpr(goIdent("jsvalue"), "NewRegex"),
-			callExpr(selectorExpr(goIdent("jsvalue"), "CompileRegex"), stringLit(e.Value)))
+		// Parse /pattern/flags
+		pattern, flags := parseRegexLiteral(e.Value)
+		compiled := callExpr(selectorExpr(goIdent("jsvalue"), "CompileRegex"), stringLit(pattern))
+		if flags != "" {
+			// Pass flags as second argument (runtime can use them for matching behavior)
+			return callExpr(selectorExpr(goIdent("jsvalue"), "NewRegexWithFlags"),
+				compiled, stringLit(flags))
+		}
+		return callExpr(selectorExpr(goIdent("jsvalue"), "NewRegex"), compiled)
 	default:
 		return goIdent(e.Value)
 	}
@@ -196,6 +201,30 @@ func (l *Lowerer) lowerTemplateLiteral(e *hir.TemplateLiteral) ast.Expr {
 	sprintfArgs := append([]ast.Expr{stringLit(format.String())}, args...)
 	formatted := callExpr(selectorExpr(goIdent("fmt"), "Sprintf"), sprintfArgs...)
 	return callExpr(selectorExpr(goIdent("jsvalue"), "NewString"), formatted)
+}
+
+func (l *Lowerer) lowerTaggedTemplate(e *hir.TaggedTemplateLiteral) ast.Expr {
+	l.jsvalueImport()
+	tag := l.lowerExpr(e.Tag)
+
+	// Build strings array and expressions list from template parts
+	var stringParts []ast.Expr
+	var exprParts []ast.Expr
+
+	if e.Template != nil {
+		for _, part := range e.Template.Parts {
+			if lit, ok := part.(*hir.Literal); ok && lit.Kind == hir.LitString {
+				stringParts = append(stringParts, callExpr(selectorExpr(goIdent("jsvalue"), "NewString"), stringLit(lit.Value)))
+			} else {
+				exprParts = append(exprParts, l.lowerExpr(part))
+			}
+		}
+	}
+
+	// tag(jsvalue.NewArray(strings...), expr1, expr2, ...)
+	stringsArr := callExpr(selectorExpr(goIdent("jsvalue"), "NewArray"), stringParts...)
+	args := append([]ast.Expr{stringsArr}, exprParts...)
+	return callExpr(tag, args...)
 }
 
 func (l *Lowerer) lowerArrayLiteral(e *hir.ArrayLiteral) ast.Expr {
@@ -346,17 +375,14 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 		if l.exprIsJSValue(mem.Object) {
 			l.jsvalueImport()
 			obj := l.lowerExpr(mem.Object)
-			var wrappedArgs []ast.Expr
-			wrappedArgs = append(wrappedArgs, stringLit(mem.Property))
-			for _, a := range e.Args {
-				wrappedArgs = append(wrappedArgs, l.wrapAsJSValue(l.lowerExpr(a)))
-			}
+			argExprs, hasSpread := l.lowerCallArgs(e.Args, true)
+			wrappedArgs := append([]ast.Expr{stringLit(mem.Property)}, argExprs...)
 			// For complex receivers, wrap in IIFE to evaluate once
 			if !l.isSimpleExpr(obj) {
 				recv := goIdent("_recv")
 				recvArgs := make([]ast.Expr, len(wrappedArgs))
 				copy(recvArgs, wrappedArgs)
-				innerCall := callExpr(selectorExpr(recv, "MethodCall"), recvArgs...)
+				innerCall := buildCallWithSpread(selectorExpr(recv, "MethodCall"), recvArgs, hasSpread)
 				return callExpr(&ast.FuncLit{
 					Type: &ast.FuncType{
 						Params:  fieldList(goField("_recv", jsValuePtrType())),
@@ -365,7 +391,7 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 					Body: blockStmt(returnStmt(innerCall)),
 				}, obj)
 			}
-			return callExpr(selectorExpr(obj, "MethodCall"), wrappedArgs...)
+			return buildCallWithSpread(selectorExpr(obj, "MethodCall"), wrappedArgs, hasSpread)
 		}
 	}
 
@@ -396,20 +422,14 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 			if isJSValueFunc {
 				l.jsvalueImport()
 				fn := l.lowerIdentifier(id)
-				var wrappedArgs []ast.Expr
-				for _, a := range e.Args {
-					wrappedArgs = append(wrappedArgs, l.wrapAsJSValue(l.lowerExpr(a)))
-				}
-				return callExpr(selectorExpr(fn, "Call"), wrappedArgs...)
+				wrappedArgs, hasSpread := l.lowerCallArgs(e.Args, true)
+				return buildCallWithSpread(selectorExpr(fn, "Call"), wrappedArgs, hasSpread)
 			}
 		}
 	}
 
 	fn := l.lowerExpr(e.Func)
-	var args []ast.Expr
-	for _, a := range e.Args {
-		args = append(args, l.lowerExpr(a))
-	}
+	args, hasSpread := l.lowerCallArgs(e.Args, false)
 
 	// If the lowered function expression is already JSValue (e.g. .Get() result),
 	// use .Call() to invoke it
@@ -418,10 +438,52 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 		for i, a := range args {
 			args[i] = jsvalueWrapLit(a)
 		}
-		return callExpr(selectorExpr(fn, "Call"), args...)
+		return buildCallWithSpread(selectorExpr(fn, "Call"), args, hasSpread)
 	}
 
-	return callExpr(fn, args...)
+	return buildCallWithSpread(fn, args, hasSpread)
+}
+
+// lowerCallArgs lowers call arguments, handling spread expressions.
+// Returns the lowered args and whether the last arg has spread (Ellipsis).
+func (l *Lowerer) lowerCallArgs(hirArgs []hir.Expr, wrap bool) ([]ast.Expr, bool) {
+	var args []ast.Expr
+	hasTrailingSpread := false
+	for i, a := range hirArgs {
+		if spread, ok := a.(*hir.SpreadExpr); ok {
+			val := l.lowerExpr(spread.Value)
+			if i == len(hirArgs)-1 {
+				// Trailing spread: use Ellipsis
+				// Convert JSValue to slice: val.Array()
+				args = append(args, callExpr(selectorExpr(val, "Array")))
+				hasTrailingSpread = true
+			} else {
+				// Mid-position spread — just pass through (simplified)
+				if wrap {
+					args = append(args, l.wrapAsJSValue(val))
+				} else {
+					args = append(args, val)
+				}
+			}
+		} else {
+			lowered := l.lowerExpr(a)
+			if wrap {
+				args = append(args, l.wrapAsJSValue(lowered))
+			} else {
+				args = append(args, lowered)
+			}
+		}
+	}
+	return args, hasTrailingSpread
+}
+
+// buildCallWithSpread creates a call expression, setting Ellipsis if the last arg is spread.
+func buildCallWithSpread(fun ast.Expr, args []ast.Expr, hasSpread bool) *ast.CallExpr {
+	c := callExpr(fun, args...)
+	if hasSpread {
+		c.Ellipsis = 1
+	}
+	return c
 }
 
 // wrapAsJSValue wraps an expression to ensure it's *jsvalue.JSValue.
@@ -473,6 +535,11 @@ func (l *Lowerer) lowerNewExpr(e *hir.NewExpr) ast.Expr {
 }
 
 func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
+	// Optional chaining: a?.b → IIFE with null check
+	if e.Optional {
+		return l.lowerOptionalMember(e)
+	}
+
 	// Check for builtin member access through context (e.g. process.env)
 	if id, ok := e.Object.(*hir.Identifier); ok {
 		name := id.Name
@@ -522,6 +589,47 @@ func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 	// Default for unknown: use .Get() (safer — assumes JSValue)
 	l.jsvalueImport()
 	return callExpr(selectorExpr(obj, "Get"), stringLit(e.Property))
+}
+
+// lowerOptionalMember handles a?.b → IIFE with jsvalue.Eq null check.
+func (l *Lowerer) lowerOptionalMember(e *hir.MemberExpr) ast.Expr {
+	l.jsvalueImport()
+	obj := l.lowerExpr(e.Object)
+
+	// func() *jsvalue.JSValue {
+	//   _o := obj
+	//   if jsvalue.Eq(_o, jsvalue.NewNull()).Bool() || _o == nil {
+	//     return jsvalue.NewUndefined()
+	//   }
+	//   return _o.Get("prop")
+	// }()
+	tmpName := "_o"
+	nullCheck := &ast.BinaryExpr{
+		X: callExpr(selectorExpr(
+			callExpr(selectorExpr(goIdent("jsvalue"), "Eq"),
+				goIdent(tmpName),
+				callExpr(selectorExpr(goIdent("jsvalue"), "NewNull"))),
+			"Bool")),
+		Op: token.LOR,
+		Y:  &ast.BinaryExpr{X: goIdent(tmpName), Op: token.EQL, Y: goIdent("nil")},
+	}
+
+	return &ast.CallExpr{
+		Fun: &ast.FuncLit{
+			Type: &ast.FuncType{
+				Params:  fieldList(),
+				Results: fieldList(goField("", jsValuePtrType())),
+			},
+			Body: blockStmt(
+				assignDefine([]ast.Expr{goIdent(tmpName)}, []ast.Expr{obj}),
+				&ast.IfStmt{
+					Cond: nullCheck,
+					Body: blockStmt(returnStmt(callExpr(selectorExpr(goIdent("jsvalue"), "NewUndefined")))),
+				},
+				returnStmt(callExpr(selectorExpr(goIdent(tmpName), "Get"), stringLit(e.Property))),
+			),
+		},
+	}
 }
 
 // exprIsJSValue returns true if the HIR expression is known to produce *jsvalue.JSValue.
@@ -643,4 +751,17 @@ func (l *Lowerer) AddImport(pkg string) {
 
 func (l *Lowerer) AddAliasedImport(pkg, alias string) {
 	l.addAliasedImport(pkg, alias)
+}
+
+// parseRegexLiteral splits /pattern/flags into pattern and flags.
+func parseRegexLiteral(s string) (pattern, flags string) {
+	if len(s) < 2 || s[0] != '/' {
+		return s, ""
+	}
+	lastSlash := strings.LastIndex(s[1:], "/")
+	if lastSlash < 0 {
+		return s, ""
+	}
+	lastSlash++
+	return s[1:lastSlash], s[lastSlash+1:]
 }

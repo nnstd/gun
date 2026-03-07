@@ -273,27 +273,33 @@ func (b *Builder) buildForOfStmt(node *sitter.Node) *ForOfStmt {
 	stmt := &ForOfStmt{}
 
 	if leftNode != nil {
-		// Could be a destructuring pattern or simple variable
-		varName := b.extractVarName(leftNode)
-		if varName != "" {
-			stmt.Elem = b.symtab.Define(varName, symbol.KindVariable)
-		} else {
-			// Try as destructuring pattern
-			inner := leftNode
-			// Unwrap lexical_declaration if present
-			if inner.Kind() == "lexical_declaration" || inner.Kind() == "variable_declaration" {
-				for i := uint(0); i < inner.NamedChildCount(); i++ {
-					child := inner.NamedChild(i)
-					if child.Kind() == "variable_declarator" {
-						nameNode := child.ChildByFieldName("name")
-						if nameNode != nil {
-							if nameNode.Kind() == "object_pattern" {
-								stmt.Pattern = b.buildObjectPattern(nameNode)
-							} else if nameNode.Kind() == "array_pattern" {
-								stmt.Pattern = b.buildArrayPattern(nameNode)
+		switch leftNode.Kind() {
+		case "array_pattern":
+			stmt.Pattern = b.buildArrayPattern(leftNode)
+		case "object_pattern":
+			stmt.Pattern = b.buildObjectPattern(leftNode)
+		default:
+			// Could be a simple variable or lexical_declaration wrapping a pattern
+			varName := b.extractVarName(leftNode)
+			if varName != "" {
+				stmt.Elem = b.symtab.Define(varName, symbol.KindVariable)
+			} else {
+				// Unwrap lexical_declaration/variable_declaration
+				inner := leftNode
+				if inner.Kind() == "lexical_declaration" || inner.Kind() == "variable_declaration" {
+					for i := uint(0); i < inner.NamedChildCount(); i++ {
+						child := inner.NamedChild(i)
+						if child.Kind() == "variable_declarator" {
+							nameNode := child.ChildByFieldName("name")
+							if nameNode != nil {
+								if nameNode.Kind() == "object_pattern" {
+									stmt.Pattern = b.buildObjectPattern(nameNode)
+								} else if nameNode.Kind() == "array_pattern" {
+									stmt.Pattern = b.buildArrayPattern(nameNode)
+								}
 							}
+							break
 						}
-						break
 					}
 				}
 			}

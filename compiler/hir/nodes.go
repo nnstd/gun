@@ -535,10 +535,11 @@ type NewExpr struct {
 	Args   []Expr
 }
 
-// MemberExpr is a property access: obj.prop.
+// MemberExpr is a property access: obj.prop or obj?.prop.
 type MemberExpr struct {
 	Object   Expr
 	Property string // property name
+	Optional bool   // true for optional chaining: obj?.prop
 }
 
 // ComputedMemberExpr is a computed property access: obj[expr].

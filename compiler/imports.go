@@ -59,7 +59,6 @@ func init() {
 	})
 	registerModule("path", "github.com/nnstd/gun/runtime/path", "nodepath", nil)
 	registerModule("os", "github.com/nnstd/gun/runtime/os", "nodeos", nil)
-	registerModule("hono", "github.com/nnstd/gun/runtime/hono", "hono", nil)
 
 	// --- Go stdlib mappings ---
 

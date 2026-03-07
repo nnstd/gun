@@ -58,6 +58,11 @@ func Lower(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, s
 	// Fix init cycles: split self-referencing vars into forward decl + init()
 	l.decls = l.fixInitCycles(l.decls)
 
+	// Ensure main() exists for runnable packages
+	if mod.Package == "main" {
+		l.getOrCreateMain()
+	}
+
 	file := &ast.File{
 		Name:  goIdent(mod.Package),
 		Decls: l.decls,

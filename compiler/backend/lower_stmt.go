@@ -319,13 +319,27 @@ func (l *Lowerer) lowerForInStmt(s *hir.ForInStmt) ast.Stmt {
 func (l *Lowerer) lowerForOfStmt(s *hir.ForOfStmt) ast.Stmt {
 	l.jsvalueImport()
 
+	value := l.lowerExpr(s.Value)
+	body := l.lowerBlock(s.Body)
+
+	if s.Pattern != nil {
+		// for (const {k, v} of entries) → iterate + destructure each element
+		tmpName := "_item"
+		destructStmts := l.lowerDestructuring(s.Pattern, goIdent(tmpName))
+		body.List = append(destructStmts, body.List...)
+		return &ast.RangeStmt{
+			Key:   goIdent("_"),
+			Value: goIdent(tmpName),
+			Tok:   token.DEFINE,
+			X:     callExpr(selectorExpr(value, "Array")),
+			Body:  body,
+		}
+	}
+
 	elemName := "_"
 	if s.Elem != nil {
 		elemName = l.emitName(s.Elem)
 	}
-
-	value := l.lowerExpr(s.Value)
-	body := l.lowerBlock(s.Body)
 
 	// for _, elem := range arr.Array()
 	return &ast.RangeStmt{

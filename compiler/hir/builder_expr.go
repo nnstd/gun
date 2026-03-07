@@ -544,18 +544,21 @@ func (b *Builder) buildMemberExpr(node *sitter.Node) Expr {
 
 	// Check for optional chaining: obj?.prop
 	isOptional := false
-	for i := uint(0); i < node.ChildCount(); i++ {
-		if node.Child(i).Kind() == "?." {
-			isOptional = true
-			break
+	if node.ChildByFieldName("optional_chain") != nil {
+		isOptional = true
+	}
+	if !isOptional {
+		for i := uint(0); i < node.ChildCount(); i++ {
+			if node.Child(i).Kind() == "?." || node.Child(i).Kind() == "optional_chain" {
+				isOptional = true
+				break
+			}
 		}
 	}
-	_ = isOptional // preserved in HIR for later use
-
 	obj := b.buildExpr(objNode)
 	prop := b.nodeText(propNode)
 
-	return &MemberExpr{Object: obj, Property: prop}
+	return &MemberExpr{Object: obj, Property: prop, Optional: isOptional}
 }
 
 func (b *Builder) buildComputedMemberExpr(node *sitter.Node) Expr {

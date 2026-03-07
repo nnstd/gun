@@ -299,13 +299,6 @@ func registerConstructors(ctx *tcontext.TranspilerContext) {
 		},
 	})
 
-	ctx.RegisterConstructor(&tcontext.Constructor{
-		Name: "Hono",
-		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
-			imp.AddImport("github.com/nnstd/gun/runtime/hono")
-			return callExpr(selectorExpr(ident("hono"), "New"))
-		},
-	})
 
 	ctx.RegisterConstructor(&tcontext.Constructor{
 		Name: "IntlSegmenter",
@@ -466,10 +459,6 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterModule("os", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/os",
 		GoPkgName:    "nodeos",
-	})
-	ctx.RegisterModule("hono", &tcontext.ModuleMapping{
-		GoImportPath: "github.com/nnstd/gun/runtime/hono",
-		GoPkgName:    "hono",
 	})
 	ctx.RegisterModule("http", &tcontext.ModuleMapping{
 		GoImportPath: "net/http",
