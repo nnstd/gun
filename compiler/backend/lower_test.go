@@ -260,10 +260,10 @@ func TestLowerEnumDecl(t *testing.T) {
 	}
 	s := string(out)
 	assertContains(t, s, "Color")
-	assertContains(t, s, "iota")
-	assertContains(t, s, "ColorRed")
-	assertContains(t, s, "ColorGreen")
-	assertContains(t, s, "ColorBlue")
+	assertContains(t, s, "jsvalue.NewObject()")
+	assertContains(t, s, `Color.Set("Red"`)
+	assertContains(t, s, `Color.Set("Green"`)
+	assertContains(t, s, `Color.Set("Blue"`)
 }
 
 // --- Round-trip tests: TS → HIR → Lower → Generate ---
@@ -361,7 +361,16 @@ func TestRoundTripClass(t *testing.T) {
 func TestRoundTripEnum(t *testing.T) {
 	out := lowerTS(t, `enum Direction { Up, Down, Left, Right }`)
 	assertContains(t, out, "Direction")
-	assertContains(t, out, "iota")
+	assertContains(t, out, "jsvalue.NewObject()")
+	assertContains(t, out, `Direction.Set("Up"`)
+}
+
+func TestRoundTripStringEnum(t *testing.T) {
+	out := lowerTS(t, `enum Dir { Up = "UP", Down = "DOWN" }`)
+	assertContains(t, out, "Dir")
+	assertContains(t, out, "jsvalue.NewObject()")
+	assertContains(t, out, `Dir.Set("Up", jsvalue.NewString("UP"))`)
+	assertContains(t, out, `Dir.Set("Down", jsvalue.NewString("DOWN"))`)
 }
 
 // --- Optional chaining tests ---

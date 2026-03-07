@@ -254,64 +254,33 @@ func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 }
 
 func (l *Lowerer) lowerEnumDecl(d *hir.EnumDecl) {
+	l.jsvalueImport()
 	name := l.emitName(d.Symbol)
 
-	// Check if it's a string enum
-	isString := false
-	for _, m := range d.Members {
-		if m.Value != nil {
-			if lit, ok := m.Value.(*hir.Literal); ok && lit.Kind == hir.LitString {
-				isString = true
-				break
-			}
-		}
-	}
+	// Enum → JSValue object with member properties
+	// var EnumName = jsvalue.NewObject()
+	// var _ = EnumName.Set("MemberName", jsvalue.NewString("value"))
+	l.decls = append(l.decls, varDecl(name, nil,
+		callExpr(selectorExpr(goIdent("jsvalue"), "NewObject"))))
 
-	if isString {
-		// String enum: type Name string + const block
+	for i, m := range d.Members {
+		var val ast.Expr
+		if m.Value != nil {
+			val = l.lowerExpr(m.Value)
+		} else {
+			// Numeric enum: use the index
+			val = callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"),
+				callExpr(goIdent("float64"), intLit(itoa(i))))
+		}
+		setCall := callExpr(selectorExpr(goIdent(name), "Set"),
+			stringLit(m.Name), val)
 		l.decls = append(l.decls, &ast.GenDecl{
-			Tok: token.TYPE,
-			Specs: []ast.Spec{&ast.TypeSpec{
-				Name: goIdent(name),
-				Assign: 1,
-				Type: goIdent("string"),
+			Tok: token.VAR,
+			Specs: []ast.Spec{&ast.ValueSpec{
+				Names:  []*ast.Ident{goIdent("_")},
+				Values: []ast.Expr{setCall},
 			}},
 		})
-		var specs []ast.Spec
-		for _, m := range d.Members {
-			val := stringLit(m.Name)
-			if m.Value != nil {
-				val = l.lowerExpr(m.Value).(*ast.BasicLit)
-			}
-			specs = append(specs, &ast.ValueSpec{
-				Names:  []*ast.Ident{goIdent(name + m.Name)},
-				Values: []ast.Expr{val},
-			})
-		}
-		l.decls = append(l.decls, &ast.GenDecl{Tok: token.CONST, Specs: specs, Lparen: 1})
-	} else {
-		// Numeric enum: type Name int + const with iota
-		l.decls = append(l.decls, &ast.GenDecl{
-			Tok: token.TYPE,
-			Specs: []ast.Spec{&ast.TypeSpec{
-				Name: goIdent(name),
-				Assign: 1,
-				Type: goIdent("int"),
-			}},
-		})
-		var specs []ast.Spec
-		for i, m := range d.Members {
-			vs := &ast.ValueSpec{
-				Names: []*ast.Ident{goIdent(name + m.Name)},
-			}
-			if m.Value != nil {
-				vs.Values = []ast.Expr{l.lowerExpr(m.Value)}
-			} else if i == 0 {
-				vs.Values = []ast.Expr{goIdent("iota")}
-			}
-			specs = append(specs, vs)
-		}
-		l.decls = append(l.decls, &ast.GenDecl{Tok: token.CONST, Specs: specs, Lparen: 1})
 	}
 }
 
