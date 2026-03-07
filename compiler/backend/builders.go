@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"strconv"
 	"strings"
 )
 
@@ -18,7 +19,7 @@ func basicLit(kind token.Token, value string) *ast.BasicLit {
 }
 
 func stringLit(s string) *ast.BasicLit {
-	return basicLit(token.STRING, `"`+s+`"`)
+	return basicLit(token.STRING, strconv.Quote(s))
 }
 
 func intLit(s string) *ast.BasicLit {

@@ -140,6 +140,14 @@ func (t *Table) ReserveName(name string, sym *Symbol) string {
 	return name
 }
 
+// ReserveNameStr marks a Go name as taken without a symbol.
+// Uses a sentinel ID so any subsequent EmitName call sees a collision.
+func (t *Table) ReserveNameStr(name string) {
+	if _, taken := t.emittedNames[name]; !taken {
+		t.emittedNames[name] = -1 // sentinel: no symbol owns this name
+	}
+}
+
 // ForEach iterates over all symbols in the table.
 func (t *Table) ForEach(fn func(sym *Symbol)) {
 	for _, sym := range t.allSymbols {

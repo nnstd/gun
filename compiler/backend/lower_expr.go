@@ -260,10 +260,14 @@ func (l *Lowerer) lowerArrayLiteral(e *hir.ArrayLiteral) ast.Expr {
 	l.jsvalueImport()
 	var args []ast.Expr
 	for _, elem := range e.Elements {
-		if elem != nil {
-			arg := l.lowerExpr(elem)
-			args = append(args, jsvalueWrapLit(arg))
+		if elem == nil {
+			continue
 		}
+		arg := l.lowerExpr(elem)
+		if arg == nil {
+			continue
+		}
+		args = append(args, jsvalueWrapLit(arg))
 	}
 	return callExpr(selectorExpr(goIdent("jsvalue"), "NewArray"), args...)
 }
@@ -518,6 +522,9 @@ func (l *Lowerer) lowerCallArgs(hirArgs []hir.Expr, wrap bool) ([]ast.Expr, bool
 			}
 		} else {
 			lowered := l.lowerExpr(a)
+			if lowered == nil {
+				continue
+			}
 			if wrap {
 				args = append(args, l.wrapAsJSValue(lowered))
 			} else {

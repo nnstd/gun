@@ -439,6 +439,15 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 			return selectorExpr(ident("jsvalue"), "Truthy")
 		},
 	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "module",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			// module as standalone → JSValue object (for module.exports pattern)
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "NewObject"))
+		},
+	})
 }
 
 // registerModules registers TS module → Go package mappings.

@@ -38,6 +38,7 @@ type Lowerer struct {
 	varTypes         map[string]string                    // variable name → module type (e.g. "hono")
 	crossFileExports map[string]bool                      // Go names from other files (prevents .Get() dispatch)
 	initStmts        []ast.Stmt                           // statements for init() function
+	pkgName          string                               // Go package name
 }
 
 // Lower converts an HIR module to a Go AST file.
@@ -60,7 +61,14 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 		moduleName:       moduleName,
 		samePackage:      samePackageImports,
 		crossFileExports: cfe,
+		pkgName:          mod.Package,
 		varTypes:     make(map[string]string),
+	}
+
+	// Reserve cross-file export names in the symbol table so local symbols
+	// get suffixed on collision instead of redeclaring.
+	for name := range l.crossFileExports {
+		l.symtab.ReserveNameStr(name)
 	}
 
 	// Pre-scan: collect function param counts for nil-padding callers
@@ -595,9 +603,16 @@ func fileSpecificDefaultName(modulePath string) string {
 }
 
 func (l *Lowerer) lowerTopLevelStmt(d *hir.TopLevelStmt) {
-	mainFn := l.getOrCreateMain()
-	if gs := l.lowerStmt(d.Stmt); gs != nil {
+	gs := l.lowerStmt(d.Stmt)
+	if gs == nil {
+		return
+	}
+	if l.pkgName == "main" {
+		mainFn := l.getOrCreateMain()
 		mainFn.Body.List = append(mainFn.Body.List, gs)
+	} else {
+		// Non-main packages: top-level statements go into init()
+		l.initStmts = append(l.initStmts, gs)
 	}
 }
 
@@ -651,23 +666,57 @@ func (l *Lowerer) prescan(mod *hir.Module) {
 	}
 }
 
-// markCrossFileExported marks symbols whose capitalized name matches a cross-file export.
+// markCrossFileExported marks symbols whose capitalized name matches a cross-file export,
+// but ONLY if the original name itself would capitalize to that export name AND no other
+// symbol in the same file already has that capitalized name.
 func (l *Lowerer) markCrossFileExported(mod *hir.Module) {
+	// Build set of all original names in this file to detect conflicts
+	localNames := make(map[string]bool)
 	for _, d := range mod.Declarations {
 		switch d := d.(type) {
 		case *hir.FuncDecl:
-			if d.Symbol != nil && l.crossFileExports[symbol.Capitalize(d.Symbol.OriginalName)] {
-				d.Symbol.Exported = true
+			if d.Symbol != nil {
+				localNames[d.Symbol.OriginalName] = true
 			}
 		case *hir.VarDecl:
 			for _, decl := range d.Declarators {
-				if decl.Symbol != nil && l.crossFileExports[symbol.Capitalize(decl.Symbol.OriginalName)] {
-					decl.Symbol.Exported = true
+				if decl.Symbol != nil {
+					localNames[decl.Symbol.OriginalName] = true
 				}
 			}
 		case *hir.ClassDecl:
-			if d.Symbol != nil && l.crossFileExports[symbol.Capitalize(d.Symbol.OriginalName)] {
-				d.Symbol.Exported = true
+			if d.Symbol != nil {
+				localNames[d.Symbol.OriginalName] = true
+			}
+		}
+	}
+
+	for _, d := range mod.Declarations {
+		switch d := d.(type) {
+		case *hir.FuncDecl:
+			if d.Symbol != nil {
+				capName := symbol.Capitalize(d.Symbol.OriginalName)
+				// Only mark as exported if the capitalized name is in cross-file exports
+				// AND no other local symbol already claims that capitalized name
+				if l.crossFileExports[capName] && !localNames[capName] {
+					d.Symbol.Exported = true
+				}
+			}
+		case *hir.VarDecl:
+			for _, decl := range d.Declarators {
+				if decl.Symbol != nil {
+					capName := symbol.Capitalize(decl.Symbol.OriginalName)
+					if l.crossFileExports[capName] && !localNames[capName] {
+						decl.Symbol.Exported = true
+					}
+				}
+			}
+		case *hir.ClassDecl:
+			if d.Symbol != nil {
+				capName := symbol.Capitalize(d.Symbol.OriginalName)
+				if l.crossFileExports[capName] && !localNames[capName] {
+					d.Symbol.Exported = true
+				}
 			}
 		}
 	}

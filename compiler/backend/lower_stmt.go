@@ -556,6 +556,16 @@ func (l *Lowerer) ensureBool(expr ast.Expr) ast.Expr {
 		return expr
 	}
 
+	// Check if expression produces int (Len(), len())
+	if call, ok := expr.(*ast.CallExpr); ok {
+		if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Len" {
+			return &ast.BinaryExpr{X: expr, Op: token.GTR, Y: intLit("0")}
+		}
+		if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "len" {
+			return &ast.BinaryExpr{X: expr, Op: token.GTR, Y: intLit("0")}
+		}
+	}
+
 	// JSValue expression → .Bool()
 	return callExpr(selectorExpr(expr, "Bool"))
 }
@@ -578,8 +588,21 @@ func (l *Lowerer) isNativeBool(expr ast.Expr) bool {
 	case *ast.ParenExpr:
 		return l.isNativeBool(e.X)
 	case *ast.CallExpr:
-		// .Bool() itself returns bool
-		if sel, ok := e.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Bool" {
+		if sel, ok := e.Fun.(*ast.SelectorExpr); ok {
+			// .Bool() itself returns bool
+			if sel.Sel.Name == "Bool" {
+				return true
+			}
+			// .Len() returns int (native Go)
+			if sel.Sel.Name == "Len" {
+				return true
+			}
+			// len() returns int
+			if id, ok2 := sel.X.(*ast.Ident); ok2 && id.Name == "len" {
+				return true
+			}
+		}
+		if id, ok := e.Fun.(*ast.Ident); ok && (id.Name == "len" || id.Name == "cap") {
 			return true
 		}
 	}
