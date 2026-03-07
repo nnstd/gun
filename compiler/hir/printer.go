@@ -51,6 +51,11 @@ func (p *printer) printDecl(d Decl) {
 	switch d := d.(type) {
 	case *ImportDecl:
 		p.printImport(d)
+	case *TopLevelStmt:
+		p.write("TopLevel")
+		p.in()
+		p.printStmt(d.Stmt)
+		p.out()
 	case *ExportDecl:
 		p.printExport(d)
 	case *FuncDecl:

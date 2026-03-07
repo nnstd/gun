@@ -66,6 +66,8 @@ func (l *lowerer) lowerDecl(d hir.Decl) {
 		l.lowerExportDecl(d)
 	case *hir.EnumDecl:
 		l.lowerEnumDecl(d)
+	case *hir.TopLevelStmt:
+		// Top-level statements don't produce MIR functions — handled by backend
 	case *hir.InterfaceDecl, *hir.TypeAliasDecl, *hir.ImportDecl:
 		// Type-level declarations don't produce MIR functions or globals
 	}

@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	tcontext "github.com/nnstd/gun/compiler/context"
+	"github.com/nnstd/gun/compiler/pipeline"
 )
 
 // PackageExport describes a symbol exported from a file within the same package.
@@ -57,6 +60,25 @@ func CompileWithExports(source []byte, pkgName, moduleName, currentFile string, 
 	}
 
 	return output, nil
+}
+
+// CompileNewPipeline transpiles TypeScript source using the new multi-stage pipeline
+// (HIR → MIR → SSA → Passes → Backend). This is the experimental path that uses
+// hygienic symbol IDs and the full optimization pipeline.
+func CompileNewPipeline(source []byte, pkgName string, optLevel int) ([]byte, error) {
+	tree, err := parseTypeScript(source)
+	if err != nil {
+		return nil, fmt.Errorf("parse: %w", err)
+	}
+	defer tree.Close()
+
+	ctx := tcontext.New()
+	registerDefaultBuiltins(ctx)
+
+	level := pipeline.OptLevel(optLevel)
+	p := pipeline.NewWithContext(level, ctx)
+
+	return p.CompileTree(tree.RootNode(), source, pkgName)
 }
 
 // CompilePackage transpiles multiple TypeScript files that belong to the

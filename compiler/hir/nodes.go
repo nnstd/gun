@@ -171,6 +171,12 @@ type ImportBinding struct {
 	Symbol       *symbol.Symbol // resolved symbol
 }
 
+// TopLevelStmt wraps a statement that appears at the top level of a module.
+// In Go, these become the body of main() or init().
+type TopLevelStmt struct {
+	Stmt Stmt
+}
+
 // ExportDecl wraps a declaration that is being exported.
 type ExportDecl struct {
 	Decl      Decl   // the underlying declaration (may be nil for re-exports)
@@ -629,6 +635,8 @@ func (*ImportDecl) hirNode()    {}
 func (*ImportDecl) hirDecl()    {}
 func (*ExportDecl) hirNode()    {}
 func (*ExportDecl) hirDecl()    {}
+func (*TopLevelStmt) hirNode()  {}
+func (*TopLevelStmt) hirDecl()  {}
 
 func (*BlockStmt) hirNode()    {}
 func (*BlockStmt) hirStmt()    {}

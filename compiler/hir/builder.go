@@ -78,20 +78,7 @@ func (b *Builder) buildTopLevel(mod *Module, node *sitter.Node) {
 		}
 	case "expression_statement":
 		if s := b.buildStmt(node); s != nil {
-			// Top-level expression statements become declarations
-			// wrapped in an ExportDecl with no export (just a statement container)
-			// For now we store them as a VarDecl-less ExportDecl
-			mod.Declarations = append(mod.Declarations, &ExportDecl{
-				Decl: &VarDecl{
-					Declarators: []*Declarator{{
-						Init: &CallExpr{
-							Func: &ArrowFunc{
-								Body: &BlockStmt{Stmts: []Stmt{s}},
-							},
-						},
-					}},
-				},
-			})
+			mod.Declarations = append(mod.Declarations, &TopLevelStmt{Stmt: s})
 		}
 	case "comment", "line_comment", "block_comment":
 		// skip

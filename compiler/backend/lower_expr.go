@@ -297,6 +297,42 @@ func (l *Lowerer) lowerAssignExpr(e *hir.AssignExpr) ast.Expr {
 }
 
 func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
+	// Check for builtin method calls: console.log(), Math.floor(), JSON.parse(), etc.
+	if mem, ok := e.Func.(*hir.MemberExpr); ok {
+		if id, ok := mem.Object.(*hir.Identifier); ok {
+			objName := id.Name
+			if id.Sym != nil {
+				objName = id.Sym.OriginalName
+			}
+			if l.ctx != nil {
+				var args []ast.Expr
+				for _, a := range e.Args {
+					args = append(args, l.lowerExpr(a))
+				}
+				if result := l.ctx.TransformBuiltinCall(objName, mem.Property, args, l); result != nil {
+					return result
+				}
+			}
+		}
+	}
+
+	// Check for bare global function calls: parseInt(), isNaN(), etc.
+	if id, ok := e.Func.(*hir.Identifier); ok {
+		name := id.Name
+		if id.Sym != nil {
+			name = id.Sym.OriginalName
+		}
+		if l.ctx != nil {
+			var args []ast.Expr
+			for _, a := range e.Args {
+				args = append(args, l.lowerExpr(a))
+			}
+			if result := l.ctx.TransformGlobalCall(name, args, l); result != nil {
+				return result
+			}
+		}
+	}
+
 	fn := l.lowerExpr(e.Func)
 	var args []ast.Expr
 	for _, a := range e.Args {

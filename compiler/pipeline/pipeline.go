@@ -40,10 +40,16 @@ type Pipeline struct {
 }
 
 // New creates a pipeline with the given optimization level and default passes.
+// The context is empty — call NewWithContext to use pre-registered builtins.
 func New(level OptLevel) *Pipeline {
+	return NewWithContext(level, context.New())
+}
+
+// NewWithContext creates a pipeline with a pre-configured TranspilerContext.
+func NewWithContext(level OptLevel, ctx *context.TranspilerContext) *Pipeline {
 	p := &Pipeline{
 		OptLevel: level,
-		Ctx:      context.New(),
+		Ctx:      ctx,
 	}
 
 	switch level {

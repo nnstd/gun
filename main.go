@@ -21,11 +21,13 @@ var cli struct {
 }
 
 type TranspileCmd struct {
-	Input   string `arg:"" help:"Input .ts file or directory."`
-	Output  string `short:"o" help:"Output directory."`
-	Pkg     string `short:"p" default:"main" help:"Go package name."`
-	Verbose bool   `short:"v" help:"Verbose output."`
-	AST     bool   `help:"Print the tree-sitter AST instead of transpiling."`
+	Input    string `arg:"" help:"Input .ts file or directory."`
+	Output   string `short:"o" help:"Output directory."`
+	Pkg      string `short:"p" default:"main" help:"Go package name."`
+	Verbose  bool   `short:"v" help:"Verbose output."`
+	AST      bool   `help:"Print the tree-sitter AST instead of transpiling."`
+	Pipeline bool   `help:"Use new multi-stage pipeline (HIR→MIR→SSA→Backend)."`
+	OptLevel int    `short:"O" default:"0" help:"Optimization level for --pipeline (0, 1, 2)."`
 }
 
 type BuildCmd struct {
@@ -66,7 +68,11 @@ func (cmd *TranspileCmd) Run() error {
 
 	// No -o: just print to stdout
 	if cmd.Output == "" {
-		return transpileFile(cmd.Input, "", cmd.Pkg, "", cmd.Verbose, false)
+		return transpileFile(cmd.Input, "", cmd.Pkg, "", cmd.Verbose, false, cmd.Pipeline, cmd.OptLevel)
+	}
+
+	if cmd.Pipeline {
+		return transpileFile(cmd.Input, "", cmd.Pkg, "", cmd.Verbose, false, true, cmd.OptLevel)
 	}
 
 	return transpileProject(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose)
@@ -150,7 +156,7 @@ func transpileProject(input, outDir, pkg string, verbose bool) error {
 
 	moduleName := "gunrun"
 	goFile := filepath.Join(outDir, strings.TrimSuffix(filepath.Base(input), ".ts")+".go")
-	if err := transpileFile(input, goFile, pkg, moduleName, verbose, false); err != nil {
+	if err := transpileFile(input, goFile, pkg, moduleName, verbose, false, false, 0); err != nil {
 		return err
 	}
 
@@ -204,7 +210,7 @@ func main() {
 	}
 }
 
-func transpileFile(inputPath, outputPath, pkgName, moduleName string, verbose, samePackageImports bool) error {
+func transpileFile(inputPath, outputPath, pkgName, moduleName string, verbose, samePackageImports bool, usePipeline bool, optLevel int) error {
 	source, err := os.ReadFile(inputPath)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", inputPath, err)
@@ -214,10 +220,15 @@ func transpileFile(inputPath, outputPath, pkgName, moduleName string, verbose, s
 		fmt.Fprintf(os.Stderr, "compiling %s\n", inputPath)
 	}
 
-	if moduleName == "" {
-		moduleName = detectModuleName(inputPath)
+	var result []byte
+	if usePipeline {
+		result, err = compiler.CompileNewPipeline(source, pkgName, optLevel)
+	} else {
+		if moduleName == "" {
+			moduleName = detectModuleName(inputPath)
+		}
+		result, err = compiler.Compile(source, pkgName, moduleName, samePackageImports)
 	}
-	result, err := compiler.Compile(source, pkgName, moduleName, samePackageImports)
 	if err != nil {
 		return fmt.Errorf("compile %s: %w", inputPath, err)
 	}
@@ -257,7 +268,7 @@ func transpileDir(dirPath, outputDir, pkgName string, verbose bool) error {
 			return err
 		}
 
-		return transpileFile(path, outPath, pkgName, "", verbose, false)
+		return transpileFile(path, outPath, pkgName, "", verbose, false, false, 0)
 	})
 }
 
@@ -480,7 +491,7 @@ func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose b
 		}
 
 		outFile := filepath.Join(outDir, filepath.Base(strings.TrimSuffix(resolved, ".ts"))+".go")
-		if err := transpileFile(resolved, outFile, pkgName, moduleName, verbose, false); err != nil {
+		if err := transpileFile(resolved, outFile, pkgName, moduleName, verbose, false, false, 0); err != nil {
 			return err
 		}
 

@@ -100,6 +100,8 @@ func (l *Lowerer) lowerDecl(d hir.Decl) {
 		l.lowerExportDecl(d)
 	case *hir.ImportDecl:
 		l.lowerImportDecl(d)
+	case *hir.TopLevelStmt:
+		l.lowerTopLevelStmt(d)
 	}
 }
 
@@ -363,6 +365,27 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 			l.addImport(mod.GoImportPath)
 		}
 	}
+}
+
+func (l *Lowerer) lowerTopLevelStmt(d *hir.TopLevelStmt) {
+	mainFn := l.getOrCreateMain()
+	if gs := l.lowerStmt(d.Stmt); gs != nil {
+		mainFn.Body.List = append(mainFn.Body.List, gs)
+	}
+}
+
+// getOrCreateMain returns the main() function declaration, creating it if needed.
+func (l *Lowerer) getOrCreateMain() *ast.FuncDecl {
+	// Look for existing main func
+	for _, d := range l.decls {
+		if fd, ok := d.(*ast.FuncDecl); ok && fd.Name.Name == "main" {
+			return fd
+		}
+	}
+	// Create one
+	fd := funcDecl("main", fieldList(), nil, blockStmt())
+	l.decls = append(l.decls, fd)
+	return fd
 }
 
 // --------------------------------------------------------------------
