@@ -577,6 +577,10 @@ func (b *Builder) buildComputedMemberExpr(node *sitter.Node) Expr {
 
 func (b *Builder) buildArrowFunc(node *sitter.Node) *ArrowFunc {
 	paramsNode := node.ChildByFieldName("parameters")
+	if paramsNode == nil {
+		// Single-param arrow: code => ... uses "parameter" field (singular)
+		paramsNode = node.ChildByFieldName("parameter")
+	}
 	bodyNode := node.ChildByFieldName("body")
 
 	// Check for async

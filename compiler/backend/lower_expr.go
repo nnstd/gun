@@ -759,11 +759,12 @@ func (l *Lowerer) lowerArrowFunc(e *hir.ArrowFunc) ast.Expr {
 	if e.Body != nil {
 		body = l.lowerFuncBody(e.Params, e.Body)
 	} else if e.ExprBody != nil {
-		// Concise body: () => expr → return expr
-		val := l.lowerExpr(e.ExprBody)
-		val = jsvalueWrapLit(val)
-		body = l.lowerFuncBody(e.Params, &hir.BlockStmt{})
-		body.List = append(body.List, returnStmt(val))
+		// Concise body: () => expr → wrap as return statement in HIR body
+		val := e.ExprBody
+		hirBody := &hir.BlockStmt{
+			Stmts: []hir.Stmt{&hir.ReturnStmt{Value: val}},
+		}
+		body = l.lowerFuncBody(e.Params, hirBody)
 	} else {
 		body = blockStmt()
 	}
