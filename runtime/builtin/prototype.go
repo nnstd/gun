@@ -6,6 +6,10 @@ func safeArg(args []*JSValue, i int) *JSValue {
 	return nil
 }
 
+// Prototype is an alias for ObjectPrototype — used when JS code accesses
+// Object.prototype (transpiled as jsvalue.Prototype).
+var Prototype *JSValue
+
 // Global prototype singletons.
 var (
 	ObjectPrototype   *JSValue
@@ -41,6 +45,7 @@ func init() {
 		typ:        TypeObject,
 		properties: make(map[string]*PropertyDescriptor),
 	}
+	Prototype = ObjectPrototype
 
 	// Wire up child prototypes, all inheriting from ObjectPrototype.
 	StringPrototype = &JSValue{typ: TypeObject, properties: make(map[string]*PropertyDescriptor), prototype: ObjectPrototype}
