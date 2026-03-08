@@ -26,36 +26,64 @@ func (l *Lowerer) lowerBlock(b *hir.BlockStmt) *ast.BlockStmt {
 		if gs == nil {
 			continue
 		}
-		// Flatten inline BlockStmt (from multi-declarator VarDecl) to avoid scoping
+		// Flatten BlockStmt results to avoid creating unnecessary Go scopes.
+		// This covers both multi-declarator VarDecl (which produces BlockStmt)
+		// and standalone HIR BlockStmts (which tree-sitter creates for
+		// statement_block nodes within function bodies).
 		if block, ok := gs.(*ast.BlockStmt); ok {
-			if _, isHIRBlock := s.(*hir.BlockStmt); !isHIRBlock {
-				stmts = append(stmts, block.List...)
-				continue
-			}
+			stmts = append(stmts, block.List...)
+			continue
 		}
 		stmts = append(stmts, gs)
 	}
 	return &ast.BlockStmt{List: stmts}
 }
 
-// hoistFunctions reorders HIR statements so that function declarations
-// (VarDecl with ArrowFunc/FuncExpr init) at the current block level appear
-// before all other statements. Only hoists from the direct level — not from
-// nested blocks, because nested functions may capture variables from their scope.
+// hoistFunctions reorders HIR statements to match JS hoisting semantics:
+// All VarDecl statements (both function-valued and regular) are moved before
+// non-VarDecl statements. This ensures that all declarations are visible
+// before any code that references them, matching JS's function hoisting
+// and preventing "undefined" errors from forward references.
 func hoistFunctions(stmts []hir.Stmt) []hir.Stmt {
-	var funcs []hir.Stmt
+	var decls []hir.Stmt
 	var rest []hir.Stmt
 	for _, s := range stmts {
-		if isFuncDecl(s) {
-			funcs = append(funcs, s)
+		if _, ok := s.(*hir.VarDecl); ok {
+			decls = append(decls, s)
+		} else if block, ok := s.(*hir.BlockStmt); ok {
+			// Recursively extract VarDecl from nested blocks
+			innerDecls, innerRest := extractVarDecls(block.Stmts)
+			decls = append(decls, innerDecls...)
+			if len(innerRest) > 0 {
+				rest = append(rest, &hir.BlockStmt{Stmts: innerRest})
+			}
 		} else {
 			rest = append(rest, s)
 		}
 	}
-	if len(funcs) == 0 {
+	if len(decls) == 0 {
 		return stmts
 	}
-	return append(funcs, rest...)
+	return append(decls, rest...)
+}
+
+// extractVarDecls separates VarDecl statements from other statements,
+// recursing into nested BlockStmts.
+func extractVarDecls(stmts []hir.Stmt) (decls, rest []hir.Stmt) {
+	for _, s := range stmts {
+		if _, ok := s.(*hir.VarDecl); ok {
+			decls = append(decls, s)
+		} else if block, ok := s.(*hir.BlockStmt); ok {
+			innerDecls, innerRest := extractVarDecls(block.Stmts)
+			decls = append(decls, innerDecls...)
+			if len(innerRest) > 0 {
+				rest = append(rest, &hir.BlockStmt{Stmts: innerRest})
+			}
+		} else {
+			rest = append(rest, s)
+		}
+	}
+	return
 }
 
 func isFuncDecl(s hir.Stmt) bool {

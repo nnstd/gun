@@ -931,7 +931,7 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 			continue
 		}
 		if block, ok := gs.(*ast.BlockStmt); ok {
-			if _, isHIRBlock := s.(*hir.BlockStmt); !isHIRBlock {
+			if true {
 				stmts = append(stmts, block.List...)
 				continue
 			}
@@ -943,6 +943,9 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 	if !endsWithReturn(stmts) {
 		stmts = append(stmts, returnStmt(goIdent("nil")))
 	}
+
+	// Forward-declare variables used before their := definition
+	stmts = forwardDeclareVars(stmts)
 
 	return &ast.BlockStmt{List: stmts}
 }
@@ -1017,15 +1020,14 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 		})
 	}
 
-	// Hoist function declarations + lower body statements, flattening inline blocks
-	hoistedMethodBody := hoistFunctions(body.Stmts)
-	for _, s := range hoistedMethodBody {
+	// Lower body statements, flattening inline blocks
+	for _, s := range body.Stmts {
 		gs := l.lowerStmt(s)
 		if gs == nil {
 			continue
 		}
 		if block, ok := gs.(*ast.BlockStmt); ok {
-			if _, isHIRBlock := s.(*hir.BlockStmt); !isHIRBlock {
+			if true {
 				stmts = append(stmts, block.List...)
 				continue
 			}
@@ -1038,7 +1040,73 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 		stmts = append(stmts, returnStmt(goIdent("nil")))
 	}
 
+	// Forward-declare variables used before their := definition
+	stmts = forwardDeclareVars(stmts)
+
 	return &ast.BlockStmt{List: stmts}
+}
+
+// forwardDeclareVars scans Go statements for variables used before their :=
+// declaration. Adds `var name *jsvalue.JSValue` at top and changes := to =.
+func forwardDeclareVars(stmts []ast.Stmt) []ast.Stmt {
+	// Find all := declarations and their indices
+	declared := make(map[string]int) // name → index of first := decl
+	for i, s := range stmts {
+		if assign, ok := s.(*ast.AssignStmt); ok && assign.Tok == token.DEFINE {
+			for _, lhs := range assign.Lhs {
+				if id, ok := lhs.(*ast.Ident); ok {
+					if _, exists := declared[id.Name]; !exists {
+						declared[id.Name] = i
+					}
+				}
+			}
+		}
+	}
+	if len(declared) == 0 {
+		return stmts
+	}
+
+	// Check which variables are referenced before their declaration
+	forwarded := make(map[string]bool)
+	for name, declIdx := range declared {
+		for i := 0; i < declIdx; i++ {
+			if stmtReferencesIdent(stmts[i], name) {
+				forwarded[name] = true
+				break
+			}
+		}
+	}
+	if len(forwarded) == 0 {
+		return stmts
+	}
+
+	// Add forward declarations and change := to =
+	var fwd []ast.Stmt
+	for name := range forwarded {
+		fwd = append(fwd, &ast.DeclStmt{Decl: varDecl(name, jsValuePtrType(), nil)})
+	}
+	for i, s := range stmts {
+		if assign, ok := s.(*ast.AssignStmt); ok && assign.Tok == token.DEFINE {
+			for _, lhs := range assign.Lhs {
+				if id, ok := lhs.(*ast.Ident); ok && forwarded[id.Name] {
+					assign.Tok = token.ASSIGN
+					break
+				}
+			}
+		}
+		stmts[i] = s
+	}
+	return append(fwd, stmts...)
+}
+
+func stmtReferencesIdent(s ast.Stmt, name string) bool {
+	found := false
+	ast.Inspect(s, func(n ast.Node) bool {
+		if found { return false }
+		if id, ok := n.(*ast.Ident); ok && id.Name == name { found = true }
+		return !found
+	})
+	return found
 }
 
 // hirBodyUsesThis checks if an HIR block references `this`.
