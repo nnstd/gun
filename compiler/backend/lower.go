@@ -899,8 +899,11 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 		}
 	}
 
+	// Hoist function declarations to top of body (JS hoisting semantics)
+	hoistedBody := hoistFunctions(body.Stmts)
+
 	// Lower body statements, flattening inline blocks (multi-declarator VarDecl)
-	for _, s := range body.Stmts {
+	for _, s := range hoistedBody {
 		gs := l.lowerStmt(s)
 		if gs == nil {
 			continue
@@ -990,8 +993,9 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 		})
 	}
 
-	// Lower body statements, flattening inline blocks
-	for _, s := range body.Stmts {
+	// Hoist function declarations + lower body statements, flattening inline blocks
+	hoistedMethodBody := hoistFunctions(body.Stmts)
+	for _, s := range hoistedMethodBody {
 		gs := l.lowerStmt(s)
 		if gs == nil {
 			continue

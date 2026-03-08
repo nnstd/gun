@@ -15,16 +15,19 @@ func (l *Lowerer) lowerBlock(b *hir.BlockStmt) *ast.BlockStmt {
 	if b == nil {
 		return blockStmt()
 	}
+	// Hoist function declarations to the top of the block.
+	// JS hoists function declarations — they're available throughout
+	// their scope regardless of where they appear in the source.
+	hoisted := hoistFunctions(b.Stmts)
+
 	var stmts []ast.Stmt
-	for _, s := range b.Stmts {
+	for _, s := range hoisted {
 		gs := l.lowerStmt(s)
 		if gs == nil {
 			continue
 		}
 		// Flatten inline BlockStmt (from multi-declarator VarDecl) to avoid scoping
 		if block, ok := gs.(*ast.BlockStmt); ok {
-			// Only flatten if this looks like an inline block (from VarDecl),
-			// not a real control-flow block
 			if _, isHIRBlock := s.(*hir.BlockStmt); !isHIRBlock {
 				stmts = append(stmts, block.List...)
 				continue
@@ -33,6 +36,43 @@ func (l *Lowerer) lowerBlock(b *hir.BlockStmt) *ast.BlockStmt {
 		stmts = append(stmts, gs)
 	}
 	return &ast.BlockStmt{List: stmts}
+}
+
+// hoistFunctions reorders HIR statements so that function declarations
+// (VarDecl with ArrowFunc/FuncExpr init) at the current block level appear
+// before all other statements. Only hoists from the direct level — not from
+// nested blocks, because nested functions may capture variables from their scope.
+func hoistFunctions(stmts []hir.Stmt) []hir.Stmt {
+	var funcs []hir.Stmt
+	var rest []hir.Stmt
+	for _, s := range stmts {
+		if isFuncDecl(s) {
+			funcs = append(funcs, s)
+		} else {
+			rest = append(rest, s)
+		}
+	}
+	if len(funcs) == 0 {
+		return stmts
+	}
+	return append(funcs, rest...)
+}
+
+func isFuncDecl(s hir.Stmt) bool {
+	vd, ok := s.(*hir.VarDecl)
+	if !ok || len(vd.Declarators) == 0 {
+		return false
+	}
+	for _, d := range vd.Declarators {
+		if d.Init == nil {
+			continue
+		}
+		switch d.Init.(type) {
+		case *hir.ArrowFunc, *hir.FuncExpr:
+			return true
+		}
+	}
+	return false
 }
 
 func (l *Lowerer) lowerStmt(s hir.Stmt) ast.Stmt {
