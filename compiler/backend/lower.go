@@ -599,6 +599,20 @@ func (l *Lowerer) resolveModule(modulePath string) (goImportPath, goPkgName stri
 	return pkgName, pkgName, false
 }
 
+// collectUsedIdents walks Go AST declarations and returns all identifier names used.
+func collectUsedIdents(decls []ast.Decl) map[string]bool {
+	used := make(map[string]bool)
+	for _, d := range decls {
+		ast.Inspect(d, func(n ast.Node) bool {
+			if id, ok := n.(*ast.Ident); ok {
+				used[id.Name] = true
+			}
+			return true
+		})
+	}
+	return used
+}
+
 func isGunRuntimePkg(importPath string) bool {
 	return strings.HasPrefix(importPath, "github.com/nnstd/gun/runtime/")
 }
@@ -874,13 +888,13 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 		if p.Rest {
 			// Rest param: name := jsvalue.NewArray(_args[i:]...)
 			l.jsvalueImport()
+			restCall := callExpr(selectorExpr(goIdent("jsvalue"), "NewArray"),
+				&ast.SliceExpr{X: goIdent("_args"), Low: intLit(itoa(i))})
+			restCall.Ellipsis = 1 // spread the slice
 			stmts = append(stmts, &ast.AssignStmt{
 				Lhs: []ast.Expr{goIdent(name)},
 				Tok: token.DEFINE,
-				Rhs: []ast.Expr{
-					callExpr(selectorExpr(goIdent("jsvalue"), "NewArray"),
-						&ast.SliceExpr{X: goIdent("_args"), Low: intLit(itoa(i))}),
-				},
+				Rhs: []ast.Expr{restCall},
 			})
 		} else {
 			// Bounds-checked unpacking:

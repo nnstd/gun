@@ -129,7 +129,8 @@ func (l *Lowerer) lowerStmt(s hir.Stmt) ast.Stmt {
 			val = jsvalueWrapLit(val)
 			return returnStmt(val)
 		}
-		return returnStmt()
+		// Bare return → return nil (all functions return *jsvalue.JSValue)
+		return returnStmt(goIdent("nil"))
 
 	case *hir.BlockStmt:
 		return l.lowerBlock(s)
@@ -493,9 +494,10 @@ func (l *Lowerer) lowerTryCatchStmt(s *hir.TryCatchStmt) ast.Stmt {
 			paramName = l.emitName(s.Catch.Param)
 		}
 
+		// Strip return values from catch body (defer closures can't return values).
+		// Only strip at the direct level — don't recurse into nested FuncLit.
+		stripTopLevelReturns(catchBody)
 		// Prepend: paramName := jsvalue.From(r); _ = paramName
-		// Strip return values from catch body (defer closures can't return)
-		stripReturnValues(catchBody)
 		catchBody.List = append([]ast.Stmt{
 			assignDefine(
 				[]ast.Expr{goIdent(paramName)},
@@ -616,9 +618,9 @@ func (l *Lowerer) lowerUpdateStmt(update *hir.UpdateExpr) ast.Stmt {
 		[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "Dec"), operand)})
 }
 
-// stripReturnValues removes return values from return statements in a block.
-// Used for catch/finally bodies which are inside defer closures (can't return values).
-func stripReturnValues(block *ast.BlockStmt) {
+// stripTopLevelReturns removes return values from return statements at the
+// direct level of a block. Does NOT recurse into nested FuncLit bodies.
+func stripTopLevelReturns(block *ast.BlockStmt) {
 	for i, s := range block.List {
 		if ret, ok := s.(*ast.ReturnStmt); ok {
 			// Convert return with value to expression statement + bare return
@@ -633,9 +635,9 @@ func stripReturnValues(block *ast.BlockStmt) {
 			}
 		}
 		if ifStmt, ok := s.(*ast.IfStmt); ok {
-			stripReturnValues(ifStmt.Body)
+			stripTopLevelReturns(ifStmt.Body)
 			if elseBlock, ok := ifStmt.Else.(*ast.BlockStmt); ok {
-				stripReturnValues(elseBlock)
+				stripTopLevelReturns(elseBlock)
 			}
 		}
 	}

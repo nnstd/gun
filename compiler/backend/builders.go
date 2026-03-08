@@ -167,13 +167,15 @@ func jsvalueWrapLit(expr ast.Expr) ast.Expr {
 // isAlreadyJSValue returns true if the expression already produces *jsvalue.JSValue.
 func isAlreadyJSValue(expr ast.Expr) bool {
 	switch e := expr.(type) {
+	case *ast.ParenExpr:
+		return isAlreadyJSValue(e.X)
 	case *ast.CallExpr:
 		if sel, ok := e.Fun.(*ast.SelectorExpr); ok {
 			if id, ok := sel.X.(*ast.Ident); ok && id.Name == "jsvalue" {
 				return true
 			}
 			switch sel.Sel.Name {
-			case "Get", "Index", "Call":
+			case "Get", "Index", "Call", "MethodCall":
 				return true
 			}
 		}
