@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
 	"path"
@@ -512,9 +513,15 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 			continue
 		}
 		goSym := symbol.Capitalize(n.OriginalName)
-		// Same-package imports: don't capitalize (both files in same Go package)
+		// Same-package imports: check if the symbol is exported from the other file
+		// (and thus capitalized), or just an internal reference (stays lowercase).
 		if goImportPath == "" {
-			goSym = n.OriginalName
+			capName := symbol.Capitalize(n.OriginalName)
+			if l.crossFileExports[capName] {
+				goSym = capName // exported from other file → use capitalized
+			} else {
+				goSym = n.OriginalName // not exported → use original name
+			}
 		}
 		if overrides != nil {
 			if ov, ok := overrides[n.OriginalName]; ok {
@@ -806,6 +813,38 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 
 	// Unpack _args into named parameters
 	for i, p := range params {
+		// Destructuring parameter: unpack _args[i] then destructure
+		if p.Pattern != nil {
+			l.jsvalueImport()
+			tmpName := fmt.Sprintf("_param%d", i)
+			stmts = append(stmts, &ast.DeclStmt{
+				Decl: varDecl(tmpName, jsValuePtrType(), nil),
+			})
+			stmts = append(stmts, &ast.IfStmt{
+				Cond: &ast.BinaryExpr{
+					X: callExpr(goIdent("len"), goIdent("_args")), Op: token.GTR, Y: intLit(itoa(i)),
+				},
+				Body: blockStmt(assignStmt(
+					[]ast.Expr{goIdent(tmpName)},
+					[]ast.Expr{&ast.IndexExpr{X: goIdent("_args"), Index: intLit(itoa(i))}},
+				)),
+			})
+			// Apply default value for the whole param (e.g. = {})
+			if p.Default != nil {
+				defVal := l.lowerExpr(p.Default)
+				defVal = jsvalueWrapLit(defVal)
+				stmts = append(stmts, &ast.IfStmt{
+					Cond: &ast.BinaryExpr{X: goIdent(tmpName), Op: token.EQL, Y: goIdent("nil")},
+					Body: blockStmt(assignStmt(
+						[]ast.Expr{goIdent(tmpName)},
+						[]ast.Expr{defVal},
+					)),
+				})
+			}
+			// Destructure the parameter
+			stmts = append(stmts, l.lowerDestructuring(p.Pattern, goIdent(tmpName))...)
+			continue
+		}
 		if p.Symbol == nil {
 			continue
 		}
