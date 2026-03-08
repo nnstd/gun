@@ -465,12 +465,15 @@ func (l *Lowerer) lowerTryCatchStmt(s *hir.TryCatchStmt) ast.Stmt {
 			paramName = l.emitName(s.Catch.Param)
 		}
 
-		// Prepend: paramName := jsvalue.From(r)
+		// Prepend: paramName := jsvalue.From(r); _ = paramName
+		// Strip return values from catch body (defer closures can't return)
+		stripReturnValues(catchBody)
 		catchBody.List = append([]ast.Stmt{
 			assignDefine(
 				[]ast.Expr{goIdent(paramName)},
 				[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "From"), goIdent("r"))},
 			),
+			assignStmt([]ast.Expr{goIdent("_")}, []ast.Expr{goIdent(paramName)}),
 		}, catchBody.List...)
 
 		recoverBlock := blockStmt(
@@ -585,6 +588,31 @@ func (l *Lowerer) lowerUpdateStmt(update *hir.UpdateExpr) ast.Stmt {
 		[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "Dec"), operand)})
 }
 
+// stripReturnValues removes return values from return statements in a block.
+// Used for catch/finally bodies which are inside defer closures (can't return values).
+func stripReturnValues(block *ast.BlockStmt) {
+	for i, s := range block.List {
+		if ret, ok := s.(*ast.ReturnStmt); ok {
+			// Convert return with value to expression statement + bare return
+			if len(ret.Results) > 0 {
+				var stmts []ast.Stmt
+				for _, r := range ret.Results {
+					stmts = append(stmts, exprStmt(r))
+				}
+				stmts = append(stmts, &ast.ReturnStmt{})
+				// Replace the return with the expanded statements
+				block.List = append(block.List[:i], append(stmts, block.List[i+1:]...)...)
+			}
+		}
+		if ifStmt, ok := s.(*ast.IfStmt); ok {
+			stripReturnValues(ifStmt.Body)
+			if elseBlock, ok := ifStmt.Else.(*ast.BlockStmt); ok {
+				stripReturnValues(elseBlock)
+			}
+		}
+	}
+}
+
 // ensureBool wraps a JSValue expression with .Bool() for use in Go conditions.
 func (l *Lowerer) ensureBool(expr ast.Expr) ast.Expr {
 	if expr == nil {
@@ -596,8 +624,12 @@ func (l *Lowerer) ensureBool(expr ast.Expr) ast.Expr {
 		return expr
 	}
 
-	// Check if expression produces int (Len(), len())
-	if call, ok := expr.(*ast.CallExpr); ok {
+	// Check if expression produces int (Len(), len()) — unwrap parens first
+	unwrapped := expr
+	if paren, ok := unwrapped.(*ast.ParenExpr); ok {
+		unwrapped = paren.X
+	}
+	if call, ok := unwrapped.(*ast.CallExpr); ok {
 		if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Len" {
 			return &ast.BinaryExpr{X: expr, Op: token.GTR, Y: intLit("0")}
 		}
@@ -633,17 +665,6 @@ func (l *Lowerer) isNativeBool(expr ast.Expr) bool {
 			if sel.Sel.Name == "Bool" {
 				return true
 			}
-			// .Len() returns int (native Go)
-			if sel.Sel.Name == "Len" {
-				return true
-			}
-			// len() returns int
-			if id, ok2 := sel.X.(*ast.Ident); ok2 && id.Name == "len" {
-				return true
-			}
-		}
-		if id, ok := e.Fun.(*ast.Ident); ok && (id.Name == "len" || id.Name == "cap") {
-			return true
 		}
 	}
 	return false

@@ -980,19 +980,21 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 	var stmts []ast.Stmt
 	l.jsvalueImport()
 
-	// this := _args[0]
-	stmts = append(stmts, &ast.DeclStmt{
-		Decl: varDecl("this", jsValuePtrType(), nil),
-	})
-	stmts = append(stmts, &ast.IfStmt{
-		Cond: &ast.BinaryExpr{
-			X: callExpr(goIdent("len"), goIdent("_args")), Op: token.GTR, Y: intLit("0"),
-		},
-		Body: blockStmt(assignStmt(
-			[]ast.Expr{goIdent("this")},
-			[]ast.Expr{&ast.IndexExpr{X: goIdent("_args"), Index: intLit("0")}},
-		)),
-	})
+	// Only declare `this` if the method body references it
+	if hirBodyUsesThis(body) {
+		stmts = append(stmts, &ast.DeclStmt{
+			Decl: varDecl("this", jsValuePtrType(), nil),
+		})
+		stmts = append(stmts, &ast.IfStmt{
+			Cond: &ast.BinaryExpr{
+				X: callExpr(goIdent("len"), goIdent("_args")), Op: token.GTR, Y: intLit("0"),
+			},
+			Body: blockStmt(assignStmt(
+				[]ast.Expr{goIdent("this")},
+				[]ast.Expr{&ast.IndexExpr{X: goIdent("_args"), Index: intLit("0")}},
+			)),
+		})
+	}
 
 	// Unpack named params from _args[1+i]
 	for i, p := range params {
@@ -1037,6 +1039,117 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 	}
 
 	return &ast.BlockStmt{List: stmts}
+}
+
+// hirBodyUsesThis checks if an HIR block references `this`.
+func hirBodyUsesThis(body *hir.BlockStmt) bool {
+	if body == nil {
+		return false
+	}
+	found := false
+	var walk func(e hir.Expr)
+	var walkStmt func(s hir.Stmt)
+	walk = func(e hir.Expr) {
+		if found || e == nil {
+			return
+		}
+		switch e := e.(type) {
+		case *hir.ThisExpr:
+			found = true
+		case *hir.BinaryExpr:
+			walk(e.Left); walk(e.Right)
+		case *hir.UnaryExpr:
+			walk(e.Operand)
+		case *hir.CallExpr:
+			walk(e.Func)
+			for _, a := range e.Args { walk(a) }
+		case *hir.MemberExpr:
+			walk(e.Object)
+		case *hir.ComputedMemberExpr:
+			walk(e.Object); walk(e.Property)
+		case *hir.AssignExpr:
+			walk(e.Left); walk(e.Right)
+		case *hir.TernaryExpr:
+			walk(e.Cond); walk(e.Then); walk(e.Else)
+		case *hir.ArrayLiteral:
+			for _, el := range e.Elements { walk(el) }
+		case *hir.ObjectLiteral:
+			for _, p := range e.Properties { walk(p.Value) }
+		case *hir.SpreadExpr:
+			walk(e.Value)
+		case *hir.NewExpr:
+			walk(e.Callee)
+			for _, a := range e.Args { walk(a) }
+		case *hir.UpdateExpr:
+			walk(e.Operand)
+		case *hir.ArrowFunc:
+			if e.Body != nil {
+				for _, st := range e.Body.Stmts { walkStmt(st) }
+			}
+			if e.ExprBody != nil { walk(e.ExprBody) }
+		case *hir.FuncExpr:
+			if e.Body != nil {
+				for _, st := range e.Body.Stmts { walkStmt(st) }
+			}
+		case *hir.TemplateLiteral:
+			for _, p := range e.Parts { walk(p) }
+		case *hir.SequenceExpr:
+			for _, ex := range e.Exprs { walk(ex) }
+		case *hir.ParenExpr:
+			walk(e.Expr)
+		}
+	}
+	walkStmt = func(s hir.Stmt) {
+		if found || s == nil {
+			return
+		}
+		switch s := s.(type) {
+		case *hir.ExprStmt:
+			walk(s.Expr)
+		case *hir.ReturnStmt:
+			walk(s.Value)
+		case *hir.VarDecl:
+			for _, d := range s.Declarators { walk(d.Init) }
+		case *hir.IfStmt:
+			walk(s.Cond)
+			if s.Then != nil { for _, st := range s.Then.Stmts { walkStmt(st) } }
+			if s.Else != nil { walkStmt(s.Else) }
+		case *hir.ForStmt:
+			walkStmt(s.Init); walk(s.Cond); walk(s.Post)
+			if s.Body != nil { for _, st := range s.Body.Stmts { walkStmt(st) } }
+		case *hir.WhileStmt:
+			walk(s.Cond)
+			if s.Body != nil { for _, st := range s.Body.Stmts { walkStmt(st) } }
+		case *hir.BlockStmt:
+			for _, st := range s.Stmts { walkStmt(st) }
+		case *hir.ThrowStmt:
+			walk(s.Value)
+		case *hir.SwitchStmt:
+			walk(s.Tag)
+			for _, c := range s.Cases {
+				for _, st := range c.Body { walkStmt(st) }
+			}
+		case *hir.TryCatchStmt:
+			if s.Try != nil { for _, st := range s.Try.Stmts { walkStmt(st) } }
+			if s.Catch != nil && s.Catch.Body != nil { for _, st := range s.Catch.Body.Stmts { walkStmt(st) } }
+		case *hir.DoWhileStmt:
+			walk(s.Cond)
+			if s.Body != nil { for _, st := range s.Body.Stmts { walkStmt(st) } }
+		case *hir.ForOfStmt:
+			walk(s.Value)
+			if s.Body != nil { for _, st := range s.Body.Stmts { walkStmt(st) } }
+		case *hir.ForInStmt:
+			walk(s.Value)
+			if s.Body != nil { for _, st := range s.Body.Stmts { walkStmt(st) } }
+		}
+	}
+	for _, s := range body.Stmts {
+		walkStmt(s)
+		if found {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *Lowerer) wrapAsJSValueFunc(params []*hir.Param, body *ast.BlockStmt) *ast.FuncLit {
