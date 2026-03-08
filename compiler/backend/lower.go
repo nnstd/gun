@@ -480,12 +480,20 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 
 	// Process default import
 	if d.Default != nil && d.Default.Symbol != nil {
-		if isKnown {
-			// Default import from known module acts as namespace: import fs from "fs" → package alias
+		if isKnown && isGunRuntimePkg(goImportPath) {
+			// Default import from Gun runtime module → pkg.AsJSValue
 			l.importedSyms[d.Default.Symbol] = importResolution{
 				goImportPath: goImportPath,
 				goPkgName:    goPkgName,
-				goSymbol:     "", // empty = namespace
+				goSymbol:     "AsJSValue",
+				isTranspiled: false,
+			}
+		} else if isKnown {
+			// Default import from Go stdlib module → namespace (bare pkg ident)
+			l.importedSyms[d.Default.Symbol] = importResolution{
+				goImportPath: goImportPath,
+				goPkgName:    goPkgName,
+				goSymbol:     "",
 				isTranspiled: false,
 			}
 		} else {
@@ -538,11 +546,21 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 
 	// Process namespace import
 	if d.Namespace != nil && d.Namespace.Symbol != nil {
-		l.importedSyms[d.Namespace.Symbol] = importResolution{
-			goImportPath: goImportPath,
-			goPkgName:    goPkgName,
-			goSymbol:     "", // empty = namespace
-			isTranspiled: !isKnown,
+		if isKnown {
+			// import * as fs from "fs" → fs.AsJSValue
+			l.importedSyms[d.Namespace.Symbol] = importResolution{
+				goImportPath: goImportPath,
+				goPkgName:    goPkgName,
+				goSymbol:     "AsJSValue",
+				isTranspiled: false,
+			}
+		} else {
+			l.importedSyms[d.Namespace.Symbol] = importResolution{
+				goImportPath: goImportPath,
+				goPkgName:    goPkgName,
+				goSymbol:     "", // empty = namespace
+				isTranspiled: true,
+			}
 		}
 	}
 }
@@ -579,6 +597,10 @@ func (l *Lowerer) resolveModule(modulePath string) (goImportPath, goPkgName stri
 		return l.moduleName + "/" + pkgName, pkgName, false
 	}
 	return pkgName, pkgName, false
+}
+
+func isGunRuntimePkg(importPath string) bool {
+	return strings.HasPrefix(importPath, "github.com/nnstd/gun/runtime/")
 }
 
 func isRelativeImport(p string) bool {

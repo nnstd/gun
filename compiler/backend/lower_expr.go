@@ -101,7 +101,7 @@ func (l *Lowerer) lowerExpr(e hir.Expr) ast.Expr {
 	case *hir.MetaPropertyExpr:
 		if e.Meta == "import" && e.Property == "meta" {
 			l.addImport("github.com/nnstd/gun/runtime/module")
-			return selectorExpr(goIdent("module"), "ImportMeta")
+			return callExpr(selectorExpr(goIdent("module"), "ImportMetaAsJSValue"))
 		}
 		return goIdent("nil")
 
@@ -137,6 +137,10 @@ func (l *Lowerer) lowerIdentifier(e *hir.Identifier) ast.Expr {
 					l.addImport(res.goImportPath)
 				}
 			}
+			// Default/namespace import from Gun runtime module → pkg.AsJSValue
+			if res.goSymbol == "AsJSValue" && !res.isTranspiled && isGunRuntimePkg(res.goImportPath) {
+				return selectorExpr(goIdent(res.goPkgName), "AsJSValue")
+			}
 			// Namespace import (no goSymbol)
 			if res.goSymbol == "" {
 				if res.goPkgName == "" {
@@ -148,7 +152,12 @@ func (l *Lowerer) lowerIdentifier(e *hir.Identifier) ast.Expr {
 			if res.goPkgName == "" {
 				return goIdent(res.goSymbol)
 			}
-			// Named import: pkg.Symbol
+			// Named import from Gun runtime module → pkg.AsJSValue.Get("jsName")
+			if !res.isTranspiled && res.goPkgName != "" && isGunRuntimePkg(res.goImportPath) {
+				return callExpr(selectorExpr(
+					selectorExpr(goIdent(res.goPkgName), "AsJSValue"),
+					"Get"), stringLit(lowercaseFirst(res.goSymbol)))
+			}
 			return selectorExpr(goIdent(res.goPkgName), res.goSymbol)
 		}
 		// Non-imported symbol — use emitName
@@ -719,6 +728,10 @@ func (l *Lowerer) exprIsJSValue(e hir.Expr) bool {
 			return true
 		}
 		if res, ok := l.importedSyms[e.Sym]; ok {
+			// Known modules with AsJSValue resolve to a JSValue object
+			if res.goSymbol == "AsJSValue" {
+				return true
+			}
 			return res.isTranspiled
 		}
 		if e.Sym.Kind == symbol.KindParameter || e.Sym.Kind == symbol.KindVariable {
@@ -847,6 +860,19 @@ func isValidGoIdent(s string) bool {
 		}
 	}
 	return true
+}
+
+// lowercaseFirst returns the string with the first character lowercased.
+// Used to convert Go capitalized names back to JS camelCase for .Get() lookups.
+func lowercaseFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	if r[0] >= 'A' && r[0] <= 'Z' {
+		r[0] = r[0] + 32
+	}
+	return string(r)
 }
 
 // parseRegexLiteral splits /pattern/flags into pattern and flags.

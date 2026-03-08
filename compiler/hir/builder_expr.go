@@ -189,6 +189,9 @@ func (b *Builder) buildExpr(node *sitter.Node) Expr {
 		// Type references in expression context — just use as identifier
 		return &Identifier{Name: b.nodeText(node)}
 
+	case "comment", "line_comment", "block_comment":
+		return nil
+
 	default:
 		// Fallback: return as identifier with raw text
 		text := b.nodeText(node)

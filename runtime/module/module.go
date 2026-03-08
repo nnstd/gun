@@ -109,3 +109,32 @@ func CreateRequire(filename *jsvalue.JSValue) *jsvalue.JSValue {
 		return jsvalue.NewUndefined()
 	})
 }
+
+// AsJSValue returns a JSValue object representing the 'module' module.
+// Properties:
+//   - createRequire: NewFunction wrapping CreateRequire
+//   - importMeta: the import.meta object
+var AsJSValue = func() *jsvalue.JSValue {
+	obj := jsvalue.NewObject()
+	obj.Set("createRequire", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		if len(args) > 0 {
+			return CreateRequire(args[0])
+		}
+		return CreateRequire(nil)
+	}))
+	obj.Set("importMeta", ImportMetaAsJSValue())
+	return obj
+}()
+
+// ImportMetaAsJSValue returns the import.meta object as a *JSValue.
+func ImportMetaAsJSValue() *jsvalue.JSValue {
+	obj := jsvalue.NewObject()
+	obj.Set("url", ImportMeta.Url)
+	obj.Set("resolve", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		if len(args) > 0 && ImportMeta.Resolve != nil {
+			return ImportMeta.Resolve(args[0])
+		}
+		return jsvalue.NewUndefined()
+	}))
+	return obj
+}
