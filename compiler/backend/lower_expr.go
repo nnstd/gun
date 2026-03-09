@@ -519,7 +519,22 @@ func (l *Lowerer) lowerCallArgs(hirArgs []hir.Expr, wrap bool) ([]ast.Expr, bool
 			if i == len(hirArgs)-1 {
 				// Trailing spread: use Ellipsis
 				// Convert JSValue to slice: val.Array()
-				args = append(args, callExpr(selectorExpr(val, "Array")))
+				spreadSlice := callExpr(selectorExpr(val, "Array"))
+				if len(args) > 0 {
+					// Go doesn't allow mixing individual args with a spread
+					// for the same variadic parameter. Merge into:
+					//   append([]*jsvalue.JSValue{arg1, arg2}, spreadSlice...)
+					l.jsvalueImport()
+					composite := &ast.CompositeLit{
+						Type: &ast.ArrayType{Elt: jsValuePtrType()},
+						Elts: args,
+					}
+					merged := callExpr(goIdent("append"), composite, spreadSlice)
+					merged.Ellipsis = 1
+					args = []ast.Expr{merged}
+				} else {
+					args = append(args, spreadSlice)
+				}
 				hasTrailingSpread = true
 			} else {
 				// Mid-position spread — just pass through (simplified)
