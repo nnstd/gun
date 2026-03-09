@@ -1,6 +1,7 @@
 package process
 
 import (
+	"fmt"
 	stdos "os"
 	"runtime"
 	"strings"
@@ -34,13 +35,24 @@ var Platform = jsvalue.NewString(func() string {
 
 var Stdout = func() *jsvalue.JSValue {
 	obj := jsvalue.NewObject()
-	// process.stdout.columns — terminal width (default 80)
 	obj.Set("columns", jsvalue.NewNumber(80))
+	obj.Set("write", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		if len(args) > 0 {
+			fmt.Print(args[0])
+		}
+		return jsvalue.NewBool(true)
+	}))
 	return obj
 }()
 var Stderr = func() *jsvalue.JSValue {
 	obj := jsvalue.NewObject()
 	obj.Set("columns", jsvalue.NewNumber(80))
+	obj.Set("write", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		if len(args) > 0 {
+			fmt.Fprint(stdos.Stderr, args[0])
+		}
+		return jsvalue.NewBool(true)
+	}))
 	return obj
 }()
 var Pid = jsvalue.NewNumber(float64(stdos.Getpid()))

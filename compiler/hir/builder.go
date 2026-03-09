@@ -291,12 +291,20 @@ func (b *Builder) buildClassBody(decl *ClassDecl, node *sitter.Node) {
 			}
 			name := b.nodeText(nameNode)
 
-			// Computed property name: [(expr1, expr2, ..., name)]
+			// Computed property name: [(expr1, expr2, ..., name)] or [varName]
 			// Extract side-effect expressions and use the last as the method name.
+			var computedExpr Expr
 			if nameNode.Kind() == "computed_property_name" {
 				sideEffects, methodName := b.extractComputedPropertyName(nameNode)
 				decl.StaticInits = append(decl.StaticInits, sideEffects...)
 				name = methodName
+				// For simple computed names like [kSymbol], build expression for dynamic dispatch
+				if nameNode.NamedChildCount() == 1 {
+					inner := nameNode.NamedChild(0)
+					if inner.Kind() == "identifier" || inner.Kind() == "member_expression" {
+						computedExpr = b.buildExpr(inner)
+					}
+				}
 			}
 
 			paramsNode := child.ChildByFieldName("parameters")
@@ -335,6 +343,7 @@ func (b *Builder) buildClassBody(decl *ClassDecl, node *sitter.Node) {
 					IsStatic: isStatic,
 					IsGetter: isGetter,
 					IsSetter: isSetter,
+					Computed: computedExpr,
 				})
 			}
 		case "public_field_definition":

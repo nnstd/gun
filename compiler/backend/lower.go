@@ -312,12 +312,21 @@ func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 			callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), methodLit),
 			"MarkAsMethod"))
 
+		// Use computed expression for dynamic method names (e.g. [kSymbol])
+		var methodKey ast.Expr
+		if m.Computed != nil {
+			l.addImport("fmt")
+			methodKey = callExpr(selectorExpr(goIdent("fmt"), "Sprint"), l.lowerExpr(m.Computed))
+		} else {
+			methodKey = stringLit(m.Name)
+		}
+
 		var setCall ast.Expr
 		if m.IsStatic {
-			setCall = callExpr(selectorExpr(goIdent(name), "Set"), stringLit(m.Name), methodFn)
+			setCall = callExpr(selectorExpr(goIdent(name), "Set"), methodKey, methodFn)
 		} else {
 			proto := callExpr(selectorExpr(goIdent(name), "Get"), stringLit("prototype"))
-			setCall = callExpr(selectorExpr(proto, "Set"), stringLit(m.Name), methodFn)
+			setCall = callExpr(selectorExpr(proto, "Set"), methodKey, methodFn)
 		}
 		l.initStmts = append(l.initStmts, exprStmt(setCall))
 	}

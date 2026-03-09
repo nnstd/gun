@@ -553,6 +553,32 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 		}
 	}
 
+	// Computed member call: obj[key](args) → obj.MethodCall(fmt.Sprint(key), args...)
+	// This ensures 'this' is passed correctly for method calls via computed keys.
+	if comp, ok := e.Func.(*hir.ComputedMemberExpr); ok && l.exprIsJSValue(comp.Object) {
+		l.jsvalueImport()
+		l.addImport("fmt")
+		obj := l.lowerExpr(comp.Object)
+		key := l.lowerExpr(comp.Property)
+		argExprs, hasSpread := l.lowerCallArgs(e.Args, true)
+		methodKey := callExpr(selectorExpr(goIdent("fmt"), "Sprint"), key)
+		wrappedArgs := append([]ast.Expr{methodKey}, argExprs...)
+		if !l.isSimpleExpr(obj) {
+			recv := goIdent("_recv")
+			recvArgs := make([]ast.Expr, len(wrappedArgs))
+			copy(recvArgs, wrappedArgs)
+			innerCall := buildCallWithSpread(selectorExpr(recv, "MethodCall"), recvArgs, hasSpread)
+			return callExpr(&ast.FuncLit{
+				Type: &ast.FuncType{
+					Params:  fieldList(goField("_recv", jsValuePtrType())),
+					Results: fieldList(goField("", jsValuePtrType())),
+				},
+				Body: blockStmt(returnStmt(innerCall)),
+			}, obj)
+		}
+		return buildCallWithSpread(selectorExpr(obj, "MethodCall"), wrappedArgs, hasSpread)
+	}
+
 	// Check for bare global function calls: parseInt(), isNaN(), etc.
 	if id, ok := e.Func.(*hir.Identifier); ok {
 		name := id.Name

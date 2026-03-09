@@ -123,12 +123,39 @@ func DefineProperty(obj any, prop any, desc any) *JSValue {
 	o := toJSValue(obj)
 	d := toJSValue(desc)
 	p := fmt.Sprint(prop)
-	if d != nil {
-		val := d.Get("value")
-		if val != nil {
-			o.Set(p, val)
+	if d == nil {
+		return o
+	}
+
+	pd := &PropertyDescriptor{
+		Writable:     d.Get("writable").Bool(),
+		Enumerable:   d.Get("enumerable").Bool(),
+		Configurable: d.Get("configurable").Bool(),
+	}
+
+	// Accessor descriptor: get/set
+	getter := d.Get("get")
+	setter := d.Get("set")
+	if getter != nil && getter.funcVal != nil {
+		fn := getter
+		pd.Get = func(this *JSValue) *JSValue {
+			return fn.Call(this)
 		}
 	}
+	if setter != nil && setter.funcVal != nil {
+		fn := setter
+		pd.Set = func(val *JSValue) {
+			fn.Call(val)
+		}
+	}
+
+	// Data descriptor: value
+	val := d.Get("value")
+	if val != nil && val.typ != TypeUndefined {
+		pd.Value = val
+	}
+
+	o.DefineProperty(p, pd)
 	return o
 }
 
