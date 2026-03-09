@@ -496,9 +496,10 @@ const (
 
 // AssignExpr is an assignment expression.
 type AssignExpr struct {
-	Op    AssignOp
-	Left  Expr // Identifier, MemberExpr, or SubscriptExpr
-	Right Expr
+	Op          AssignOp
+	Left        Expr    // Identifier, MemberExpr, or SubscriptExpr
+	LeftPattern Pattern // destructuring pattern (set instead of Left)
+	Right       Expr
 }
 
 // AssignOp is an assignment operator.

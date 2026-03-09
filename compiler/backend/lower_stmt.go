@@ -206,7 +206,7 @@ func (l *Lowerer) lowerLocalVarStmts(d *hir.VarDecl) []ast.Stmt {
 	for _, decl := range d.Declarators {
 		// Destructuring pattern
 		if decl.Pattern != nil && decl.Init != nil {
-			stmts = append(stmts, l.lowerDestructuring(decl.Pattern, l.lowerExpr(decl.Init))...)
+			stmts = append(stmts, l.lowerDestructuring(decl.Pattern, l.lowerExpr(decl.Init), true)...)
 			continue
 		}
 		if decl.Symbol == nil {
@@ -231,21 +231,26 @@ func (l *Lowerer) lowerLocalVarStmts(d *hir.VarDecl) []ast.Stmt {
 	return stmts
 }
 
-// lowerDestructuring generates assignment statements for a destructuring pattern.
-func (l *Lowerer) lowerDestructuring(pat hir.Pattern, init ast.Expr) []ast.Stmt {
+// lowerDestructuring generates statements for a destructuring pattern.
+// When define=true, uses := (declarations). When define=false, uses = (assignments).
+func (l *Lowerer) lowerDestructuring(pat hir.Pattern, init ast.Expr, define bool) []ast.Stmt {
 	l.jsvalueImport()
 	switch p := pat.(type) {
 	case *hir.ObjectPattern:
-		return l.lowerObjectDestructuring(p, init)
+		return l.lowerObjectDestructuring(p, init, define)
 	case *hir.ArrayPattern:
-		return l.lowerArrayDestructuring(p, init)
+		return l.lowerArrayDestructuring(p, init, define)
 	}
 	return nil
 }
 
-func (l *Lowerer) lowerObjectDestructuring(pat *hir.ObjectPattern, init ast.Expr) []ast.Stmt {
+func (l *Lowerer) lowerObjectDestructuring(pat *hir.ObjectPattern, init ast.Expr, define bool) []ast.Stmt {
 	var stmts []ast.Stmt
-	// Assign init to a temp if it's complex
+	assign := assignDefine
+	if !define {
+		assign = assignStmt
+	}
+	// Assign init to a temp (always :=, it's a new variable)
 	tmpName := "_obj"
 	stmts = append(stmts, assignDefine(
 		[]ast.Expr{goIdent(tmpName)},
@@ -257,7 +262,7 @@ func (l *Lowerer) lowerObjectDestructuring(pat *hir.ObjectPattern, init ast.Expr
 		}
 		name := l.emitName(prop.Value)
 		getter := callExpr(selectorExpr(goIdent(tmpName), "Get"), stringLit(prop.Key))
-		stmts = append(stmts, assignDefine(
+		stmts = append(stmts, assign(
 			[]ast.Expr{goIdent(name)},
 			[]ast.Expr{getter},
 		))
@@ -279,7 +284,7 @@ func (l *Lowerer) lowerObjectDestructuring(pat *hir.ObjectPattern, init ast.Expr
 	if pat.Rest != nil {
 		// rest := spread remaining keys (not implemented yet — placeholder)
 		name := l.emitName(pat.Rest)
-		stmts = append(stmts, assignDefine(
+		stmts = append(stmts, assign(
 			[]ast.Expr{goIdent(name)},
 			[]ast.Expr{goIdent(tmpName)},
 		))
@@ -287,8 +292,12 @@ func (l *Lowerer) lowerObjectDestructuring(pat *hir.ObjectPattern, init ast.Expr
 	return stmts
 }
 
-func (l *Lowerer) lowerArrayDestructuring(pat *hir.ArrayPattern, init ast.Expr) []ast.Stmt {
+func (l *Lowerer) lowerArrayDestructuring(pat *hir.ArrayPattern, init ast.Expr, define bool) []ast.Stmt {
 	var stmts []ast.Stmt
+	assign := assignDefine
+	if !define {
+		assign = assignStmt
+	}
 	tmpName := "_arr"
 	stmts = append(stmts, assignDefine(
 		[]ast.Expr{goIdent(tmpName)},
@@ -300,7 +309,7 @@ func (l *Lowerer) lowerArrayDestructuring(pat *hir.ArrayPattern, init ast.Expr) 
 		}
 		name := l.emitName(elem.Symbol)
 		idx := callExpr(selectorExpr(goIdent(tmpName), "Index"), intLit(itoa(i)))
-		stmts = append(stmts, assignDefine(
+		stmts = append(stmts, assign(
 			[]ast.Expr{goIdent(name)},
 			[]ast.Expr{idx},
 		))
@@ -320,7 +329,7 @@ func (l *Lowerer) lowerArrayDestructuring(pat *hir.ArrayPattern, init ast.Expr) 
 	}
 	if pat.Rest != nil {
 		name := l.emitName(pat.Rest)
-		stmts = append(stmts, assignDefine(
+		stmts = append(stmts, assign(
 			[]ast.Expr{goIdent(name)},
 			[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "Slice"),
 				goIdent(tmpName),
@@ -409,7 +418,7 @@ func (l *Lowerer) lowerForOfStmt(s *hir.ForOfStmt) ast.Stmt {
 	if s.Pattern != nil {
 		// for (const {k, v} of entries) → iterate + destructure each element
 		tmpName := "_item"
-		destructStmts := l.lowerDestructuring(s.Pattern, goIdent(tmpName))
+		destructStmts := l.lowerDestructuring(s.Pattern, goIdent(tmpName), true)
 		body.List = append(destructStmts, body.List...)
 		return &ast.RangeStmt{
 			Key:   goIdent("_"),
@@ -560,8 +569,16 @@ func (l *Lowerer) lowerTryCatchStmt(s *hir.TryCatchStmt) ast.Stmt {
 // lowerAssignStmt handles assignment expressions as statements.
 // Member assignments: obj.prop = val → obj.Set("prop", val)
 // Subscript assignments: obj[key] = val → obj.Set(key, val)
+// Destructuring assignments: [a, b] = val / {x, y} = val → expanded
 // Simple assignments: x = val → x = val
 func (l *Lowerer) lowerAssignStmt(assign *hir.AssignExpr) ast.Stmt {
+	// Destructuring assignment: [a, ...b] = expr or {x, y} = expr
+	if assign.LeftPattern != nil {
+		right := l.lowerExpr(assign.Right)
+		stmts := l.lowerDestructuring(assign.LeftPattern, right, false)
+		return &ast.BlockStmt{List: stmts}
+	}
+
 	right := l.lowerExpr(assign.Right)
 
 	// Member assignment: obj.prop = val → obj.Set("prop", wrappedVal)

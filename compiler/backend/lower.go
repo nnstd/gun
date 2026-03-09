@@ -890,7 +890,7 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 				})
 			}
 			// Destructure the parameter
-			stmts = append(stmts, l.lowerDestructuring(p.Pattern, goIdent(tmpName))...)
+			stmts = append(stmts, l.lowerDestructuring(p.Pattern, goIdent(tmpName), true)...)
 			continue
 		}
 		if p.Symbol == nil {
