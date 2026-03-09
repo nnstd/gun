@@ -27,6 +27,10 @@ func BuildModule(root *sitter.Node, source []byte, pkgName string) *Module {
 		SymbolTable: symtab,
 	}
 
+	// Pre-pass: register top-level function declarations for JS hoisting.
+	// Functions declared later in the file must be visible to earlier code.
+	b.hoistTopLevelFunctions(root)
+
 	for i := uint(0); i < root.NamedChildCount(); i++ {
 		child := root.NamedChild(i)
 		b.buildTopLevel(mod, child)
@@ -113,7 +117,11 @@ func (b *Builder) buildFuncDecl(node *sitter.Node, exported bool) *FuncDecl {
 		return nil
 	}
 	name := b.nodeText(nameNode)
-	sym := b.symtab.Define(name, symbol.KindFunction)
+	// Reuse pre-hoisted symbol if it exists (from hoistTopLevelFunctions)
+	sym := b.symtab.Lookup(name)
+	if sym == nil || sym.Kind != symbol.KindFunction {
+		sym = b.symtab.Define(name, symbol.KindFunction)
+	}
 	sym.Exported = exported
 
 	// Push a scope for function parameters so they don't leak into the
@@ -969,4 +977,29 @@ func (b *Builder) buildArrayPatternLookup(node *sitter.Node) *ArrayPattern {
 		}
 	}
 	return pat
+}
+
+// hoistTopLevelFunctions pre-registers all top-level function declarations
+// in the symbol table. JS hoists function declarations so they're visible
+// throughout their scope regardless of source order.
+func (b *Builder) hoistTopLevelFunctions(root *sitter.Node) {
+	for i := uint(0); i < root.NamedChildCount(); i++ {
+		child := root.NamedChild(i)
+		switch child.Kind() {
+		case "function_declaration":
+			if nameNode := child.ChildByFieldName("name"); nameNode != nil {
+				b.symtab.Define(b.nodeText(nameNode), symbol.KindFunction)
+			}
+		case "export_statement":
+			for j := uint(0); j < child.NamedChildCount(); j++ {
+				inner := child.NamedChild(j)
+				if inner.Kind() == "function_declaration" {
+					if nameNode := inner.ChildByFieldName("name"); nameNode != nil {
+						sym := b.symtab.Define(b.nodeText(nameNode), symbol.KindFunction)
+						sym.Exported = true
+					}
+				}
+			}
+		}
+	}
 }

@@ -93,6 +93,11 @@ func (l *Lowerer) lowerExpr(e hir.Expr) ast.Expr {
 		return &ast.ParenExpr{X: l.lowerExpr(e.Expr)}
 
 	case *hir.ThisExpr:
+		if l.insideFunc == 0 {
+			// Top-level this is undefined in ESM (SWC convention)
+			l.jsvalueImport()
+			return callExpr(selectorExpr(goIdent("jsvalue"), "NewUndefined"))
+		}
 		return goIdent("this")
 
 	case *hir.SuperExpr:

@@ -41,6 +41,7 @@ type Lowerer struct {
 	initStmts        []ast.Stmt                           // statements for init() function
 	pkgName          string                               // Go package name
 	currentClassName string                               // set during class constructor/method lowering
+	insideFunc       int                                  // >0 when inside a function body
 }
 
 // Lower converts an HIR module to a Go AST file.
@@ -858,6 +859,8 @@ func exprReferencesIdent(expr ast.Expr, name string) bool {
 // --------------------------------------------------------------------
 
 func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.BlockStmt {
+	l.insideFunc++
+	defer func() { l.insideFunc-- }()
 	if body == nil {
 		return blockStmt()
 	}
@@ -978,6 +981,9 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 	// Forward-declare variables used before their := definition
 	stmts = forwardDeclareVars(stmts)
 
+	// Replace unused := variables with _ to satisfy Go's "declared and not used" rule
+	stmts = eliminateUnusedVars(stmts)
+
 	return &ast.BlockStmt{List: stmts}
 }
 
@@ -1008,6 +1014,8 @@ func endsWithReturn(stmts []ast.Stmt) bool {
 // lowerMethodBody is like lowerFuncBody but prepends `this := _args[0]`
 // and unpacks remaining params from _args[1:] offset.
 func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast.BlockStmt {
+	l.insideFunc++
+	defer func() { l.insideFunc-- }()
 	if body == nil {
 		return blockStmt()
 	}
@@ -1032,11 +1040,29 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 
 	// Unpack named params from _args[1+i]
 	for i, p := range params {
+		idx := i + 1 // offset by 1 for 'this'
+		// Destructuring parameter: unpack _args[idx] then destructure
+		if p.Pattern != nil {
+			tmpName := fmt.Sprintf("_param%d", idx)
+			stmts = append(stmts, &ast.DeclStmt{
+				Decl: varDecl(tmpName, jsValuePtrType(), nil),
+			})
+			stmts = append(stmts, &ast.IfStmt{
+				Cond: &ast.BinaryExpr{
+					X: callExpr(goIdent("len"), goIdent("_args")), Op: token.GTR, Y: intLit(itoa(idx)),
+				},
+				Body: blockStmt(assignStmt(
+					[]ast.Expr{goIdent(tmpName)},
+					[]ast.Expr{&ast.IndexExpr{X: goIdent("_args"), Index: intLit(itoa(idx))}},
+				)),
+			})
+			stmts = append(stmts, l.lowerDestructuring(p.Pattern, goIdent(tmpName), true)...)
+			continue
+		}
 		if p.Symbol == nil {
 			continue
 		}
 		name := l.emitName(p.Symbol)
-		idx := i + 1 // offset by 1 for 'this'
 		stmts = append(stmts, &ast.DeclStmt{
 			Decl: varDecl(name, jsValuePtrType(), nil),
 		})
@@ -1073,6 +1099,9 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 
 	// Forward-declare variables used before their := definition
 	stmts = forwardDeclareVars(stmts)
+
+	// Replace unused := variables with _ to satisfy Go's "declared and not used" rule
+	stmts = eliminateUnusedVars(stmts)
 
 	return &ast.BlockStmt{List: stmts}
 }
@@ -1128,6 +1157,48 @@ func forwardDeclareVars(stmts []ast.Stmt) []ast.Stmt {
 		stmts[i] = s
 	}
 	return append(fwd, stmts...)
+}
+
+// eliminateUnusedVars finds := assignments where the variable is never
+// referenced elsewhere in the function and replaces the LHS with _.
+func eliminateUnusedVars(stmts []ast.Stmt) []ast.Stmt {
+	// Collect all := definitions
+	type defInfo struct {
+		stmtIdx int
+		lhsIdx  int
+		name    string
+	}
+	var defs []defInfo
+	for i, s := range stmts {
+		if assign, ok := s.(*ast.AssignStmt); ok && assign.Tok == token.DEFINE {
+			for j, lhs := range assign.Lhs {
+				if id, ok := lhs.(*ast.Ident); ok && id.Name != "_" {
+					defs = append(defs, defInfo{i, j, id.Name})
+				}
+			}
+		}
+	}
+	if len(defs) == 0 {
+		return stmts
+	}
+	// For each def, check if the name is referenced in any OTHER statement
+	for _, d := range defs {
+		used := false
+		for i, s := range stmts {
+			if i == d.stmtIdx {
+				continue
+			}
+			if stmtReferencesIdent(s, d.name) {
+				used = true
+				break
+			}
+		}
+		if !used {
+			assign := stmts[d.stmtIdx].(*ast.AssignStmt)
+			assign.Lhs[d.lhsIdx] = goIdent("_")
+		}
+	}
+	return stmts
 }
 
 func stmtReferencesIdent(s ast.Stmt, name string) bool {
