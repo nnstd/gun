@@ -292,7 +292,7 @@ func (l *Lowerer) lowerObjectLiteral(e *hir.ObjectLiteral) ast.Expr {
 	// Check if there are spread properties — if so, use jsvalue.Assign to merge
 	hasSpread := false
 	for _, prop := range e.Properties {
-		if _, ok := prop.Value.(*hir.SpreadExpr); ok && prop.KeyName == "" {
+		if _, ok := prop.Key.(*hir.SpreadExpr); ok {
 			hasSpread = true
 			break
 		}
@@ -335,7 +335,7 @@ func (l *Lowerer) lowerObjectWithSpreads(e *hir.ObjectLiteral) ast.Expr {
 	}
 
 	for _, prop := range e.Properties {
-		if spread, ok := prop.Value.(*hir.SpreadExpr); ok && prop.KeyName == "" {
+		if spread, ok := prop.Key.(*hir.SpreadExpr); ok {
 			flush()
 			args = append(args, l.lowerExpr(spread.Value))
 		} else {
@@ -932,7 +932,14 @@ func (l *Lowerer) lowerArrowFunc(e *hir.ArrowFunc) ast.Expr {
 func (l *Lowerer) lowerFuncExpr(e *hir.FuncExpr) ast.Expr {
 	l.jsvalueImport()
 
-	body := l.lowerFuncBody(e.Params, e.Body)
+	// Regular function expressions get their own `this` binding (unlike arrow functions).
+	// If the body references `this`, use lowerMethodBody to unpack it from _args[0].
+	var body *ast.BlockStmt
+	if e.Body != nil && hirBodyUsesThis(e.Body) {
+		body = l.lowerMethodBody(e.Params, e.Body)
+	} else {
+		body = l.lowerFuncBody(e.Params, e.Body)
+	}
 	fnLit := l.wrapAsJSValueFunc(e.Params, body)
 	return callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), fnLit)
 }

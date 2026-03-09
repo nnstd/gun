@@ -1223,6 +1223,57 @@ func eliminateUnusedVarsFlat(stmts []ast.Stmt) []ast.Stmt {
 			}
 		}
 	}
+
+	// Second pass: detect unused parameter declarations (var x *T; if len(_args) > i { x = _args[i] })
+	// Remove both the DeclStmt and the IfStmt when x is never referenced elsewhere.
+	var toRemove map[int]bool
+	for i, s := range stmts {
+		decl, ok := s.(*ast.DeclStmt)
+		if !ok {
+			continue
+		}
+		gd, ok := decl.Decl.(*ast.GenDecl)
+		if !ok || gd.Tok != token.VAR || len(gd.Specs) != 1 {
+			continue
+		}
+		vs, ok := gd.Specs[0].(*ast.ValueSpec)
+		if !ok || len(vs.Names) != 1 || len(vs.Values) != 0 {
+			continue
+		}
+		name := vs.Names[0].Name
+		if name == "_" {
+			continue
+		}
+		// Check if this name is referenced in any statement other than this one
+		// and the next one (which is the if-assignment)
+		used := false
+		for j, other := range stmts {
+			if j == i || j == i+1 {
+				continue
+			}
+			if stmtReferencesIdent(other, name) {
+				used = true
+				break
+			}
+		}
+		if !used {
+			if toRemove == nil {
+				toRemove = make(map[int]bool)
+			}
+			toRemove[i] = true     // remove the var decl
+			toRemove[i+1] = true   // remove the if-assignment
+		}
+	}
+	if len(toRemove) > 0 {
+		var filtered []ast.Stmt
+		for i, s := range stmts {
+			if !toRemove[i] {
+				filtered = append(filtered, s)
+			}
+		}
+		stmts = filtered
+	}
+
 	return stmts
 }
 
