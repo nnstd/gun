@@ -346,6 +346,14 @@ func (v *JSValue) MethodCall(method string, args ...*JSValue) *JSValue {
 		return v.Call()
 	}
 	if v.typ == TypeFunction && method == "call" && len(args) >= 1 {
+		// .call(thisArg, ...args) — invoke function with thisArg as receiver
+		// For methods (isMethod=true), prepend thisArg so it becomes _args[0]
+		if v.isMethod {
+			allArgs := make([]*JSValue, 0, len(args))
+			allArgs = append(allArgs, args[0]) // thisArg
+			allArgs = append(allArgs, args[1:]...)
+			return v.Call(allArgs...)
+		}
 		return v.Call(args[1:]...)
 	}
 	fn := v.Get(method)
