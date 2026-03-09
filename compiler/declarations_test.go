@@ -569,7 +569,7 @@ func TestMathCallResultIsJSValue(t *testing.T) {
 	if (m > 0) { return m; }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsmath.Min(")
+	assertContains(t, out, "math.Min(")
 	assertContains(t, out, "jsvalue.Gt(")
 }
 
@@ -1032,7 +1032,7 @@ func TestSuperCallInConstructor(t *testing.T) {
 	}
 }`
 	out := compile(t, ts)
-	assertContains(t, out, `jserror.Error.CallSuper(this,`)
+	assertContains(t, out, `error.Error.CallSuper(this,`)
 	assertContains(t, out, `this.Set("name"`)
 }
 

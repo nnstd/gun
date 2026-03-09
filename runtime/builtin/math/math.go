@@ -1,4 +1,4 @@
-package jsmath
+package math
 
 import (
 	gomath "math"
@@ -98,4 +98,24 @@ func Sign(x *jsvalue.JSValue) *jsvalue.JSValue {
 	default:
 		return jsvalue.NewNumber(0)
 	}
+}
+
+// IsNaN returns true if x is NaN.
+func IsNaN(x *jsvalue.JSValue) *jsvalue.JSValue {
+	return jsvalue.NewBool(gomath.IsNaN(x.Number()))
+}
+
+// IsFinite returns true if x is not NaN, +Inf, or -Inf.
+func IsFinite(x *jsvalue.JSValue) *jsvalue.JSValue {
+	return jsvalue.NewBool(!gomath.IsInf(x.Number(), 0))
+}
+
+// Inf returns positive infinity as a JSValue.
+func Inf() *jsvalue.JSValue {
+	return jsvalue.NewNumber(gomath.Inf(1))
+}
+
+// NaN returns NaN as a JSValue.
+func NaN() *jsvalue.JSValue {
+	return jsvalue.NewNumber(gomath.NaN())
 }

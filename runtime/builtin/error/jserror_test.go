@@ -1,4 +1,4 @@
-package jserror
+package error
 
 import (
 	"strings"

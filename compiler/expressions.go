@@ -842,7 +842,7 @@ func isObjectPrototypeHasOwnProperty(node *sitter.Node, source []byte) bool {
 // isRuntimePackage returns true if the name is a known Gun runtime package alias.
 func isRuntimePackage(name string) bool {
 	switch name {
-	case "fs", "nodepath", "json", "process", "module", "jserror", "jsmath":
+	case "fs", "nodepath", "json", "process", "module", "error", "math":
 		return true
 	}
 	return false
@@ -1064,11 +1064,11 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 		}
 	}
 
-	// Error.X → jserror.Error.Get("X") for static properties
+	// Error.X → error.Error.Get("X") for static properties
 	if objNode.Kind() == "identifier" && isErrorType(objNode.Utf8Text(t.source)) {
-		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "jserror")
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "error")
 		errName := objNode.Utf8Text(t.source)
-		return callExpr(selectorExpr(selectorExpr(ident("jserror"), errName), "Get"), stringLit(prop))
+		return callExpr(selectorExpr(selectorExpr(ident("error"), errName), "Get"), stringLit(prop))
 	}
 
 	// process.env.X → process.Env.Get("X")

@@ -1,4 +1,4 @@
-package jserror
+package error
 
 import (
 	"fmt"
@@ -25,7 +25,7 @@ func getStackTraceLimit() int {
 //	    at functionName (file:line:0)
 //	    at ...
 //
-// skip controls how many call frames to omit (to hide jserror internals).
+// skip controls how many call frames to omit (to hide error internals).
 func captureStack(name, message string, skip int) string {
 	limit := getStackTraceLimit()
 	if limit <= 0 {
@@ -136,7 +136,7 @@ func makeErrorClass(errorName string, parent *jsvalue.JSValue) *jsvalue.JSValue 
 			}
 		}
 
-		// Capture stack trace — skip frames to hide jserror/jsvalue internals
+		// Capture stack trace — skip frames to hide error/jsvalue internals
 		this.Set("stack", jsvalue.NewString(captureStack(errorName, message, 3)))
 		return nil
 	}, parent)

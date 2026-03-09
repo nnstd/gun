@@ -101,6 +101,18 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 		Decls: l.decls,
 	}
 
+	// Prune unused imports: only keep imports whose package ident appears in the code
+	usedIdents := collectUsedIdents(l.decls)
+	for pkg, alias := range l.imports {
+		pkgIdent := alias
+		if pkgIdent == "" {
+			pkgIdent = path.Base(pkg)
+		}
+		if !usedIdents[pkgIdent] {
+			delete(l.imports, pkg)
+		}
+	}
+
 	// Assemble import declarations
 	if len(l.imports) > 0 {
 		var specs []ast.Spec

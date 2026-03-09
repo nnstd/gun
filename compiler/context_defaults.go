@@ -93,25 +93,24 @@ func registerGlobalFunctions(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
 		Name: "isNaN",
 		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
-			imp.AddImport("math")
+			imp.AddImport("github.com/nnstd/gun/runtime/builtin/math")
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			if len(args) > 0 {
-				return callExpr(selectorExpr(ident("math"), "IsNaN"), callExpr(selectorExpr(args[0], "Number")))
+				return callExpr(selectorExpr(ident("math"), "IsNaN"), jsvalueWrapLit(args[0]))
 			}
-			return ident("false")
+			return callExpr(selectorExpr(ident("jsvalue"), "NewBool"), ident("false"))
 		},
 	})
 
 	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
 		Name: "isFinite",
 		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
-			imp.AddImport("math")
+			imp.AddImport("github.com/nnstd/gun/runtime/builtin/math")
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			if len(args) > 0 {
-				return &ast.UnaryExpr{
-					Op: token.NOT,
-					X:  callExpr(selectorExpr(ident("math"), "IsInf"), callExpr(selectorExpr(args[0], "Number")), intLit("0")),
-				}
+				return callExpr(selectorExpr(ident("math"), "IsFinite"), jsvalueWrapLit(args[0]))
 			}
-			return ident("true")
+			return callExpr(selectorExpr(ident("jsvalue"), "NewBool"), ident("true"))
 		},
 	})
 
@@ -190,12 +189,12 @@ func registerGlobalFunctions(ctx *tcontext.TranspilerContext) {
 		ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
 			Name: et,
 			Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
-				imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "jserror")
+				imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "error")
 				imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 				for i, arg := range args {
 					args[i] = jsvalueWrapLit(arg)
 				}
-				return callExpr(selectorExpr(selectorExpr(ident("jserror"), et), "Call"), args...)
+				return callExpr(selectorExpr(selectorExpr(ident("error"), et), "Call"), args...)
 			},
 		})
 	}
@@ -209,12 +208,12 @@ func registerConstructors(ctx *tcontext.TranspilerContext) {
 		ctx.RegisterConstructor(&tcontext.Constructor{
 			Name: et,
 			Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
-				imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "jserror")
+				imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "error")
 				imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 				for i, arg := range args {
 					args[i] = jsvalueWrapLit(arg)
 				}
-				return callExpr(selectorExpr(selectorExpr(ident("jserror"), et), "Call"), args...)
+				return callExpr(selectorExpr(selectorExpr(ident("error"), et), "Call"), args...)
 			},
 		})
 	}
@@ -328,18 +327,16 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "Infinity",
 		Transform: func(imp tcontext.Imports) ast.Expr {
-			imp.AddImport("math")
-			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), callExpr(selectorExpr(ident("math"), "Inf"), intLit("1")))
+			imp.AddImport("github.com/nnstd/gun/runtime/builtin/math")
+			return callExpr(selectorExpr(ident("math"), "Inf"))
 		},
 	})
 
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "NaN",
 		Transform: func(imp tcontext.Imports) ast.Expr {
-			imp.AddImport("math")
-			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), callExpr(selectorExpr(ident("math"), "NaN")))
+			imp.AddImport("github.com/nnstd/gun/runtime/builtin/math")
+			return callExpr(selectorExpr(ident("math"), "NaN"))
 		},
 	})
 
@@ -354,8 +351,8 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "Math",
 		Transform: func(imp tcontext.Imports) ast.Expr {
-			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin/math", "jsmath")
-			return ident("jsmath")
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin/math", "math")
+			return ident("math")
 		},
 	})
 
@@ -372,8 +369,8 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 			Name: et,
 			Transform: func(imp tcontext.Imports) ast.Expr {
-				imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "jserror")
-				return selectorExpr(ident("jserror"), et)
+				imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "error")
+				return selectorExpr(ident("error"), et)
 			},
 		})
 	}

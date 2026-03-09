@@ -114,14 +114,14 @@ func transformProcessMember(prop string, addImport func(string)) ast.Expr {
 // transformErrorCall handles Error.X() static method calls (e.g. Error.captureStackTrace).
 func transformErrorCall(errType, prop string, args []ast.Expr, addImport func(string)) ast.Expr {
 	addImport("github.com/nnstd/gun/runtime/builtin/error")
-	// Error.captureStackTrace(obj) → jserror.Error.Get("captureStackTrace").Call(obj)
+	// Error.captureStackTrace(obj) → error.Error.Get("captureStackTrace").Call(obj)
 	// Other static methods: dispatch via .Get(prop).Call(args...)
 	for i, arg := range args {
 		args[i] = jsvalueWrapLit(arg)
 	}
 	return callExpr(
 		selectorExpr(
-			callExpr(selectorExpr(selectorExpr(ident("jserror"), errType), "Get"), stringLit(prop)),
+			callExpr(selectorExpr(selectorExpr(ident("error"), errType), "Get"), stringLit(prop)),
 			"Call",
 		),
 		args...,

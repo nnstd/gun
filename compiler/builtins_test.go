@@ -17,14 +17,14 @@ func TestConsoleError(t *testing.T) {
 func TestMathFloor(t *testing.T) {
 	ts := `function f(x: number): number { return Math.floor(x); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsmath.Floor(")
+	assertContains(t, out, "math.Floor(")
 	assertContains(t, out, "runtime/builtin/math")
 }
 
 func TestMathRandom(t *testing.T) {
 	ts := `function r(): number { return Math.random(); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsmath.Random()")
+	assertContains(t, out, "math.Random()")
 	assertContains(t, out, "runtime/builtin/math")
 }
 
@@ -83,7 +83,7 @@ func TestArrayPush(t *testing.T) {
 func TestNewTypeError(t *testing.T) {
 	ts := `function fail(): void { throw new TypeError("bad input"); }`
 	out := compile(t, ts)
-	assertContains(t, out, `jserror.TypeError.Call(`)
+	assertContains(t, out, `error.TypeError.Call(`)
 	assertNotContains(t, out, `errors.New`)
 }
 
@@ -348,7 +348,7 @@ func TestErrorCallNoUnusedImport(t *testing.T) {
 	ts := `function f(msg) { return Error(msg); }`
 	out := compile(t, ts)
 	assertNotContains(t, out, `"errors"`)
-	assertContains(t, out, `jserror.Error.Call(`)
+	assertContains(t, out, `error.Error.Call(`)
 }
 
 func TestPushOnSliceLocalWrapsLiteralArgs(t *testing.T) {
@@ -402,7 +402,7 @@ func TestJSValueFunctionFromGetChainUsesCall(t *testing.T) {
 func TestNewErrorUsesJserror(t *testing.T) {
 	ts := `function fail() { throw new Error("bad"); }`
 	out := compile(t, ts)
-	assertContains(t, out, `jserror.Error.Call(`)
+	assertContains(t, out, `error.Error.Call(`)
 	assertContains(t, out, `runtime/builtin/error`)
 	assertNotContains(t, out, `errors.New`)
 }
@@ -410,7 +410,7 @@ func TestNewErrorUsesJserror(t *testing.T) {
 func TestErrorCallUsesJserror(t *testing.T) {
 	ts := `function f(msg) { return Error(msg); }`
 	out := compile(t, ts)
-	assertContains(t, out, `jserror.Error.Call(`)
+	assertContains(t, out, `error.Error.Call(`)
 }
 
 func TestErrorMessageAccess(t *testing.T) {
@@ -425,28 +425,28 @@ func TestErrorMessageAccess(t *testing.T) {
 func TestErrorStackTraceLimit(t *testing.T) {
 	ts := `Error.stackTraceLimit = 0;`
 	out := compile(t, ts)
-	assertContains(t, out, `jserror.Error`)
+	assertContains(t, out, `error.Error`)
 	assertContains(t, out, `Set("stackTraceLimit"`)
 }
 
 func TestErrorPrepareStackTrace(t *testing.T) {
 	ts := `Error.prepareStackTrace = (err, stack) => stack;`
 	out := compile(t, ts)
-	assertContains(t, out, `jserror.Error`)
+	assertContains(t, out, `error.Error`)
 	assertContains(t, out, `Set("prepareStackTrace"`)
 }
 
 func TestErrorCaptureStackTrace(t *testing.T) {
 	ts := `const obj = {}; Error.captureStackTrace(obj);`
 	out := compile(t, ts)
-	assertContains(t, out, `jserror.Error`)
+	assertContains(t, out, `error.Error`)
 	assertContains(t, out, `captureStackTrace`)
 }
 
 func TestErrorMemberAccess(t *testing.T) {
 	ts := `const limit = Error.stackTraceLimit;`
 	out := compile(t, ts)
-	assertContains(t, out, `jserror.Error.Get("stackTraceLimit")`)
+	assertContains(t, out, `error.Error.Get("stackTraceLimit")`)
 }
 
 func TestParseIntGlobal(t *testing.T) {
@@ -470,15 +470,15 @@ func TestParseFloatGlobal(t *testing.T) {
 func TestInfinityGlobal(t *testing.T) {
 	ts := `const x = Infinity;`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.NewNumber(math.Inf(1))")
-	assertContains(t, out, `"math"`)
+	assertContains(t, out, "math.Inf()")
+	assertContains(t, out, `runtime/builtin/math`)
 }
 
 func TestNaNGlobal(t *testing.T) {
 	ts := `const x = NaN;`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.NewNumber(math.NaN())")
-	assertContains(t, out, `"math"`)
+	assertContains(t, out, "math.NaN()")
+	assertContains(t, out, `runtime/builtin/math`)
 }
 
 func TestPromiseGlobal(t *testing.T) {

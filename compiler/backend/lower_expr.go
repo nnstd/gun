@@ -665,7 +665,7 @@ func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 			if _, isIdent := obj.(*ast.Ident); isIdent {
 				return selectorExpr(obj, symbol.Capitalize(e.Property))
 			}
-			// Not a bare ident — it's a JSValue expression (e.g. jserror.Error)
+			// Not a bare ident — it's a JSValue expression (e.g. error.Error)
 			return callExpr(selectorExpr(obj, "Get"), stringLit(e.Property))
 		}
 		// Imported known-module symbols → capitalize
@@ -729,8 +729,8 @@ func (l *Lowerer) exprIsJSValue(e hir.Expr) bool {
 		if e.Sym == nil {
 			if l.ctx != nil && l.ctx.IsKnownGlobal(e.Name) {
 				// Known global — check if it resolves to a JSValue or a typed Go entity.
-				// Bare idents like "jsvalue", "console", "jsmath" are Go packages (not JSValue).
-				// SelectorExprs like jserror.Error are JSValue references.
+				// Bare idents like "jsvalue", "console", "math" are Go packages (not JSValue).
+				// SelectorExprs like error.Error are JSValue references.
 				if l.ctx.LookupIdentifier(e.Name) != nil {
 					resolved := l.ctx.TransformIdentifier(e.Name, l)
 					if _, isIdent := resolved.(*ast.Ident); isIdent {

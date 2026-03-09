@@ -127,10 +127,10 @@ func (t *Transformer) addImport(pkg string) {
 	// Auto-alias packages whose directory name differs from their Go package name.
 	switch pkg {
 	case "github.com/nnstd/gun/runtime/builtin/error":
-		t.imports[pkg] = "jserror"
+		t.imports[pkg] = "error"
 		return
 	case "github.com/nnstd/gun/runtime/builtin/math":
-		t.imports[pkg] = "jsmath"
+		t.imports[pkg] = "math"
 		return
 	case "github.com/nnstd/gun/runtime/builtin/json":
 		t.imports[pkg] = "json"
@@ -287,6 +287,10 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 			if t.nodeReturnsJSValue(fnNode) {
 				return true
 			}
+			// Context-registered global functions (isNaN, parseInt, etc.)
+			if t.ctx != nil && t.ctx.LookupGlobalFunc(fnNode.Utf8Text(t.source)) != nil {
+				return true
+			}
 		}
 		// Plain function call to imported function → returns *jsvalue.JSValue
 		if fnNode != nil && fnNode.Kind() == "identifier" {
@@ -317,7 +321,7 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 				if objText == "Array" && propText == "isArray" {
 					return true
 				}
-				// Math.* calls return *jsvalue.JSValue via runtime/jsmath
+				// Math.* calls return *jsvalue.JSValue via runtime/math
 				if objText == "Math" {
 					return true
 				}
