@@ -77,6 +77,24 @@ func (b *Builder) buildTopLevel(mod *Module, node *sitter.Node) {
 			mod.Imports = append(mod.Imports, d)
 		}
 	case "expression_statement":
+		// Detect module.exports = expr → treat as export default
+		if b.isModuleExportsAssign(node) {
+			expr := b.extractModuleExportsValue(node)
+			if expr != nil {
+				mod.Declarations = append(mod.Declarations, &ExportDecl{
+					Decl: &VarDecl{
+						Kind:     VarConst,
+						Exported: true,
+						Declarators: []*Declarator{{
+							Symbol: b.symtab.Define("default", symbol.KindVariable),
+							Init:   expr,
+						}},
+					},
+					IsDefault: true,
+				})
+				return
+			}
+		}
 		if s := b.buildStmt(node); s != nil {
 			mod.Declarations = append(mod.Declarations, &TopLevelStmt{Stmt: s})
 		}
@@ -860,6 +878,92 @@ func (b *Builder) buildArrayPattern(node *sitter.Node) *ArrayPattern {
 			if child.NamedChildCount() > 0 {
 				name := b.nodeText(child.NamedChild(0))
 				sym := b.symtab.Define(name, symbol.KindVariable)
+				pat.Rest = sym
+			}
+		}
+	}
+	return pat
+}
+
+// isModuleExportsAssign checks if an expression_statement is `module.exports = expr`.
+func (b *Builder) isModuleExportsAssign(node *sitter.Node) bool {
+	if node.NamedChildCount() == 0 {
+		return false
+	}
+	child := node.NamedChild(0)
+	if child.Kind() != "assignment_expression" {
+		return false
+	}
+	left := child.ChildByFieldName("left")
+	if left == nil || left.Kind() != "member_expression" {
+		return false
+	}
+	return b.nodeText(left) == "module.exports"
+}
+
+// extractModuleExportsValue returns the RHS expression of `module.exports = expr`.
+func (b *Builder) extractModuleExportsValue(node *sitter.Node) Expr {
+	child := node.NamedChild(0)
+	right := child.ChildByFieldName("right")
+	if right == nil {
+		return nil
+	}
+	return b.buildExpr(right)
+}
+
+// lookupOrDefine tries Lookup first (for assignment context where vars exist),
+// falls back to Define if not found.
+func (b *Builder) lookupOrDefine(name string, kind symbol.Kind) *symbol.Symbol {
+	if sym := b.symtab.Lookup(name); sym != nil {
+		return sym
+	}
+	return b.symtab.Define(name, kind)
+}
+
+// buildObjectPatternLookup builds an object pattern using Lookup for existing variables.
+func (b *Builder) buildObjectPatternLookup(node *sitter.Node) *ObjectPattern {
+	pat := &ObjectPattern{}
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		switch child.Kind() {
+		case "shorthand_property_identifier_pattern", "shorthand_property_identifier":
+			name := b.nodeText(child)
+			sym := b.lookupOrDefine(name, symbol.KindVariable)
+			pat.Properties = append(pat.Properties, &ObjectPatternProp{Key: name, Value: sym})
+		case "pair_pattern":
+			keyNode := child.ChildByFieldName("key")
+			valueNode := child.ChildByFieldName("value")
+			if keyNode != nil && valueNode != nil {
+				key := b.nodeText(keyNode)
+				valName := b.nodeText(valueNode)
+				sym := b.lookupOrDefine(valName, symbol.KindVariable)
+				pat.Properties = append(pat.Properties, &ObjectPatternProp{Key: key, Value: sym})
+			}
+		case "rest_pattern":
+			if child.NamedChildCount() > 0 {
+				name := b.nodeText(child.NamedChild(0))
+				sym := b.lookupOrDefine(name, symbol.KindVariable)
+				pat.Rest = sym
+			}
+		}
+	}
+	return pat
+}
+
+// buildArrayPatternLookup builds an array pattern using Lookup for existing variables.
+func (b *Builder) buildArrayPatternLookup(node *sitter.Node) *ArrayPattern {
+	pat := &ArrayPattern{}
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		switch child.Kind() {
+		case "identifier":
+			name := b.nodeText(child)
+			sym := b.lookupOrDefine(name, symbol.KindVariable)
+			pat.Elements = append(pat.Elements, &ArrayPatternElem{Symbol: sym})
+		case "rest_pattern":
+			if child.NamedChildCount() > 0 {
+				name := b.nodeText(child.NamedChild(0))
+				sym := b.lookupOrDefine(name, symbol.KindVariable)
 				pat.Rest = sym
 			}
 		}

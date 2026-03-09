@@ -146,11 +146,21 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 			}
 		}
 	}
-	renameDefault := make(map[string]bool)
+	renameDefault := make(map[string]string) // file → renamed name
 	if len(defaultFiles) > 1 {
 		for _, name := range defaultFiles {
 			if name != entryFile {
-				renameDefault[name] = true
+				renameDefault[name] = fileDefaultName(name)
+			}
+		}
+	}
+
+	// Update allExports for renamed files so cross-file references use the new name
+	for fileName, newName := range renameDefault {
+		exps := allExports[fileName]
+		for i, exp := range exps {
+			if exp.GoName == "Default" {
+				exps[i].GoName = newName
 			}
 		}
 	}
@@ -174,7 +184,7 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 		}
 
 		// Rename Default in non-entry files to avoid conflicts
-		if renameDefault[name] {
+		if _, shouldRename := renameDefault[name]; shouldRename {
 			out = renameDefaultExport(out, name)
 		}
 
@@ -184,8 +194,8 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 	return results, nil
 }
 
-// renameDefaultExport replaces "Default" in compiled output with a file-specific name.
-func renameDefaultExport(source []byte, fileName string) []byte {
+// fileDefaultName generates a file-specific name for renamed default exports.
+func fileDefaultName(fileName string) string {
 	base := filepath.Base(fileName)
 	base = strings.TrimSuffix(base, filepath.Ext(base))
 	name := ""
@@ -199,11 +209,19 @@ func renameDefaultExport(source []byte, fileName string) []byte {
 	if name == "" {
 		name = "FileDefault"
 	}
-	name = strings.ToUpper(name[:1]) + name[1:] + "Default"
+	return strings.ToUpper(name[:1]) + name[1:] + "Default"
+}
+
+// renameDefaultExport replaces "Default" in compiled output with a file-specific name.
+func renameDefaultExport(source []byte, fileName string) []byte {
+	name := fileDefaultName(fileName)
 
 	s := string(source)
 	s = strings.ReplaceAll(s, "var Default ", "var "+name+" ")
 	s = strings.ReplaceAll(s, "var Default\n", "var "+name+"\n")
+	// Also rename bare assignments from fixInitCycles (e.g. "\tDefault = " in init())
+	s = strings.ReplaceAll(s, "\tDefault = ", "\t"+name+" = ")
+	s = strings.ReplaceAll(s, "\nDefault = ", "\n"+name+" = ")
 	return []byte(s)
 }
 

@@ -40,6 +40,7 @@ type Lowerer struct {
 	crossFileExports map[string]bool                      // Go names from other files (prevents .Get() dispatch)
 	initStmts        []ast.Stmt                           // statements for init() function
 	pkgName          string                               // Go package name
+	currentClassName string                               // set during class constructor/method lowering
 }
 
 // Lower converts an HIR module to a Go AST file.
@@ -239,6 +240,10 @@ func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 	// Build constructor function body
 	// Constructor signature: func(this *jsvalue.JSValue, _args ...*jsvalue.JSValue) *jsvalue.JSValue
 	// Parameters are unpacked from _args (offset 0, since 'this' is separate in NewClass)
+	// Track class name for super() lowering
+	l.currentClassName = name
+	defer func() { l.currentClassName = "" }()
+
 	var ctorBody *ast.BlockStmt
 	if d.Constructor != nil {
 		ctorBody = l.lowerFuncBody(d.Constructor.Params, d.Constructor.Body)
@@ -510,7 +515,7 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 			}
 		} else {
 			goSym := "Default"
-			if l.samePackage && isRelativeImport(d.ModulePath) && !strings.HasPrefix(d.ModulePath, "..") {
+			if l.samePackage && isRelativeImport(d.ModulePath) {
 				goSym = fileSpecificDefaultName(d.ModulePath)
 			}
 			if overrides != nil {

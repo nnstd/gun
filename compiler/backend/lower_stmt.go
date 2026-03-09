@@ -558,10 +558,16 @@ func (l *Lowerer) lowerTryCatchStmt(s *hir.TryCatchStmt) ast.Stmt {
 		stmts = append(stmts, deferStmt)
 	}
 
-	// Try body
+	// Try body — flatten BlockStmt results (e.g. multi-declarator VarDecl, destructuring)
 	if s.Try != nil {
 		for _, st := range s.Try.Stmts {
-			if gs := l.lowerStmt(st); gs != nil {
+			gs := l.lowerStmt(st)
+			if gs == nil {
+				continue
+			}
+			if block, ok := gs.(*ast.BlockStmt); ok {
+				stmts = append(stmts, block.List...)
+			} else {
 				stmts = append(stmts, gs)
 			}
 		}

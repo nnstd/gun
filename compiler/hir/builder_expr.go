@@ -422,18 +422,19 @@ func (b *Builder) buildAssignExpr(node *sitter.Node) *AssignExpr {
 	rightNode := node.ChildByFieldName("right")
 
 	// Destructuring assignment: [a, b] = expr or {x, y} = expr
+	// Uses Lookup (not Define) since variables already exist in assignment context.
 	if leftNode != nil {
 		switch leftNode.Kind() {
 		case "array_pattern":
 			return &AssignExpr{
 				Op:          OpAssign,
-				LeftPattern: b.buildArrayPattern(leftNode),
+				LeftPattern: b.buildArrayPatternLookup(leftNode),
 				Right:       b.buildExpr(rightNode),
 			}
 		case "object_pattern":
 			return &AssignExpr{
 				Op:          OpAssign,
-				LeftPattern: b.buildObjectPattern(leftNode),
+				LeftPattern: b.buildObjectPatternLookup(leftNode),
 				Right:       b.buildExpr(rightNode),
 			}
 		}

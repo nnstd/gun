@@ -395,6 +395,14 @@ func (l *Lowerer) lowerAssignExpr(e *hir.AssignExpr) ast.Expr {
 }
 
 func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
+	// super(args) in class constructor → ClassName.CallSuper(this, args...)
+	if _, ok := e.Func.(*hir.SuperExpr); ok && l.currentClassName != "" {
+		l.jsvalueImport()
+		args, _ := l.lowerCallArgs(e.Args, true)
+		allArgs := append([]ast.Expr{goIdent("this")}, args...)
+		return callExpr(selectorExpr(goIdent(l.currentClassName), "CallSuper"), allArgs...)
+	}
+
 	// Check for builtin method calls: console.log(), Math.floor(), JSON.parse(), etc.
 	if mem, ok := e.Func.(*hir.MemberExpr); ok {
 		if id, ok := mem.Object.(*hir.Identifier); ok {
