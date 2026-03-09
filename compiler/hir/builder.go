@@ -98,6 +98,11 @@ func (b *Builder) buildFuncDecl(node *sitter.Node, exported bool) *FuncDecl {
 	sym := b.symtab.Define(name, symbol.KindFunction)
 	sym.Exported = exported
 
+	// Push a scope for function parameters so they don't leak into the
+	// enclosing scope (e.g. sibling function declarations must not see
+	// each other's parameters).
+	b.symtab.PushScope()
+
 	paramsNode := node.ChildByFieldName("parameters")
 	params := b.buildParams(paramsNode)
 
@@ -115,6 +120,8 @@ func (b *Builder) buildFuncDecl(node *sitter.Node, exported bool) *FuncDecl {
 	if bodyNode != nil {
 		body = b.buildBlock(bodyNode)
 	}
+
+	b.symtab.PopScope()
 
 	// Record param count in symbol
 	sym.FuncInfo = &symbol.FuncInfo{ParamCount: len(params)}
