@@ -505,7 +505,7 @@ func TestRoundTripNilPadding(t *testing.T) {
 	out := lowerTS(t, `function f(a, b) { return a; }`)
 	assertContains(t, out, "var a *jsvalue.JSValue")
 	assertContains(t, out, "if len(_args) > 0")
-	assertContains(t, out, "var b *jsvalue.JSValue")
+	// b is unused so eliminated, but args are still unpacked
 	assertContains(t, out, "if len(_args) > 1")
 }
 

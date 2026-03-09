@@ -1159,122 +1159,147 @@ func forwardDeclareVars(stmts []ast.Stmt) []ast.Stmt {
 	return append(fwd, stmts...)
 }
 
-// eliminateUnusedVars finds := assignments where the variable is never
-// referenced elsewhere in the block and replaces the LHS with _.
-// Also recurses into nested blocks.
+// eliminateUnusedVars performs SWC-style write/read analysis on an entire
+// function body. Variables that are written (declared or assigned) but never
+// read are eliminated: var decls are removed, := becomes _ =, = becomes _ =.
 func eliminateUnusedVars(stmts []ast.Stmt) []ast.Stmt {
-	// Recurse into nested blocks first
+	// Phase 1: Collect writes and reads across the entire body (recursively)
+	writes := make(map[string]bool)
+	reads := make(map[string]bool)
+	for _, s := range stmts {
+		collectWritesAndReads(s, writes, reads)
+	}
+
+	// Phase 2: Find write-only variables (written but never read)
+	unused := make(map[string]bool)
+	for name := range writes {
+		if !reads[name] {
+			unused[name] = true
+		}
+	}
+	if len(unused) == 0 {
+		return stmts
+	}
+
+	// Phase 3: Eliminate unused variables throughout the AST
+	eliminateUnusedInStmts(stmts, unused)
+
+	// Phase 4: Remove bare `var x *T` DeclStmts for unused vars
+	return filterUnusedDecls(stmts, unused)
+}
+
+// collectWritesAndReads walks a statement recursively, recording which
+// identifiers appear in write positions (LHS of assignment, var decl names)
+// vs read positions (everything else).
+func collectWritesAndReads(node ast.Node, writes, reads map[string]bool) {
+	// Track idents that are in write positions so we skip them as reads
+	writeIdents := make(map[*ast.Ident]bool)
+
+	// First pass: mark all write-position idents
+	ast.Inspect(node, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.AssignStmt:
+			for _, lhs := range n.Lhs {
+				if id, ok := lhs.(*ast.Ident); ok {
+					writeIdents[id] = true
+					if id.Name != "_" {
+						writes[id.Name] = true
+					}
+				}
+			}
+		case *ast.GenDecl:
+			if n.Tok == token.VAR {
+				for _, spec := range n.Specs {
+					if vs, ok := spec.(*ast.ValueSpec); ok {
+						for _, name := range vs.Names {
+							writeIdents[name] = true
+							if name.Name != "_" {
+								writes[name.Name] = true
+							}
+						}
+					}
+				}
+			}
+		}
+		return true
+	})
+
+	// Second pass: all idents NOT in write positions are reads
+	ast.Inspect(node, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && !writeIdents[id] && id.Name != "_" {
+			reads[id.Name] = true
+		}
+		return true
+	})
+}
+
+// collectReads walks an expression and records all identifiers as reads.
+func collectReads(node ast.Node, reads map[string]bool) {
+	ast.Inspect(node, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && id.Name != "_" {
+			reads[id.Name] = true
+		}
+		return true
+	})
+}
+
+// eliminateUnusedInStmts walks statements recursively and blanks out
+// unused variable references in assignment LHS positions.
+func eliminateUnusedInStmts(stmts []ast.Stmt, unused map[string]bool) {
 	for _, s := range stmts {
 		ast.Inspect(s, func(n ast.Node) bool {
-			if block, ok := n.(*ast.BlockStmt); ok && block != nil {
-				block.List = eliminateUnusedVarsFlat(block.List)
+			if assign, ok := n.(*ast.AssignStmt); ok {
+				allBlank := true
+				for i, lhs := range assign.Lhs {
+					if id, ok := lhs.(*ast.Ident); ok && unused[id.Name] {
+						assign.Lhs[i] = goIdent("_")
+					}
+					if id, ok := assign.Lhs[i].(*ast.Ident); !ok || id.Name != "_" {
+						allBlank = false
+					}
+				}
+				if allBlank && assign.Tok == token.DEFINE {
+					assign.Tok = token.ASSIGN
+				}
 			}
 			return true
 		})
 	}
-	return eliminateUnusedVarsFlat(stmts)
 }
 
-func eliminateUnusedVarsFlat(stmts []ast.Stmt) []ast.Stmt {
-	// Collect all := definitions
-	type defInfo struct {
-		stmtIdx int
-		lhsIdx  int
-		name    string
-	}
-	var defs []defInfo
-	for i, s := range stmts {
-		if assign, ok := s.(*ast.AssignStmt); ok && assign.Tok == token.DEFINE {
-			for j, lhs := range assign.Lhs {
-				if id, ok := lhs.(*ast.Ident); ok && id.Name != "_" {
-					defs = append(defs, defInfo{i, j, id.Name})
+// filterUnusedDecls removes `var x *T` DeclStmts where x is unused.
+// Works recursively on nested BlockStmts.
+func filterUnusedDecls(stmts []ast.Stmt, unused map[string]bool) []ast.Stmt {
+	var result []ast.Stmt
+	for _, s := range stmts {
+		// Recurse into block statements
+		ast.Inspect(s, func(n ast.Node) bool {
+			if block, ok := n.(*ast.BlockStmt); ok && block != nil {
+				block.List = filterUnusedDecls(block.List, unused)
+			}
+			return true
+		})
+		// Check if this is a removable var decl
+		if decl, ok := s.(*ast.DeclStmt); ok {
+			if gd, ok := decl.Decl.(*ast.GenDecl); ok && gd.Tok == token.VAR {
+				allUnused := true
+				for _, spec := range gd.Specs {
+					if vs, ok := spec.(*ast.ValueSpec); ok {
+						for _, name := range vs.Names {
+							if !unused[name.Name] {
+								allUnused = false
+							}
+						}
+					}
+				}
+				if allUnused {
+					continue // skip this decl entirely
 				}
 			}
 		}
+		result = append(result, s)
 	}
-	if len(defs) == 0 {
-		return stmts
-	}
-	// For each def, check if the name is referenced in any OTHER statement
-	for _, d := range defs {
-		used := false
-		for i, s := range stmts {
-			if i == d.stmtIdx {
-				continue
-			}
-			if stmtReferencesIdent(s, d.name) {
-				used = true
-				break
-			}
-		}
-		if !used {
-			assign := stmts[d.stmtIdx].(*ast.AssignStmt)
-			assign.Lhs[d.lhsIdx] = goIdent("_")
-			// If all LHS are now _, change := to = to avoid "no new variables"
-			allBlank := true
-			for _, lhs := range assign.Lhs {
-				if id, ok := lhs.(*ast.Ident); !ok || id.Name != "_" {
-					allBlank = false
-					break
-				}
-			}
-			if allBlank {
-				assign.Tok = token.ASSIGN
-			}
-		}
-	}
-
-	// Second pass: detect unused parameter declarations (var x *T; if len(_args) > i { x = _args[i] })
-	// Remove both the DeclStmt and the IfStmt when x is never referenced elsewhere.
-	var toRemove map[int]bool
-	for i, s := range stmts {
-		decl, ok := s.(*ast.DeclStmt)
-		if !ok {
-			continue
-		}
-		gd, ok := decl.Decl.(*ast.GenDecl)
-		if !ok || gd.Tok != token.VAR || len(gd.Specs) != 1 {
-			continue
-		}
-		vs, ok := gd.Specs[0].(*ast.ValueSpec)
-		if !ok || len(vs.Names) != 1 || len(vs.Values) != 0 {
-			continue
-		}
-		name := vs.Names[0].Name
-		if name == "_" {
-			continue
-		}
-		// Check if this name is referenced in any statement other than this one
-		// and the next one (which is the if-assignment)
-		used := false
-		for j, other := range stmts {
-			if j == i || j == i+1 {
-				continue
-			}
-			if stmtReferencesIdent(other, name) {
-				used = true
-				break
-			}
-		}
-		if !used {
-			if toRemove == nil {
-				toRemove = make(map[int]bool)
-			}
-			toRemove[i] = true     // remove the var decl
-			toRemove[i+1] = true   // remove the if-assignment
-		}
-	}
-	if len(toRemove) > 0 {
-		var filtered []ast.Stmt
-		for i, s := range stmts {
-			if !toRemove[i] {
-				filtered = append(filtered, s)
-			}
-		}
-		stmts = filtered
-	}
-
-	return stmts
+	return result
 }
 
 func stmtReferencesIdent(s ast.Stmt, name string) bool {
