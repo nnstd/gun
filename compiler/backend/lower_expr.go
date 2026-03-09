@@ -288,6 +288,19 @@ func (l *Lowerer) lowerArrayLiteral(e *hir.ArrayLiteral) ast.Expr {
 
 func (l *Lowerer) lowerObjectLiteral(e *hir.ObjectLiteral) ast.Expr {
 	l.jsvalueImport()
+
+	// Check if there are spread properties — if so, use jsvalue.Assign to merge
+	hasSpread := false
+	for _, prop := range e.Properties {
+		if _, ok := prop.Value.(*hir.SpreadExpr); ok && prop.KeyName == "" {
+			hasSpread = true
+			break
+		}
+	}
+	if hasSpread {
+		return l.lowerObjectWithSpreads(e)
+	}
+
 	// jsvalue.ObjectFrom(map[string]any{...})
 	var elts []ast.Expr
 	for _, prop := range e.Properties {
@@ -301,6 +314,45 @@ func (l *Lowerer) lowerObjectLiteral(e *hir.ObjectLiteral) ast.Expr {
 	}
 	mapLit := &ast.CompositeLit{Type: mapType, Elts: elts}
 	return callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), mapLit)
+}
+
+// lowerObjectWithSpreads handles object literals with spread properties:
+// {a: 1, ...obj, b: 2} → jsvalue.Assign(jsvalue.ObjectFrom({a:1}), obj, jsvalue.ObjectFrom({b:2}))
+func (l *Lowerer) lowerObjectWithSpreads(e *hir.ObjectLiteral) ast.Expr {
+	var args []ast.Expr
+	var currentElts []ast.Expr
+
+	flush := func() {
+		if len(currentElts) > 0 {
+			mapType := &ast.MapType{
+				Key:   goIdent("string"),
+				Value: &ast.InterfaceType{Methods: &ast.FieldList{}},
+			}
+			mapLit := &ast.CompositeLit{Type: mapType, Elts: currentElts}
+			args = append(args, callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), mapLit))
+			currentElts = nil
+		}
+	}
+
+	for _, prop := range e.Properties {
+		if spread, ok := prop.Value.(*hir.SpreadExpr); ok && prop.KeyName == "" {
+			flush()
+			args = append(args, l.lowerExpr(spread.Value))
+		} else {
+			key := stringLit(prop.KeyName)
+			value := l.lowerExpr(prop.Value)
+			currentElts = append(currentElts, &ast.KeyValueExpr{Key: key, Value: value})
+		}
+	}
+	flush()
+
+	if len(args) == 0 {
+		return callExpr(selectorExpr(goIdent("jsvalue"), "NewObject"))
+	}
+	if len(args) == 1 {
+		return args[0]
+	}
+	return callExpr(selectorExpr(goIdent("jsvalue"), "Assign"), args...)
 }
 
 func (l *Lowerer) lowerBinaryExpr(e *hir.BinaryExpr) ast.Expr {
@@ -361,8 +413,54 @@ func (l *Lowerer) lowerUpdateExpr(e *hir.UpdateExpr) ast.Expr {
 }
 
 func (l *Lowerer) lowerAssignExpr(e *hir.AssignExpr) ast.Expr {
-	left := l.lowerExpr(e.Left)
+	// Destructuring assignment in expression context → IIFE with destructuring stmts
+	if e.LeftPattern != nil {
+		right := l.lowerExpr(e.Right)
+		l.jsvalueImport()
+		stmts := l.lowerDestructuring(e.LeftPattern, right, false)
+		stmts = append(stmts, returnStmt(goIdent("nil")))
+		return &ast.CallExpr{
+			Fun: &ast.FuncLit{
+				Type: &ast.FuncType{Params: fieldList(), Results: fieldList(goField("", jsValuePtrType()))},
+				Body: &ast.BlockStmt{List: stmts},
+			},
+		}
+	}
+
 	right := l.lowerExpr(e.Right)
+
+	// Member assignment expression: obj.prop = val → IIFE { obj.Set("prop", val); return val }
+	if mem, ok := e.Left.(*hir.MemberExpr); ok && e.Op == hir.OpAssign && l.exprIsJSValue(mem.Object) {
+		l.jsvalueImport()
+		obj := l.lowerExpr(mem.Object)
+		val := l.wrapAsJSValue(right)
+		setCall := callExpr(selectorExpr(obj, "Set"), stringLit(mem.Property), val)
+		return &ast.CallExpr{
+			Fun: &ast.FuncLit{
+				Type: &ast.FuncType{Params: fieldList(), Results: fieldList(goField("", jsValuePtrType()))},
+				Body: blockStmt(exprStmt(setCall), returnStmt(val)),
+			},
+		}
+	}
+
+	// Computed member assignment: obj[key] = val → IIFE { obj.Set(key, val); return val }
+	if comp, ok := e.Left.(*hir.ComputedMemberExpr); ok && e.Op == hir.OpAssign && l.exprIsJSValue(comp.Object) {
+		l.jsvalueImport()
+		l.addImport("fmt")
+		obj := l.lowerExpr(comp.Object)
+		key := l.lowerExpr(comp.Property)
+		val := l.wrapAsJSValue(right)
+		setCall := callExpr(selectorExpr(obj, "Set"),
+			callExpr(selectorExpr(goIdent("fmt"), "Sprint"), key), val)
+		return &ast.CallExpr{
+			Fun: &ast.FuncLit{
+				Type: &ast.FuncType{Params: fieldList(), Results: fieldList(goField("", jsValuePtrType()))},
+				Body: blockStmt(exprStmt(setCall), returnStmt(val)),
+			},
+		}
+	}
+
+	left := l.lowerExpr(e.Left)
 
 	if e.Op == hir.OpAssign {
 		// Simple assignment as IIFE: func() T { x = val; return val }()
@@ -635,6 +733,13 @@ func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 		return l.lowerOptionalMember(e)
 	}
 
+	// Same-package namespace import: templates.foo → Foo (capitalized package var)
+	if id, ok := e.Object.(*hir.Identifier); ok && id.Sym != nil {
+		if res, ok := l.importedSyms[id.Sym]; ok && res.goImportPath == "" && res.goSymbol == "" {
+			return goIdent(symbol.Capitalize(e.Property))
+		}
+	}
+
 	// Check for builtin member access through context (e.g. process.env)
 	if id, ok := e.Object.(*hir.Identifier); ok {
 		name := id.Name
@@ -772,7 +877,7 @@ func (l *Lowerer) exprIsJSValue(e hir.Expr) bool {
 		*hir.TernaryExpr, *hir.TemplateLiteral:
 		return true
 	case *hir.Literal:
-		return false
+		return true // all-JSValue: literals are wrapped by lowerLiteral
 	default:
 		return true
 	}

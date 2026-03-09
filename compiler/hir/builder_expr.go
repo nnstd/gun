@@ -79,6 +79,11 @@ func (b *Builder) buildExpr(node *sitter.Node) Expr {
 		return b.buildUpdateExpr(node)
 
 	case "assignment_expression":
+		// Member-target destructuring: ({k: this.k} = obj) → SequenceExpr
+		leftNode := node.ChildByFieldName("left")
+		if leftNode != nil && leftNode.Kind() == "object_pattern" && b.hasNonIdentValues(leftNode) {
+			return b.buildMemberDestructuringSeq(node)
+		}
 		return b.buildAssignExpr(node)
 
 	case "augmented_assignment_expression":
@@ -695,3 +700,49 @@ func stripQuotes(s string) string {
 // unused but kept for reference
 var _ = strings.TrimPrefix
 var _ = stripQuotes
+
+// hasNonIdentValues checks if an object_pattern has any pair_pattern
+// whose value is not a simple identifier (e.g. member expressions like this.prop).
+func (b *Builder) hasNonIdentValues(node *sitter.Node) bool {
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if child.Kind() == "pair_pattern" {
+			valueNode := child.ChildByFieldName("value")
+			if valueNode != nil && valueNode.Kind() != "identifier" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// buildMemberDestructuringSeq handles object destructuring where targets
+// are member expressions: ({handlers: this.handlers} = obj).
+// Returns a SequenceExpr of individual assignments.
+func (b *Builder) buildMemberDestructuringSeq(node *sitter.Node) *SequenceExpr {
+	patNode := node.ChildByFieldName("left")
+	rightNode := node.ChildByFieldName("right")
+	right := b.buildExpr(rightNode)
+	var exprs []Expr
+	for i := uint(0); i < patNode.NamedChildCount(); i++ {
+		child := patNode.NamedChild(i)
+		if child.Kind() == "pair_pattern" {
+			keyNode := child.ChildByFieldName("key")
+			valueNode := child.ChildByFieldName("value")
+			if keyNode != nil && valueNode != nil {
+				key := b.nodeText(keyNode)
+				target := b.buildExpr(valueNode)
+				getter := &MemberExpr{
+					Object:   right,
+					Property: key,
+				}
+				exprs = append(exprs, &AssignExpr{
+					Op:    OpAssign,
+					Left:  target,
+					Right: getter,
+				})
+			}
+		}
+	}
+	return &SequenceExpr{Exprs: exprs}
+}

@@ -1160,8 +1160,22 @@ func forwardDeclareVars(stmts []ast.Stmt) []ast.Stmt {
 }
 
 // eliminateUnusedVars finds := assignments where the variable is never
-// referenced elsewhere in the function and replaces the LHS with _.
+// referenced elsewhere in the block and replaces the LHS with _.
+// Also recurses into nested blocks.
 func eliminateUnusedVars(stmts []ast.Stmt) []ast.Stmt {
+	// Recurse into nested blocks first
+	for _, s := range stmts {
+		ast.Inspect(s, func(n ast.Node) bool {
+			if block, ok := n.(*ast.BlockStmt); ok && block != nil {
+				block.List = eliminateUnusedVarsFlat(block.List)
+			}
+			return true
+		})
+	}
+	return eliminateUnusedVarsFlat(stmts)
+}
+
+func eliminateUnusedVarsFlat(stmts []ast.Stmt) []ast.Stmt {
 	// Collect all := definitions
 	type defInfo struct {
 		stmtIdx int
@@ -1196,6 +1210,17 @@ func eliminateUnusedVars(stmts []ast.Stmt) []ast.Stmt {
 		if !used {
 			assign := stmts[d.stmtIdx].(*ast.AssignStmt)
 			assign.Lhs[d.lhsIdx] = goIdent("_")
+			// If all LHS are now _, change := to = to avoid "no new variables"
+			allBlank := true
+			for _, lhs := range assign.Lhs {
+				if id, ok := lhs.(*ast.Ident); !ok || id.Name != "_" {
+					allBlank = false
+					break
+				}
+			}
+			if allBlank {
+				assign.Tok = token.ASSIGN
+			}
 		}
 	}
 	return stmts
