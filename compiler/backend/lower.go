@@ -288,6 +288,14 @@ func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 		l.initStmts = append(l.initStmts, exprStmt(setCall))
 	}
 
+	// Side-effect expressions from computed property names (e.g. WeakMap inits)
+	for _, expr := range d.StaticInits {
+		lowered := l.lowerExpr(expr)
+		if lowered != nil {
+			l.initStmts = append(l.initStmts, exprStmt(lowered))
+		}
+	}
+
 	// Methods: ClassName.Get("prototype").Set("method", jsvalue.NewFunction(...))
 	for _, m := range d.Methods {
 		// Instance methods: first _args element is 'this'
@@ -299,7 +307,9 @@ func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 			methodBody = l.lowerFuncBody(m.Params, m.Body)
 		}
 		methodLit := l.wrapAsJSValueFunc(m.Params, methodBody)
-		methodFn := callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), methodLit)
+		methodFn := callExpr(selectorExpr(
+			callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), methodLit),
+			"MarkAsMethod"))
 
 		var setCall ast.Expr
 		if m.IsStatic {

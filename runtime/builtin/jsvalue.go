@@ -369,9 +369,16 @@ func (v *JSValue) CallSuper(this *JSValue, args ...*JSValue) {
 	if v == nil {
 		return
 	}
-	// Walk the prototype chain to find classInit (handles grandparent constructors)
+	// Walk the prototype chain to find the PARENT's classInit.
+	// Skip the first classInit (which is the current class's own constructor)
+	// to avoid infinite recursion when the constructor calls super().
+	skipped := false
 	for cur := v; cur != nil; cur = cur.prototype {
 		if cur.classInit != nil {
+			if !skipped {
+				skipped = true
+				continue
+			}
 			cur.classInit(this, args...)
 			return
 		}

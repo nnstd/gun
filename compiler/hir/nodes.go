@@ -92,6 +92,7 @@ type ClassDecl struct {
 	Constructor *ClassConstructor
 	Methods     []*ClassMethod
 	Properties  []*ClassProperty
+	StaticInits []Expr // side-effect expressions from computed property names
 	Exported    bool
 }
 

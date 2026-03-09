@@ -291,6 +291,14 @@ func (b *Builder) buildClassBody(decl *ClassDecl, node *sitter.Node) {
 			}
 			name := b.nodeText(nameNode)
 
+			// Computed property name: [(expr1, expr2, ..., name)]
+			// Extract side-effect expressions and use the last as the method name.
+			if nameNode.Kind() == "computed_property_name" {
+				sideEffects, methodName := b.extractComputedPropertyName(nameNode)
+				decl.StaticInits = append(decl.StaticInits, sideEffects...)
+				name = methodName
+			}
+
 			paramsNode := child.ChildByFieldName("parameters")
 			params := b.buildParams(paramsNode)
 
@@ -1002,4 +1010,66 @@ func (b *Builder) hoistTopLevelFunctions(root *sitter.Node) {
 			}
 		}
 	}
+}
+
+// extractComputedPropertyName handles computed property names like
+// [(x = new WeakMap(), y = new WeakMap(), methodName)].
+// Returns side-effect expressions and the final method name string.
+func (b *Builder) extractComputedPropertyName(node *sitter.Node) (sideEffects []Expr, name string) {
+	// Walk into parenthesized_expression if present
+	inner := node
+	for i := uint(0); i < inner.NamedChildCount(); i++ {
+		child := inner.NamedChild(i)
+		if child.Kind() == "parenthesized_expression" {
+			inner = child
+			break
+		}
+		if child.Kind() == "sequence_expression" {
+			inner = child
+			break
+		}
+	}
+
+	// Check if inner is a sequence_expression
+	if inner.Kind() == "parenthesized_expression" {
+		for i := uint(0); i < inner.NamedChildCount(); i++ {
+			child := inner.NamedChild(i)
+			if child.Kind() == "sequence_expression" {
+				inner = child
+				break
+			}
+		}
+	}
+
+	if inner.Kind() != "sequence_expression" {
+		// Not a sequence — just return the computed name as-is
+		// Strip brackets: [expr] → expr text
+		text := b.nodeText(node)
+		if len(text) >= 2 && text[0] == '[' {
+			text = text[1 : len(text)-1]
+		}
+		return nil, text
+	}
+
+	// sequence_expression: expr1, expr2, ..., last
+	// All but the last are side effects, last is the method name
+	count := inner.NamedChildCount()
+	for i := uint(0); i < count; i++ {
+		child := inner.NamedChild(i)
+		if i < count-1 {
+			// Side-effect expression (e.g. x = new WeakMap())
+			expr := b.buildExpr(child)
+			if expr != nil {
+				sideEffects = append(sideEffects, expr)
+			}
+		} else {
+			// Last expression is the method name
+			name = b.nodeText(child)
+			// Strip quotes if it's a string literal
+			if len(name) >= 2 && (name[0] == '\'' || name[0] == '"') {
+				name = name[1 : len(name)-1]
+			}
+		}
+	}
+	return sideEffects, name
 }
