@@ -126,7 +126,12 @@ func (l *Lowerer) lowerIdentifier(e *hir.Identifier) ast.Expr {
 	}
 	if name == "arguments" {
 		l.jsvalueImport()
-		c := callExpr(selectorExpr(goIdent("jsvalue"), "NewArray"), goIdent("_args"))
+		// In method context, _args[0] is 'this' — exclude it from arguments
+		argsExpr := ast.Expr(goIdent("_args"))
+		if l.insideMethod > 0 {
+			argsExpr = &ast.SliceExpr{X: goIdent("_args"), Low: intLit("1")}
+		}
+		c := callExpr(selectorExpr(goIdent("jsvalue"), "NewArray"), argsExpr)
 		c.Ellipsis = 1
 		return c
 	}

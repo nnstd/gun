@@ -42,6 +42,7 @@ type Lowerer struct {
 	pkgName          string                               // Go package name
 	currentClassName string                               // set during class constructor/method lowering
 	insideFunc       int                                  // >0 when inside a function body
+	insideMethod     int                                  // >0 when inside a method body (_args[0] is this)
 }
 
 // Lower converts an HIR module to a Go AST file.
@@ -1025,7 +1026,8 @@ func endsWithReturn(stmts []ast.Stmt) bool {
 // and unpacks remaining params from _args[1:] offset.
 func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast.BlockStmt {
 	l.insideFunc++
-	defer func() { l.insideFunc-- }()
+	l.insideMethod++
+	defer func() { l.insideFunc--; l.insideMethod-- }()
 	if body == nil {
 		return blockStmt()
 	}
