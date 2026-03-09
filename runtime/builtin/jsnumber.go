@@ -264,19 +264,25 @@ func GtE(a, b *JSValue) *JSValue {
 // ---------------------------------------------------------------------------
 
 // Inc implements JavaScript ++ (prefix/postfix increment).
+// Mutates the value in-place so for-loop post expressions like i++ work.
 func Inc(a *JSValue) *JSValue {
 	if a == nil {
 		return NewNumber(1)
 	}
-	return NewNumber(a.Number() + 1)
+	a.numVal = a.Number() + 1
+	a.typ = TypeNumber
+	return a
 }
 
 // Dec implements JavaScript -- (prefix/postfix decrement).
+// Mutates the value in-place so for-loop post expressions like i-- work.
 func Dec(a *JSValue) *JSValue {
 	if a == nil {
 		return NewNumber(-1)
 	}
-	return NewNumber(a.Number() - 1)
+	a.numVal = a.Number() - 1
+	a.typ = TypeNumber
+	return a
 }
 
 // ---------------------------------------------------------------------------

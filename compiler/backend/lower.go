@@ -1096,6 +1096,19 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 				[]ast.Expr{&ast.IndexExpr{X: goIdent("_args"), Index: intLit(itoa(idx))}},
 			)),
 		})
+
+		// Default value
+		if p.Default != nil {
+			defVal := l.lowerExpr(p.Default)
+			defVal = jsvalueWrapLit(defVal)
+			stmts = append(stmts, &ast.IfStmt{
+				Cond: &ast.BinaryExpr{X: goIdent(name), Op: token.EQL, Y: goIdent("nil")},
+				Body: blockStmt(assignStmt(
+					[]ast.Expr{goIdent(name)},
+					[]ast.Expr{defVal},
+				)),
+			})
+		}
 	}
 
 	// Lower body statements, flattening inline blocks
