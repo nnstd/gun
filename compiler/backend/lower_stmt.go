@@ -358,10 +358,24 @@ func (l *Lowerer) lowerIfStmt(s *hir.IfStmt) *ast.IfStmt {
 	}
 }
 
-func (l *Lowerer) lowerForStmt(s *hir.ForStmt) *ast.ForStmt {
+func (l *Lowerer) lowerForStmt(s *hir.ForStmt) ast.Stmt {
 	var init ast.Stmt
+	var preLoop []ast.Stmt // statements hoisted before the for loop
 	if s.Init != nil {
 		init = l.lowerStmt(s.Init)
+		// Go for-init only accepts a single SimpleStmt. When the init is a
+		// multi-declarator VarDecl it lowers to a BlockStmt — hoist all but
+		// the last statement before the loop.
+		if block, ok := init.(*ast.BlockStmt); ok && len(block.List) > 1 {
+			preLoop = block.List[:len(block.List)-1]
+			init = block.List[len(block.List)-1]
+		}
+		// Go for-init doesn't allow var declarations (DeclStmt) — only
+		// SimpleStmts like := assignments. Hoist var decls before the loop.
+		if _, ok := init.(*ast.DeclStmt); ok {
+			preLoop = append(preLoop, init)
+			init = nil
+		}
 	}
 
 	var cond ast.Expr
@@ -380,12 +394,17 @@ func (l *Lowerer) lowerForStmt(s *hir.ForStmt) *ast.ForStmt {
 
 	body := l.lowerBlock(s.Body)
 
-	return &ast.ForStmt{
+	forStmt := &ast.ForStmt{
 		Init: init,
 		Cond: cond,
 		Post: post,
 		Body: body,
 	}
+
+	if len(preLoop) > 0 {
+		return &ast.BlockStmt{List: append(preLoop, forStmt)}
+	}
+	return forStmt
 }
 
 func (l *Lowerer) lowerForInStmt(s *hir.ForInStmt) ast.Stmt {
