@@ -1142,8 +1142,9 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 
 // forwardDeclareVars scans Go statements for variables used before their :=
 // declaration. Adds `var name *jsvalue.JSValue` at top and changes := to =.
+// Also hoists function-valued assignments to the top (JS function hoisting).
 func forwardDeclareVars(stmts []ast.Stmt) []ast.Stmt {
-	// Find all := declarations and their indices
+	// Step 1: Identify all := declarations
 	declared := make(map[string]int) // name → index of first := decl
 	for i, s := range stmts {
 		if assign, ok := s.(*ast.AssignStmt); ok && assign.Tok == token.DEFINE {
@@ -1160,7 +1161,7 @@ func forwardDeclareVars(stmts []ast.Stmt) []ast.Stmt {
 		return stmts
 	}
 
-	// Check which variables are referenced before their declaration
+	// Step 2: Detect forward references (variables used before their := position)
 	forwarded := make(map[string]bool)
 	for name, declIdx := range declared {
 		for i := 0; i < declIdx; i++ {
@@ -1174,7 +1175,7 @@ func forwardDeclareVars(stmts []ast.Stmt) []ast.Stmt {
 		return stmts
 	}
 
-	// Add forward declarations and change := to =
+	// Step 5: Create var declarations at top and change := to =
 	var fwd []ast.Stmt
 	for name := range forwarded {
 		fwd = append(fwd, &ast.DeclStmt{Decl: varDecl(name, jsValuePtrType(), nil)})
@@ -1190,6 +1191,68 @@ func forwardDeclareVars(stmts []ast.Stmt) []ast.Stmt {
 		}
 		stmts[i] = s
 	}
+
+	// Final step: hoist forward-declared function assignments right after var
+	// declarations (JS function hoisting). Only hoist functions that were
+	// actually forward-declared — these are the ones whose := was split.
+	var hoisted []ast.Stmt
+	var remaining []ast.Stmt
+	for _, s := range stmts {
+		if assign, ok := s.(*ast.AssignStmt); ok && assign.Tok == token.ASSIGN {
+			if len(assign.Lhs) == 1 {
+				if id, ok := assign.Lhs[0].(*ast.Ident); ok && forwarded[id.Name] && isFuncValuedAssign(assign) {
+					hoisted = append(hoisted, s)
+					continue
+				}
+			}
+		}
+		remaining = append(remaining, s)
+	}
+	if len(hoisted) > 0 {
+		// Hoisted function bodies may reference variables (argv, flags, etc.)
+		// that are assigned later. These variables need var declarations before
+		// the hoisted code. Scan hoisted functions for referenced names and
+		// add var decls for any that aren't already forward-declared.
+		existingDecls := make(map[string]bool)
+		for name := range forwarded {
+			existingDecls[name] = true
+		}
+		// Find all = assignments in remaining (these are variable assignments)
+		assignedNames := make(map[string]bool)
+		for _, s := range remaining {
+			if assign, ok := s.(*ast.AssignStmt); ok {
+				for _, lhs := range assign.Lhs {
+					if id, ok := lhs.(*ast.Ident); ok {
+						assignedNames[id.Name] = true
+					}
+				}
+			}
+		}
+		// Check which names hoisted functions reference that aren't declared yet
+		var extraDecls []ast.Stmt
+		for _, s := range hoisted {
+			ast.Inspect(s, func(n ast.Node) bool {
+				if id, ok := n.(*ast.Ident); ok && !existingDecls[id.Name] && assignedNames[id.Name] {
+					existingDecls[id.Name] = true
+					extraDecls = append(extraDecls, &ast.DeclStmt{Decl: varDecl(id.Name, jsValuePtrType(), nil)})
+					// Change the corresponding := in remaining to = since we forward-declared it
+					for _, rs := range remaining {
+						if assign, ok := rs.(*ast.AssignStmt); ok && assign.Tok == token.DEFINE {
+							for _, lhs := range assign.Lhs {
+								if lid, ok := lhs.(*ast.Ident); ok && lid.Name == id.Name {
+									assign.Tok = token.ASSIGN
+								}
+							}
+						}
+					}
+				}
+				return true
+			})
+		}
+		fwd = append(fwd, extraDecls...)
+		return append(append(fwd, hoisted...), remaining...)
+	}
+
 	return append(fwd, stmts...)
 }
 
@@ -1334,6 +1397,30 @@ func filterUnusedDecls(stmts []ast.Stmt, unused map[string]bool) []ast.Stmt {
 		result = append(result, s)
 	}
 	return result
+}
+
+// isFuncValuedAssign checks if an assignment's RHS is a jsvalue.NewFunction() call
+// (possibly with .MarkAsMethod() chained).
+func isFuncValuedAssign(assign *ast.AssignStmt) bool {
+	if len(assign.Rhs) != 1 {
+		return false
+	}
+	call, ok := assign.Rhs[0].(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	fn := call.Fun
+	if sel, ok := fn.(*ast.SelectorExpr); ok && sel.Sel.Name == "MarkAsMethod" {
+		if inner, ok := sel.X.(*ast.CallExpr); ok {
+			fn = inner.Fun
+		}
+	}
+	if sel, ok := fn.(*ast.SelectorExpr); ok {
+		if id, ok := sel.X.(*ast.Ident); ok {
+			return id.Name == "jsvalue" && sel.Sel.Name == "NewFunction"
+		}
+	}
+	return false
 }
 
 func stmtReferencesIdent(s ast.Stmt, name string) bool {
