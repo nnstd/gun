@@ -306,6 +306,18 @@ func (l *Lowerer) lowerObjectLiteral(e *hir.ObjectLiteral) ast.Expr {
 		return l.lowerObjectWithSpreads(e)
 	}
 
+	// Check for computed properties — need imperative construction
+	hasComputed := false
+	for _, prop := range e.Properties {
+		if prop.Computed {
+			hasComputed = true
+			break
+		}
+	}
+	if hasComputed {
+		return l.lowerObjectWithComputed(e)
+	}
+
 	// jsvalue.ObjectFrom(map[string]any{...})
 	var elts []ast.Expr
 	for _, prop := range e.Properties {
@@ -319,6 +331,40 @@ func (l *Lowerer) lowerObjectLiteral(e *hir.ObjectLiteral) ast.Expr {
 	}
 	mapLit := &ast.CompositeLit{Type: mapType, Elts: elts}
 	return callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), mapLit)
+}
+
+// lowerObjectWithComputed handles object literals with computed property names
+// like {[expr]: value}. Uses IIFE: func() *JSValue { obj := NewObject(); obj.Set(Sprint(expr), val); return obj }()
+func (l *Lowerer) lowerObjectWithComputed(e *hir.ObjectLiteral) ast.Expr {
+	l.jsvalueImport()
+	l.addImport("fmt")
+	var stmts []ast.Stmt
+	stmts = append(stmts, assignDefine(
+		[]ast.Expr{goIdent("_obj")},
+		[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "NewObject"))},
+	))
+	for _, prop := range e.Properties {
+		value := l.lowerExpr(prop.Value)
+		var keyExpr ast.Expr
+		if prop.Computed {
+			keyExpr = callExpr(selectorExpr(goIdent("fmt"), "Sprint"), l.lowerExpr(prop.Key))
+		} else {
+			keyExpr = stringLit(prop.KeyName)
+		}
+		stmts = append(stmts, exprStmt(
+			callExpr(selectorExpr(goIdent("_obj"), "Set"), keyExpr, value),
+		))
+	}
+	stmts = append(stmts, returnStmt(goIdent("_obj")))
+	return &ast.CallExpr{
+		Fun: &ast.FuncLit{
+			Type: &ast.FuncType{
+				Params:  fieldList(),
+				Results: fieldList(goField("", jsValuePtrType())),
+			},
+			Body: &ast.BlockStmt{List: stmts},
+		},
+	}
 }
 
 // lowerObjectWithSpreads handles object literals with spread properties:

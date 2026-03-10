@@ -248,11 +248,12 @@ func (b *Builder) buildObjectLiteral(node *sitter.Node) *ObjectLiteral {
 					Key:     b.buildExpr(keyNode),
 					Value:   b.buildExpr(valueNode),
 				}
-				// Check for computed key
-				for j := uint(0); j < child.ChildCount(); j++ {
-					if child.Child(j).Kind() == "[" {
-						prop.Computed = true
-						break
+				// Computed property name: [expr]
+				if keyNode.Kind() == "computed_property_name" {
+					prop.Computed = true
+					// Build the inner expression (unwrap the brackets)
+					if keyNode.NamedChildCount() > 0 {
+						prop.Key = b.buildExpr(keyNode.NamedChild(0))
 					}
 				}
 				ol.Properties = append(ol.Properties, prop)
