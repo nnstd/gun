@@ -566,3 +566,212 @@ func TestGenerateProducesValidGo(t *testing.T) {
 		}
 	}
 }
+
+// --- Destructuring assignment tests ---
+
+func TestDestructuringArrayAssign(t *testing.T) {
+	out := lowerTS(t, `
+		let a: any, b: any;
+		const arr = [1, 2];
+		[a, b] = arr;
+	`)
+	assertContains(t, out, `_arr`)
+	assertContains(t, out, `.Index(0)`)
+	assertContains(t, out, `.Index(1)`)
+}
+
+func TestDestructuringObjectAssign(t *testing.T) {
+	out := lowerTS(t, `
+		let x: any, y: any;
+		const obj = {x: 1, y: 2};
+		({x, y} = obj);
+	`)
+	assertContains(t, out, `_obj`)
+	assertContains(t, out, `.Get("x")`)
+	assertContains(t, out, `.Get("y")`)
+}
+
+func TestDestructuringArrayRestAssign(t *testing.T) {
+	out := lowerTS(t, `
+		let first: any, rest: any;
+		[first, ...rest] = [1, 2, 3];
+	`)
+	assertContains(t, out, `.Index(0)`)
+	assertContains(t, out, `Slice`)
+}
+
+// --- Super call tests ---
+
+func TestSuperCallInConstructor(t *testing.T) {
+	out := lowerTS(t, `
+		class Parent {}
+		class Child extends Parent {
+			constructor() { super(); }
+		}
+	`)
+	assertContains(t, out, "CallSuper")
+	assertContains(t, out, "this")
+}
+
+// --- Top-level this ---
+
+func TestTopLevelThisIsUndefined(t *testing.T) {
+	out := lowerTS(t, `const x = this;`)
+	assertContains(t, out, "NewUndefined")
+	assertNotContains(t, out, `goIdent("this")`)
+}
+
+func TestThisInsideFunctionIsPreserved(t *testing.T) {
+	out := lowerTS(t, `
+		function foo() { return this; }
+	`)
+	// Inside a function, this should not be NewUndefined
+	assertNotContains(t, out, "NewUndefined")
+}
+
+// --- For-loop init tests ---
+
+func TestForLoopMultiDeclaratorInit(t *testing.T) {
+	out := lowerTS(t, `
+		function f() {
+			for (let i = 0, len = 10; i < len; i++) {}
+		}
+	`)
+	// Should compile without "var declaration not allowed in for initializer"
+	assertContains(t, out, "jsvalue.Lt")
+}
+
+func TestForLoopVarDeclInit(t *testing.T) {
+	out := lowerTS(t, `
+		function f() {
+			for (var x: any; x; ) {}
+		}
+	`)
+	// var decl should be hoisted before the for loop
+	assertContains(t, out, "for")
+}
+
+// --- Object literal tests ---
+
+func TestObjectLiteralSpread(t *testing.T) {
+	out := lowerTS(t, `
+		const a = {x: 1};
+		const b = {...a, y: 2};
+	`)
+	assertContains(t, out, "Assign")
+}
+
+func TestObjectLiteralComputedKey(t *testing.T) {
+	out := lowerTS(t, `
+		const KEY = "myKey";
+		const obj = { [KEY]: true };
+	`)
+	assertContains(t, out, "fmt.Sprint")
+	assertContains(t, out, "NewObject")
+	assertNotContains(t, out, `"[KEY]"`)
+}
+
+// --- Unused variable elimination tests ---
+
+func TestUnusedVarElimination(t *testing.T) {
+	out := lowerTS(t, `
+		function f() {
+			const x = 1;
+			const y = 2;
+			return y;
+		}
+	`)
+	// x is unused, should be replaced with _
+	assertContains(t, out, "_ =")
+	assertContains(t, out, "return")
+}
+
+// --- Function hoisting tests ---
+
+func TestFunctionHoistingInBody(t *testing.T) {
+	out := lowerTS(t, `
+		function outer() {
+			const result = inner();
+			function inner() { return 42; }
+			return result;
+		}
+	`)
+	// inner should be available before its declaration
+	assertContains(t, out, "inner")
+	assertContains(t, out, "NewFunction")
+}
+
+// --- FuncExpr this binding ---
+
+func TestFuncExprThisBinding(t *testing.T) {
+	out := lowerTS(t, `
+		const obj = {
+			method: function() { return this; }
+		};
+	`)
+	// function expression that uses this should use lowerMethodBody
+	assertContains(t, out, "this")
+}
+
+// --- Class method MarkAsMethod ---
+
+func TestClassMethodsAreMarkedAsMethod(t *testing.T) {
+	out := lowerTS(t, `
+		class Foo {
+			bar() { return 1; }
+		}
+	`)
+	assertContains(t, out, "MarkAsMethod")
+}
+
+// --- Member assignment in expression context ---
+
+func TestMemberAssignExpr(t *testing.T) {
+	out := lowerTS(t, `
+		function f(obj: any) {
+			const x = (obj.foo = 42);
+		}
+	`)
+	assertContains(t, out, `.Set("foo"`)
+}
+
+// --- Computed member call ---
+
+func TestComputedMemberCall(t *testing.T) {
+	out := lowerTS(t, `
+		function f(obj: any, key: any) {
+			obj[key]();
+		}
+	`)
+	assertContains(t, out, "MethodCall")
+	assertContains(t, out, "fmt.Sprint")
+}
+
+// --- Module.exports detection ---
+
+func TestModuleExportsAsDefaultExport(t *testing.T) {
+	tree := parseTS(t, `module.exports = function() { return 1; }`)
+	mod := hir.BuildModule(tree.RootNode(), []byte(`module.exports = function() { return 1; }`), "mymod")
+	tree.Close()
+
+	hasExportDefault := false
+	for _, d := range mod.Declarations {
+		if ed, ok := d.(*hir.ExportDecl); ok && ed.IsDefault {
+			hasExportDefault = true
+		}
+	}
+	if !hasExportDefault {
+		t.Error("module.exports = ... should produce ExportDecl with IsDefault")
+	}
+}
+
+// --- Spread in call args ---
+
+func TestSpreadWithRegularArgs(t *testing.T) {
+	out := lowerTS(t, `
+		function f(obj: any, arr: any) {
+			obj.method("first", ...arr);
+		}
+	`)
+	assertContains(t, out, "append")
+}

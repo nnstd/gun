@@ -748,3 +748,158 @@ func TestMapPassesArrayAsThirdArg(t *testing.T) {
 		t.Errorf("map third arg: expected array, got %v", gotSelf)
 	}
 }
+
+// --- Inc/Dec mutation tests ---
+
+func TestIncMutatesInPlace(t *testing.T) {
+	v := NewNumber(5)
+	Inc(v)
+	if v.Number() != 6 {
+		t.Errorf("Inc: expected 6, got %v", v.Number())
+	}
+	Inc(v)
+	if v.Number() != 7 {
+		t.Errorf("Inc twice: expected 7, got %v", v.Number())
+	}
+}
+
+func TestDecMutatesInPlace(t *testing.T) {
+	v := NewNumber(5)
+	Dec(v)
+	if v.Number() != 4 {
+		t.Errorf("Dec: expected 4, got %v", v.Number())
+	}
+}
+
+func TestIncInForLoop(t *testing.T) {
+	count := 0
+	for i := NewNumber(0); Lt(From(i), NewNumber(3)).Bool(); Inc(i) {
+		count++
+	}
+	if count != 3 {
+		t.Errorf("for loop with Inc: expected 3 iterations, got %d", count)
+	}
+}
+
+// --- ObjectFrom with map ---
+
+func TestObjectFromMap(t *testing.T) {
+	obj := ObjectFrom(map[string]interface{}{
+		"name": NewString("Alice"),
+		"age":  NewNumber(30),
+	})
+	if obj.Get("name").String() != "Alice" {
+		t.Errorf("ObjectFrom map: name = %v", obj.Get("name"))
+	}
+	if obj.Get("age").Number() != 30 {
+		t.Errorf("ObjectFrom map: age = %v", obj.Get("age"))
+	}
+}
+
+func TestObjectFromMapWithNestedJSValue(t *testing.T) {
+	inner := NewArray(NewString("a"), NewString("b"))
+	obj := ObjectFrom(map[string]interface{}{
+		"arr": inner,
+	})
+	arr := obj.Get("arr")
+	if arr.Len() != 2 {
+		t.Errorf("ObjectFrom nested: expected len 2, got %d", arr.Len())
+	}
+	arr.MethodCall("push", NewString("c"))
+	if arr.Len() != 3 {
+		t.Errorf("ObjectFrom nested push: expected len 3, got %d", arr.Len())
+	}
+}
+
+// --- DefineProperty with getter ---
+
+func TestDefinePropertyGetter(t *testing.T) {
+	obj := NewObject()
+	desc := ObjectFrom(map[string]interface{}{
+		"get": NewFunction(func(args ...*JSValue) *JSValue {
+			return NewString("computed")
+		}),
+		"enumerable": NewBool(true),
+	})
+	DefineProperty(obj, NewString("prop"), desc)
+	if obj.Get("prop").String() != "computed" {
+		t.Errorf("DefineProperty getter: expected 'computed', got %v", obj.Get("prop"))
+	}
+}
+
+// --- Function.prototype.call with thisArg ---
+
+func TestFunctionCallWithThisArg(t *testing.T) {
+	arr := NewArray(NewString("a"), NewString("b"))
+	sliceFn := NewArray().Get("slice")
+	result := sliceFn.MethodCall("call", arr)
+	if result.Len() != 2 {
+		t.Errorf("slice.call(arr): expected len 2, got %d", result.Len())
+	}
+}
+
+// --- CallSuper skips own classInit ---
+
+func TestCallSuperSkipsOwnInit(t *testing.T) {
+	parentCalled := false
+	parent := NewClass(func(this *JSValue, args ...*JSValue) *JSValue {
+		parentCalled = true
+		this.Set("fromParent", NewBool(true))
+		return nil
+	}, nil)
+	var child *JSValue
+	child = NewClass(func(this *JSValue, args ...*JSValue) *JSValue {
+		child.CallSuper(this)
+		this.Set("fromChild", NewBool(true))
+		return nil
+	}, parent)
+	instance := child.Call()
+	if !parentCalled {
+		t.Error("CallSuper did not call parent constructor")
+	}
+	if !instance.Get("fromParent").Bool() {
+		t.Error("parent constructor did not set fromParent")
+	}
+	if !instance.Get("fromChild").Bool() {
+		t.Error("child constructor did not set fromChild")
+	}
+}
+
+// --- MethodCall with MarkAsMethod ---
+
+func TestMethodCallPassesThis(t *testing.T) {
+	var receivedThis *JSValue
+	proto := NewObject()
+	proto.Set("greet", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) > 0 {
+			receivedThis = args[0]
+		}
+		return NewString("hi")
+	}).MarkAsMethod())
+
+	obj := NewObject()
+	obj.SetPrototype(proto)
+	obj.Set("name", NewString("test"))
+
+	obj.MethodCall("greet")
+	if receivedThis == nil {
+		t.Fatal("MethodCall did not pass this")
+	}
+	if receivedThis.Get("name").String() != "test" {
+		t.Errorf("this.name = %v, want 'test'", receivedThis.Get("name"))
+	}
+}
+
+// --- Map has/set/get with object keys ---
+
+func TestMapWithObjectKeys(t *testing.T) {
+	m := NewMap()
+	key := NewObject()
+	m.MethodCall("set", key, NewString("value"))
+	if !m.MethodCall("has", key).Bool() {
+		t.Error("Map.has(key) should be true after set")
+	}
+	if m.MethodCall("get", key).String() != "value" {
+		t.Errorf("Map.get(key) = %v, want 'value'", m.MethodCall("get", key))
+	}
+}
