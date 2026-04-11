@@ -695,8 +695,12 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 	// use .Call() to invoke it
 	if isAlreadyJSValue(fn) {
 		l.jsvalueImport()
-		for i, a := range args {
-			args[i] = jsvalueWrapLit(a)
+		limit := len(args)
+		if hasSpread && limit > 0 {
+			limit--
+		}
+		for i := 0; i < limit; i++ {
+			args[i] = jsvalueWrapLit(args[i])
 		}
 		return buildCallWithSpread(selectorExpr(fn, "Call"), args, hasSpread)
 	}
@@ -712,8 +716,12 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 			// Check if this could be a JSValue function
 			if l.exprIsJSValue(e.Func) {
 				l.jsvalueImport()
-				for i, a := range args {
-					args[i] = l.wrapAsJSValue(a)
+				limit := len(args)
+				if hasSpread && limit > 0 {
+					limit--
+				}
+				for i := 0; i < limit; i++ {
+					args[i] = l.wrapAsJSValue(args[i])
 				}
 				return buildCallWithSpread(selectorExpr(fn, "Call"), args, hasSpread)
 			}
@@ -881,13 +889,20 @@ func (l *Lowerer) lowerClassExpr(e *hir.ClassExpr) ast.Expr {
 	}
 
 	classVar := goIdent("_class")
+	stmts = append(stmts, &ast.DeclStmt{Decl: varDecl(classVar.Name, jsValuePtrType(), nil)})
+	if e.Name != "" {
+		stmts = append(stmts, &ast.DeclStmt{Decl: varDecl(symbol.Sanitize(e.Name), jsValuePtrType(), nil)})
+	}
 	l.currentClassName = classVar.Name
 	ctorLit := l.lowerClassConstructor(classVar.Name, e.Parent != nil, e.Constructor, e.Properties, e.Methods)
 	stmts = append(stmts,
-		assignDefine([]ast.Expr{classVar}, []ast.Expr{
+		assignStmt([]ast.Expr{classVar}, []ast.Expr{
 			callExpr(selectorExpr(goIdent("jsvalue"), "NewClass"), ctorLit, parentExpr),
 		}),
 	)
+	if e.Name != "" {
+		stmts = append(stmts, assignStmt([]ast.Expr{goIdent(symbol.Sanitize(e.Name))}, []ast.Expr{classVar}))
+	}
 	stmts = append(stmts, l.lowerClassSetups(classVar, e.Properties, e.Methods, e.StaticInits)...)
 	stmts = append(stmts, returnStmt(classVar))
 

@@ -37,12 +37,15 @@ type Lowerer struct {
 	moduleName       string                              // Go module name for relative import resolution
 	samePackage      bool                                // treat relative imports as same-package refs
 	varTypes         map[string]string                   // variable name → module type (e.g. "hono")
-	crossFileExports map[string]bool                     // Go names from other files (prevents .Get() dispatch)
-	initStmts        []ast.Stmt                          // statements for init() function
-	pkgName          string                              // Go package name
-	currentClassName string                              // set during class constructor/method lowering
-	insideFunc       int                                 // >0 when inside a function body
-	insideMethod     int                                 // >0 when inside a method body (_args[0] is this)
+	reservedNames    map[string]bool
+	importNameMap    map[string]string
+	exportAliasMap   map[string]string
+	crossFileExports map[string]bool // Go names from other files (prevents .Get() dispatch)
+	initStmts        []ast.Stmt      // statements for init() function
+	pkgName          string          // Go package name
+	currentClassName string          // set during class constructor/method lowering
+	insideFunc       int             // >0 when inside a function body
+	insideMethod     int             // >0 when inside a method body (_args[0] is this)
 	privateKeys      map[string]string
 	syntheticCounter int
 	needsBunWait     bool
@@ -50,15 +53,19 @@ type Lowerer struct {
 
 // Lower converts an HIR module to a Go AST file.
 func Lower(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool) *ast.File {
-	return LowerWithExports(mod, ctx, moduleName, samePackageImports, nil)
+	return LowerWithExports(mod, ctx, moduleName, samePackageImports, nil, nil, nil, nil)
 }
 
 // LowerWithExports converts an HIR module to a Go AST file with knowledge of
 // symbols exported from other files in the same package.
-func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport) *ast.File {
+func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string) *ast.File {
 	cfe := make(map[string]bool)
 	for _, exp := range crossFileExports {
 		cfe[exp.GoName] = true
+	}
+	reserved := make(map[string]bool)
+	for _, name := range reservedNames {
+		reserved[name] = true
 	}
 	l := &Lowerer{
 		symtab:           mod.SymbolTable,
@@ -67,6 +74,9 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 		importedSyms:     make(map[*symbol.Symbol]importResolution),
 		moduleName:       moduleName,
 		samePackage:      samePackageImports,
+		reservedNames:    reserved,
+		importNameMap:    importNameMap,
+		exportAliasMap:   exportAliasMap,
 		crossFileExports: cfe,
 		pkgName:          mod.Package,
 		varTypes:         make(map[string]string),
@@ -75,6 +85,9 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 	// Reserve cross-file export names in the symbol table so local symbols
 	// get suffixed on collision instead of redeclaring.
 	for name := range l.crossFileExports {
+		l.symtab.ReserveNameStr(name)
+	}
+	for name := range l.reservedNames {
 		l.symtab.ReserveNameStr(name)
 	}
 
@@ -219,8 +232,16 @@ func (l *Lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 	// All other functions become jsvalue.NewFunction vars
 	l.jsvalueImport()
 	body := l.lowerFuncBody(d.Params, d.Body)
+	methodLike := d.Body != nil && hirBodyUsesThis(d.Body)
+	if methodLike {
+		body = l.lowerMethodBody(d.Params, d.Body)
+	}
 	fnLit := l.wrapAsJSValueFunc(d.Params, body)
-	l.decls = append(l.decls, varDecl(name, nil, callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), fnLit)))
+	fnVal := callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), fnLit)
+	if methodLike {
+		fnVal = callExpr(selectorExpr(fnVal, "MarkAsMethod"))
+	}
+	l.decls = append(l.decls, varDecl(name, nil, fnVal))
 }
 
 func (l *Lowerer) lowerVarDecl(d *hir.VarDecl) {
@@ -577,6 +598,7 @@ func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 				inner.Symbol.Exported = true
 			}
 			l.lowerFuncDecl(inner)
+			l.maybeEmitExportAlias(inner.Symbol.OriginalName, l.emitName(inner.Symbol))
 		case *hir.VarDecl:
 			for _, decl := range inner.Declarators {
 				if decl.Symbol != nil {
@@ -584,30 +606,64 @@ func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 				}
 			}
 			l.lowerVarDecl(inner)
+			for _, decl := range inner.Declarators {
+				if decl.Symbol != nil {
+					l.maybeEmitExportAlias(decl.Symbol.OriginalName, l.emitName(decl.Symbol))
+				}
+			}
 		case *hir.ClassDecl:
 			if inner.Symbol != nil {
 				inner.Symbol.Exported = true
 			}
 			l.lowerClassDecl(inner)
+			l.maybeEmitExportAlias(inner.Symbol.OriginalName, l.emitName(inner.Symbol))
 		case *hir.EnumDecl:
 			if inner.Symbol != nil {
 				inner.Symbol.Exported = true
 			}
 			l.lowerEnumDecl(inner)
+			l.maybeEmitExportAlias(inner.Symbol.OriginalName, l.emitName(inner.Symbol))
 		case *hir.InterfaceDecl:
 			if inner.Symbol != nil {
 				inner.Symbol.Exported = true
 			}
 			l.lowerInterfaceDecl(inner)
+			l.maybeEmitExportAlias(inner.Symbol.OriginalName, l.emitName(inner.Symbol))
 		case *hir.TypeAliasDecl:
 			if inner.Symbol != nil {
 				inner.Symbol.Exported = true
 			}
 			l.lowerTypeAliasDecl(inner)
+			l.maybeEmitExportAlias(inner.Symbol.OriginalName, l.emitName(inner.Symbol))
 		default:
 			l.lowerDecl(d.Decl)
 		}
 	}
+	for _, n := range d.Names {
+		goName := symbol.Capitalize(symbol.Sanitize(n.ExportedName))
+		if alias, ok := l.exportAliasMap[symbol.Capitalize(n.ExportedName)]; ok {
+			goName = alias
+		}
+		var rhs ast.Expr = goIdent(symbol.Sanitize(n.LocalName))
+		if sym := l.symtab.Lookup(n.LocalName); sym != nil {
+			rhs = l.lowerIdentifier(&hir.Identifier{Sym: sym, Name: n.LocalName})
+		}
+		if id, ok := rhs.(*ast.Ident); ok && id.Name == goName {
+			continue
+		}
+		l.decls = append(l.decls, varDecl(goName, nil, rhs))
+	}
+}
+
+func (l *Lowerer) maybeEmitExportAlias(exportedName, localGoName string) {
+	if l.exportAliasMap == nil {
+		return
+	}
+	goName, ok := l.exportAliasMap[symbol.Capitalize(exportedName)]
+	if !ok || goName == "" || goName == localGoName {
+		return
+	}
+	l.decls = append(l.decls, varDecl(goName, nil, goIdent(localGoName)))
 }
 
 // lowerExportDefault handles `export default ...` declarations.
@@ -622,13 +678,27 @@ func (l *Lowerer) lowerExportDefault(d *hir.ExportDecl) {
 			l.lowerFuncDecl(inner)
 			// Create Default alias pointing to the capitalized name
 			goName := l.emitName(inner.Symbol)
-			l.decls = append(l.decls, varDecl("Default", nil, goIdent(goName)))
+			defaultName := "Default"
+			if alias, ok := l.exportAliasMap["default"]; ok {
+				defaultName = alias
+			}
+			l.decls = append(l.decls, varDecl(defaultName, nil, goIdent(goName)))
 		}
 	case *hir.ClassDecl:
 		if inner.Symbol != nil {
 			inner.Symbol.Exported = true
 		}
 		l.lowerClassDecl(inner)
+		if inner.Symbol != nil {
+			localGoName := l.emitName(inner.Symbol)
+			defaultName := "Default"
+			if alias, ok := l.exportAliasMap["default"]; ok {
+				defaultName = alias
+			}
+			if defaultName != localGoName {
+				l.decls = append(l.decls, varDecl(defaultName, nil, goIdent(localGoName)))
+			}
+		}
 	case *hir.VarDecl:
 		// export default expr → var Default = expr
 		for _, decl := range inner.Declarators {
@@ -637,7 +707,11 @@ func (l *Lowerer) lowerExportDefault(d *hir.ExportDecl) {
 				value = l.lowerExpr(decl.Init)
 				value = jsvalueWrapLit(value)
 			}
-			l.decls = append(l.decls, varDecl("Default", nil, value))
+			defaultName := "Default"
+			if alias, ok := l.exportAliasMap["default"]; ok {
+				defaultName = alias
+			}
+			l.decls = append(l.decls, varDecl(defaultName, nil, value))
 			return
 		}
 	default:
@@ -662,7 +736,14 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 
 	// Process default import
 	if d.Default != nil && d.Default.Symbol != nil {
-		if isKnown && isGunRuntimePkg(goImportPath) {
+		if mapped, ok := l.importNameMap[d.ModulePath+"\x00default"]; ok {
+			l.importedSyms[d.Default.Symbol] = importResolution{
+				goImportPath: "",
+				goPkgName:    "",
+				goSymbol:     mapped,
+				isTranspiled: true,
+			}
+		} else if isKnown && isGunRuntimePkg(goImportPath) {
 			// Default import from Gun runtime module → pkg.AsJSValue
 			l.importedSyms[d.Default.Symbol] = importResolution{
 				goImportPath: goImportPath,
@@ -703,6 +784,15 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 			continue
 		}
 		goSym := symbol.Capitalize(n.OriginalName)
+		if mapped, ok := l.importNameMap[d.ModulePath+"\x00"+n.OriginalName]; ok {
+			l.importedSyms[n.Symbol] = importResolution{
+				goImportPath: "",
+				goPkgName:    "",
+				goSymbol:     mapped,
+				isTranspiled: true,
+			}
+			continue
+		}
 		// Same-package imports: check if the symbol is exported from the other file
 		// (and thus capitalized), or just an internal reference (stays lowercase).
 		if goImportPath == "" {

@@ -236,7 +236,8 @@ type ObjectPattern struct {
 // ObjectPatternProp is a single property in an object pattern.
 type ObjectPatternProp struct {
 	Key     string         // property key in source object
-	Value   *symbol.Symbol // local binding (nil if shorthand = Key)
+	Value   *symbol.Symbol // local binding (nil if nested pattern)
+	Pattern Pattern        // nested pattern for {a: [x]} / {a: {b}}
 	Default Expr           // default value (nil if required)
 }
 
@@ -249,6 +250,7 @@ type ArrayPattern struct {
 // ArrayPatternElem is a single element in an array pattern.
 type ArrayPatternElem struct {
 	Symbol  *symbol.Symbol // local binding
+	Pattern Pattern        // nested pattern for [[x]] / [{a}]
 	Default Expr           // default value (nil if required)
 }
 

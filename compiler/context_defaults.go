@@ -204,6 +204,37 @@ func registerGlobalFunctions(ctx *tcontext.TranspilerContext) {
 		},
 	})
 
+	for _, fnName := range []string{"decodeURI", "decodeURIComponent", "encodeURI"} {
+		name := fnName
+		ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
+			Name: name,
+			Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+				imp.AddImport("github.com/nnstd/gun/runtime/web")
+				callName := ""
+				switch name {
+				case "decodeURI":
+					callName = "DecodeURI"
+				case "decodeURIComponent":
+					callName = "DecodeURIComponent"
+				case "encodeURI":
+					callName = "EncodeURI"
+				}
+				if len(args) > 0 {
+					return callExpr(selectorExpr(ident("web"), callName), jsvalueWrapLit(args[0]))
+				}
+				return callExpr(selectorExpr(ident("web"), callName), callExpr(selectorExpr(ident("jsvalue"), "NewString"), stringLit("")))
+			},
+		})
+	}
+
+	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
+		Name: "addEventListener",
+		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "NewUndefined"))
+		},
+	})
+
 	// Error types as functions (Error() without new)
 	for _, errType := range []string{"Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError"} {
 		et := errType
@@ -327,12 +358,18 @@ func registerConstructors(ctx *tcontext.TranspilerContext) {
 		},
 	})
 
-	for _, ctorName := range []string{"Headers", "Request", "Response"} {
+	for _, ctorName := range []string{"Headers", "Request", "Response", "URL"} {
 		name := ctorName
 		ctx.RegisterConstructor(&tcontext.Constructor{
 			Name: name,
 			Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
 				imp.AddImport("github.com/nnstd/gun/runtime/web")
+				if name == "URL" {
+					if len(args) > 0 {
+						return callExpr(selectorExpr(ident("web"), "ParseURL"), jsvalueWrapLit(args[0]))
+					}
+					return callExpr(selectorExpr(ident("web"), "ParseURL"), callExpr(selectorExpr(ident("jsvalue"), "NewString"), stringLit("")))
+				}
 				return callExpr(selectorExpr(selectorExpr(ident("web"), name), "Call"), args...)
 			},
 		})
@@ -502,12 +539,15 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		},
 	})
 
-	for _, identName := range []string{"Headers", "Request", "Response"} {
+	for _, identName := range []string{"Headers", "Request", "Response", "URL"} {
 		name := identName
 		ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 			Name: name,
 			Transform: func(imp tcontext.Imports) ast.Expr {
 				imp.AddImport("github.com/nnstd/gun/runtime/web")
+				if name == "URL" {
+					return selectorExpr(ident("web"), "URL")
+				}
 				return selectorExpr(ident("web"), name)
 			},
 		})
@@ -528,6 +568,35 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 			return callExpr(selectorExpr(ident("jsvalue"), "NewObject"))
 		},
 	})
+
+	for _, identName := range []string{"decodeURI", "decodeURIComponent", "encodeURI"} {
+		name := identName
+		ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+			Name: name,
+			Transform: func(imp tcontext.Imports) ast.Expr {
+				imp.AddImport("github.com/nnstd/gun/runtime/web")
+				imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+				callName := ""
+				switch name {
+				case "decodeURI":
+					callName = "DecodeURI"
+				case "decodeURIComponent":
+					callName = "DecodeURIComponent"
+				case "encodeURI":
+					callName = "EncodeURI"
+				}
+				return callExpr(selectorExpr(ident("jsvalue"), "NewFunction"), &ast.FuncLit{
+					Type: &ast.FuncType{
+						Params:  fieldList(&ast.Field{Names: []*ast.Ident{ident("_a")}, Type: &ast.Ellipsis{Elt: ptrType(selectorExpr(ident("jsvalue"), "JSValue"))}}),
+						Results: fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue")))),
+					},
+					Body: blockStmt(
+						returnStmt(callExpr(selectorExpr(ident("web"), callName), &ast.IndexExpr{X: ident("_a"), Index: intLit("0")})),
+					),
+				})
+			},
+		})
+	}
 }
 
 // registerModules registers TS module → Go package mappings.
@@ -632,8 +701,12 @@ func registerKnownGlobals(ctx *tcontext.TranspilerContext) {
 	ctx.MarkKnownGlobal("Headers")
 	ctx.MarkKnownGlobal("Request")
 	ctx.MarkKnownGlobal("Response")
+	ctx.MarkKnownGlobal("URL")
 	ctx.MarkKnownGlobal("Symbol")
 	ctx.MarkKnownGlobal("module")
 	ctx.MarkKnownGlobal("require")
 	ctx.MarkKnownGlobal("globalThis")
+	ctx.MarkKnownGlobal("decodeURI")
+	ctx.MarkKnownGlobal("decodeURIComponent")
+	ctx.MarkKnownGlobal("encodeURI")
 }

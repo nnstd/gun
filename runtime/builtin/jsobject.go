@@ -81,6 +81,26 @@ func Entries(obj *JSValue) *JSValue {
 	return NewArray(result...)
 }
 
+// FromEntries builds an object from an iterable/array of [key, value] pairs.
+func FromEntries(entries *JSValue) *JSValue {
+	obj := NewObject()
+	if entries == nil {
+		return obj
+	}
+	for i, pair := range entries.Array() {
+		if pair == nil {
+			continue
+		}
+		key := pair.Index(0)
+		if key == nil || key.TypeString() == "undefined" {
+			_ = i
+			continue
+		}
+		obj.Set(PropertyKey(key), pair.Index(1))
+	}
+	return obj
+}
+
 // Assign copies own properties from sources to target.
 // Implements Object.assign() semantics.
 func Assign(target any, sources ...any) *JSValue {

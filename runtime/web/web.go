@@ -101,6 +101,13 @@ var Response = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSV
 	return nil
 }, nil)
 
+var URL = jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+	if len(args) > 0 {
+		return ParseURL(args[0])
+	}
+	return ParseURL(jsvalue.NewString(""))
+})
+
 func init() {
 	Headers.Get("prototype").Set("get", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		if len(args) < 2 || args[0] == nil {
@@ -257,4 +264,54 @@ func ParseURL(raw *jsvalue.JSValue) *jsvalue.JSValue {
 	obj.Set("hostname", jsvalue.NewString(u.Hostname()))
 	obj.Set("port", jsvalue.NewString(u.Port()))
 	return obj
+}
+
+func DecodeURI(raw *jsvalue.JSValue) *jsvalue.JSValue {
+	if raw == nil {
+		return jsvalue.NewString("")
+	}
+	if s, err := neturl.PathUnescape(raw.String()); err == nil {
+		return jsvalue.NewString(s)
+	}
+	return jsvalue.NewString(raw.String())
+}
+
+func DecodeURIComponent(raw *jsvalue.JSValue) *jsvalue.JSValue {
+	if raw == nil {
+		return jsvalue.NewString("")
+	}
+	if s, err := neturl.QueryUnescape(raw.String()); err == nil {
+		return jsvalue.NewString(s)
+	}
+	if s, err := neturl.PathUnescape(raw.String()); err == nil {
+		return jsvalue.NewString(s)
+	}
+	return jsvalue.NewString(raw.String())
+}
+
+func EncodeURI(raw *jsvalue.JSValue) *jsvalue.JSValue {
+	if raw == nil {
+		return jsvalue.NewString("")
+	}
+	s := raw.String()
+	escaped := neturl.PathEscape(s)
+	escaped = strings.ReplaceAll(escaped, "%2F", "/")
+	escaped = strings.ReplaceAll(escaped, "%3A", ":")
+	escaped = strings.ReplaceAll(escaped, "%3F", "?")
+	escaped = strings.ReplaceAll(escaped, "%23", "#")
+	escaped = strings.ReplaceAll(escaped, "%5B", "[")
+	escaped = strings.ReplaceAll(escaped, "%5D", "]")
+	escaped = strings.ReplaceAll(escaped, "%40", "@")
+	escaped = strings.ReplaceAll(escaped, "%21", "!")
+	escaped = strings.ReplaceAll(escaped, "%24", "$")
+	escaped = strings.ReplaceAll(escaped, "%26", "&")
+	escaped = strings.ReplaceAll(escaped, "%27", "'")
+	escaped = strings.ReplaceAll(escaped, "%28", "(")
+	escaped = strings.ReplaceAll(escaped, "%29", ")")
+	escaped = strings.ReplaceAll(escaped, "%2A", "*")
+	escaped = strings.ReplaceAll(escaped, "%2B", "+")
+	escaped = strings.ReplaceAll(escaped, "%2C", ",")
+	escaped = strings.ReplaceAll(escaped, "%3B", ";")
+	escaped = strings.ReplaceAll(escaped, "%3D", "=")
+	return jsvalue.NewString(escaped)
 }

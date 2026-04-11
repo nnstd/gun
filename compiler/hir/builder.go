@@ -660,6 +660,12 @@ func (b *Builder) buildExport(mod *Module, node *sitter.Node) {
 				exportedName := localName
 				if aliasNode != nil {
 					exportedName = b.nodeText(aliasNode)
+					if (strings.HasPrefix(exportedName, "'") && strings.HasSuffix(exportedName, "'")) ||
+						(strings.HasPrefix(exportedName, "\"") && strings.HasSuffix(exportedName, "\"")) {
+						// CJS interop aliases like `export { X as 'module.exports' }`
+						// do not have a Go-level export equivalent.
+						continue
+					}
 				}
 				ed.Names = append(ed.Names, ExportName{
 					LocalName:    localName,
@@ -854,12 +860,17 @@ func (b *Builder) buildObjectPattern(node *sitter.Node) *ObjectPattern {
 			valueNode := child.ChildByFieldName("value")
 			if keyNode != nil && valueNode != nil {
 				key := b.nodeText(keyNode)
-				valName := b.nodeText(valueNode)
-				sym := b.symtab.Define(valName, symbol.KindVariable)
-				pat.Properties = append(pat.Properties, &ObjectPatternProp{
-					Key:   key,
-					Value: sym,
-				})
+				prop := &ObjectPatternProp{Key: key}
+				switch valueNode.Kind() {
+				case "object_pattern":
+					prop.Pattern = b.buildObjectPattern(valueNode)
+				case "array_pattern":
+					prop.Pattern = b.buildArrayPattern(valueNode)
+				default:
+					valName := b.nodeText(valueNode)
+					prop.Value = b.symtab.Define(valName, symbol.KindVariable)
+				}
+				pat.Properties = append(pat.Properties, prop)
 			}
 		case "object_assignment_pattern":
 			// {key = default}
@@ -898,20 +909,30 @@ func (b *Builder) buildArrayPattern(node *sitter.Node) *ArrayPattern {
 			name := b.nodeText(child)
 			sym := b.symtab.Define(name, symbol.KindVariable)
 			pat.Elements = append(pat.Elements, &ArrayPatternElem{Symbol: sym})
+		case "array_pattern":
+			pat.Elements = append(pat.Elements, &ArrayPatternElem{Pattern: b.buildArrayPattern(child)})
+		case "object_pattern":
+			pat.Elements = append(pat.Elements, &ArrayPatternElem{Pattern: b.buildObjectPattern(child)})
 		case "assignment_pattern":
 			leftNode := child.ChildByFieldName("left")
 			rightNode := child.ChildByFieldName("right")
 			if leftNode != nil {
-				name := b.nodeText(leftNode)
-				sym := b.symtab.Define(name, symbol.KindVariable)
+				elem := &ArrayPatternElem{}
+				switch leftNode.Kind() {
+				case "object_pattern":
+					elem.Pattern = b.buildObjectPattern(leftNode)
+				case "array_pattern":
+					elem.Pattern = b.buildArrayPattern(leftNode)
+				default:
+					name := b.nodeText(leftNode)
+					elem.Symbol = b.symtab.Define(name, symbol.KindVariable)
+				}
 				var def Expr
 				if rightNode != nil {
 					def = b.buildExpr(rightNode)
 				}
-				pat.Elements = append(pat.Elements, &ArrayPatternElem{
-					Symbol:  sym,
-					Default: def,
-				})
+				elem.Default = def
+				pat.Elements = append(pat.Elements, elem)
 			}
 		case "rest_pattern":
 			if child.NamedChildCount() > 0 {
@@ -974,9 +995,17 @@ func (b *Builder) buildObjectPatternLookup(node *sitter.Node) *ObjectPattern {
 			valueNode := child.ChildByFieldName("value")
 			if keyNode != nil && valueNode != nil {
 				key := b.nodeText(keyNode)
-				valName := b.nodeText(valueNode)
-				sym := b.lookupOrDefine(valName, symbol.KindVariable)
-				pat.Properties = append(pat.Properties, &ObjectPatternProp{Key: key, Value: sym})
+				prop := &ObjectPatternProp{Key: key}
+				switch valueNode.Kind() {
+				case "object_pattern":
+					prop.Pattern = b.buildObjectPatternLookup(valueNode)
+				case "array_pattern":
+					prop.Pattern = b.buildArrayPatternLookup(valueNode)
+				default:
+					valName := b.nodeText(valueNode)
+					prop.Value = b.lookupOrDefine(valName, symbol.KindVariable)
+				}
+				pat.Properties = append(pat.Properties, prop)
 			}
 		case "rest_pattern":
 			if child.NamedChildCount() > 0 {
@@ -999,6 +1028,10 @@ func (b *Builder) buildArrayPatternLookup(node *sitter.Node) *ArrayPattern {
 			name := b.nodeText(child)
 			sym := b.lookupOrDefine(name, symbol.KindVariable)
 			pat.Elements = append(pat.Elements, &ArrayPatternElem{Symbol: sym})
+		case "array_pattern":
+			pat.Elements = append(pat.Elements, &ArrayPatternElem{Pattern: b.buildArrayPatternLookup(child)})
+		case "object_pattern":
+			pat.Elements = append(pat.Elements, &ArrayPatternElem{Pattern: b.buildObjectPatternLookup(child)})
 		case "rest_pattern":
 			if child.NamedChildCount() > 0 {
 				name := b.nodeText(child.NamedChild(0))

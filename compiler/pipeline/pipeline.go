@@ -13,10 +13,10 @@ import (
 	"github.com/nnstd/gun/compiler/backend"
 	"github.com/nnstd/gun/compiler/context"
 	"github.com/nnstd/gun/compiler/hir"
-	"github.com/nnstd/gun/compiler/symbol"
 	"github.com/nnstd/gun/compiler/mir"
 	"github.com/nnstd/gun/compiler/passes"
 	"github.com/nnstd/gun/compiler/ssa"
+	"github.com/nnstd/gun/compiler/symbol"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
@@ -38,9 +38,9 @@ type Pipeline struct {
 	Ctx      *context.TranspilerContext
 
 	// Hooks for observability (all optional)
-	OnHIR func(*hir.Module)  // called after HIR construction
-	OnMIR func(*mir.Module)  // called after MIR lowering
-	OnSSA func(*ssa.Module)  // called after SSA construction
+	OnHIR func(*hir.Module) // called after HIR construction
+	OnMIR func(*mir.Module) // called after MIR lowering
+	OnSSA func(*ssa.Module) // called after SSA construction
 }
 
 // New creates a pipeline with the given optimization level and default passes.
@@ -131,6 +131,8 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 	// Phase 1: Parse all files into HIR and scan exports
 	hirModules := make(map[string]*hir.Module)
 	allExports := make(map[string][]backend.CrossFileExport)
+	allNames := make(map[string][]string)
+	exportAliases := make(map[string]map[string]string)
 
 	for name, source := range files {
 		tree, err := parseTypeScript(source)
@@ -141,6 +143,7 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 		tree.Close()
 		hirModules[name] = hirMod
 		allExports[name] = backend.ScanHIRExports(hirMod)
+		allNames[name] = backend.ScanHIRTopLevelNames(hirMod)
 	}
 
 	// Phase 1b: Synthesize Default export for modules with named exports
@@ -198,19 +201,72 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 		}
 	}
 
+	// Phase 2b: assign package-global alias names for exported symbols.
+	// Entry-file exports keep their public names. Non-entry exports get
+	// file-specific aliases so flattened packages preserve module boundaries.
+	for fileName, exps := range allExports {
+		aliases := make(map[string]string)
+		for _, exp := range exps {
+			exportName := exp.GoName
+			if exportName == "Default" {
+				aliases["default"] = exportName
+				if fileName != entryFile {
+					aliases["default"] = fileDefaultName(fileName)
+				}
+				continue
+			}
+			aliases[exportName] = exportName
+			if fileName != entryFile {
+				aliases[exportName] = fileSpecificExportName(fileName, exportName)
+			}
+		}
+		exportAliases[fileName] = aliases
+	}
+
 	// Phase 3: Compile each file with cross-file export knowledge
 	results := make(map[string][]byte)
 	for name, hirMod := range hirModules {
 		// Collect exports from OTHER files (not this one)
 		var crossExports []backend.CrossFileExport
+		var reservedNames []string
+		importNameMap := make(map[string]string)
 		for otherFile, exps := range allExports {
 			if otherFile == name {
 				continue
 			}
 			crossExports = append(crossExports, exps...)
 		}
+		for otherFile, names := range allNames {
+			if otherFile == name {
+				continue
+			}
+			reservedNames = append(reservedNames, names...)
+			for _, alias := range exportAliases[otherFile] {
+				reservedNames = append(reservedNames, alias)
+			}
+		}
+		for _, imp := range hirMod.Imports {
+			if !strings.HasPrefix(imp.ModulePath, ".") {
+				continue
+			}
+			target := resolvePackageImportFile(name, imp.ModulePath, files)
+			if target == "" {
+				continue
+			}
+			targetAliases := exportAliases[target]
+			if imp.Default != nil {
+				if alias := targetAliases["default"]; alias != "" {
+					importNameMap[imp.ModulePath+"\x00default"] = alias
+				}
+			}
+			for _, n := range imp.Named {
+				if alias := targetAliases[symbol.Capitalize(n.OriginalName)]; alias != "" {
+					importNameMap[imp.ModulePath+"\x00"+n.OriginalName] = alias
+				}
+			}
+		}
 
-		goFile := backend.LowerWithExports(hirMod, p.Ctx, moduleName, true, crossExports)
+		goFile := backend.LowerWithExports(hirMod, p.Ctx, moduleName, true, crossExports, reservedNames, importNameMap, exportAliases[name])
 		out, err := backend.Generate(goFile)
 		if err != nil {
 			return nil, fmt.Errorf("compile %s: %w", name, err)
@@ -243,6 +299,45 @@ func fileDefaultName(fileName string) string {
 		name = "FileDefault"
 	}
 	return strings.ToUpper(name[:1]) + name[1:] + "Default"
+}
+
+func fileSpecificExportName(fileName, exportName string) string {
+	clean := strings.TrimSuffix(filepath.Clean(fileName), filepath.Ext(fileName))
+	parts := strings.Split(clean, string(filepath.Separator))
+	if len(parts) > 3 {
+		parts = parts[len(parts)-3:]
+	}
+	name := ""
+	for _, r := range strings.Join(parts, "_") {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			name += string(r)
+		} else {
+			name += "_"
+		}
+	}
+	if name == "" {
+		name = "File"
+	}
+	return strings.ToUpper(name[:1]) + name[1:] + symbol.Capitalize(exportName)
+}
+
+func resolvePackageImportFile(currentFile, importPath string, files map[string][]byte) string {
+	fromDir := filepath.Dir(currentFile)
+	base := filepath.Join(fromDir, importPath)
+	candidates := []string{
+		base,
+		base + ".ts",
+		base + ".js",
+		filepath.Join(base, "index.ts"),
+		filepath.Join(base, "index.js"),
+	}
+	for _, candidate := range candidates {
+		abs, _ := filepath.Abs(candidate)
+		if _, ok := files[abs]; ok {
+			return abs
+		}
+	}
+	return ""
 }
 
 // renameDefaultExport replaces "Default" in compiled output with a file-specific name.

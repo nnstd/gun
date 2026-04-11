@@ -19,6 +19,10 @@ func transformObjectCall(prop string, args []ast.Expr, addImport func(string)) a
 		if len(args) > 0 {
 			return callExpr(selectorExpr(ident("jsvalue"), "Entries"), args[0])
 		}
+	case "fromEntries":
+		if len(args) > 0 {
+			return callExpr(selectorExpr(ident("jsvalue"), "FromEntries"), args[0])
+		}
 	case "assign":
 		if len(args) > 0 {
 			return callExpr(selectorExpr(ident("jsvalue"), "Assign"), args...)

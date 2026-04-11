@@ -49,13 +49,6 @@ func hoistFunctions(stmts []hir.Stmt) []hir.Stmt {
 	for _, s := range stmts {
 		if isFuncDecl(s) {
 			decls = append(decls, s)
-		} else if block, ok := s.(*hir.BlockStmt); ok {
-			// Recursively extract function-valued declarations from nested blocks.
-			innerDecls, innerRest := extractVarDecls(block.Stmts)
-			decls = append(decls, innerDecls...)
-			if len(innerRest) > 0 {
-				rest = append(rest, &hir.BlockStmt{Stmts: innerRest})
-			}
 		} else {
 			rest = append(rest, s)
 		}
@@ -64,25 +57,6 @@ func hoistFunctions(stmts []hir.Stmt) []hir.Stmt {
 		return stmts
 	}
 	return append(decls, rest...)
-}
-
-// extractVarDecls separates function-valued VarDecl statements from other
-// statements, recursing into nested BlockStmts.
-func extractVarDecls(stmts []hir.Stmt) (decls, rest []hir.Stmt) {
-	for _, s := range stmts {
-		if isFuncDecl(s) {
-			decls = append(decls, s)
-		} else if block, ok := s.(*hir.BlockStmt); ok {
-			innerDecls, innerRest := extractVarDecls(block.Stmts)
-			decls = append(decls, innerDecls...)
-			if len(innerRest) > 0 {
-				rest = append(rest, &hir.BlockStmt{Stmts: innerRest})
-			}
-		} else {
-			rest = append(rest, s)
-		}
-	}
-	return
 }
 
 func isFuncDecl(s hir.Stmt) bool {
@@ -250,35 +224,45 @@ func (l *Lowerer) lowerObjectDestructuring(pat *hir.ObjectPattern, init ast.Expr
 		assign = assignStmt
 	}
 	// Assign init to a temp (always :=, it's a new variable)
-	tmpName := "_obj"
+	tmpName := l.nextSyntheticName("_obj")
 	stmts = append(stmts, assignDefine(
 		[]ast.Expr{goIdent(tmpName)},
 		[]ast.Expr{jsvalueWrapLit(init)},
 	))
 	for _, prop := range pat.Properties {
-		if prop.Value == nil {
+		if prop.Value == nil && prop.Pattern == nil {
 			continue
 		}
-		name := l.emitName(prop.Value)
 		getter := callExpr(selectorExpr(goIdent(tmpName), "Get"), stringLit(prop.Key))
-		stmts = append(stmts, assign(
-			[]ast.Expr{goIdent(name)},
-			[]ast.Expr{getter},
-		))
-		// Default value
+		var target ast.Expr = getter
 		if prop.Default != nil {
+			defTmp := l.nextSyntheticName("_prop")
+			stmts = append(stmts, assignDefine(
+				[]ast.Expr{goIdent(defTmp)},
+				[]ast.Expr{getter},
+			))
 			defVal := l.lowerExpr(prop.Default)
 			defVal = jsvalueWrapLit(defVal)
 			stmts = append(stmts, &ast.IfStmt{
 				Cond: &ast.BinaryExpr{
-					X: goIdent(name), Op: token.EQL, Y: goIdent("nil"),
+					X: goIdent(defTmp), Op: token.EQL, Y: goIdent("nil"),
 				},
 				Body: blockStmt(assignStmt(
-					[]ast.Expr{goIdent(name)},
+					[]ast.Expr{goIdent(defTmp)},
 					[]ast.Expr{defVal},
 				)),
 			})
+			target = goIdent(defTmp)
 		}
+		if prop.Pattern != nil {
+			stmts = append(stmts, l.lowerDestructuring(prop.Pattern, target, define)...)
+			continue
+		}
+		name := l.emitName(prop.Value)
+		stmts = append(stmts, assign(
+			[]ast.Expr{goIdent(name)},
+			[]ast.Expr{target},
+		))
 	}
 	if pat.Rest != nil {
 		// rest := spread remaining keys (not implemented yet — placeholder)
@@ -297,34 +281,45 @@ func (l *Lowerer) lowerArrayDestructuring(pat *hir.ArrayPattern, init ast.Expr, 
 	if !define {
 		assign = assignStmt
 	}
-	tmpName := "_arr"
+	tmpName := l.nextSyntheticName("_arr")
 	stmts = append(stmts, assignDefine(
 		[]ast.Expr{goIdent(tmpName)},
 		[]ast.Expr{jsvalueWrapLit(init)},
 	))
 	for i, elem := range pat.Elements {
-		if elem == nil || elem.Symbol == nil {
+		if elem == nil || (elem.Symbol == nil && elem.Pattern == nil) {
 			continue
 		}
-		name := l.emitName(elem.Symbol)
 		idx := callExpr(selectorExpr(goIdent(tmpName), "Index"), intLit(itoa(i)))
-		stmts = append(stmts, assign(
-			[]ast.Expr{goIdent(name)},
-			[]ast.Expr{idx},
-		))
+		var target ast.Expr = idx
 		if elem.Default != nil {
+			defTmp := l.nextSyntheticName("_elem")
+			stmts = append(stmts, assignDefine(
+				[]ast.Expr{goIdent(defTmp)},
+				[]ast.Expr{idx},
+			))
 			defVal := l.lowerExpr(elem.Default)
 			defVal = jsvalueWrapLit(defVal)
 			stmts = append(stmts, &ast.IfStmt{
 				Cond: &ast.BinaryExpr{
-					X: goIdent(name), Op: token.EQL, Y: goIdent("nil"),
+					X: goIdent(defTmp), Op: token.EQL, Y: goIdent("nil"),
 				},
 				Body: blockStmt(assignStmt(
-					[]ast.Expr{goIdent(name)},
+					[]ast.Expr{goIdent(defTmp)},
 					[]ast.Expr{defVal},
 				)),
 			})
+			target = goIdent(defTmp)
 		}
+		if elem.Pattern != nil {
+			stmts = append(stmts, l.lowerDestructuring(elem.Pattern, target, define)...)
+			continue
+		}
+		name := l.emitName(elem.Symbol)
+		stmts = append(stmts, assign(
+			[]ast.Expr{goIdent(name)},
+			[]ast.Expr{target},
+		))
 	}
 	if pat.Rest != nil {
 		name := l.emitName(pat.Rest)
@@ -529,13 +524,17 @@ func (l *Lowerer) lowerTryCatchStmt(s *hir.TryCatchStmt) ast.Stmt {
 		// Only strip at the direct level — don't recurse into nested FuncLit.
 		stripTopLevelReturns(catchBody)
 		// Prepend: paramName := jsvalue.From(r); _ = paramName
-		catchBody.List = append([]ast.Stmt{
-			assignDefine(
-				[]ast.Expr{goIdent(paramName)},
-				[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "From"), goIdent("r"))},
-			),
-			assignStmt([]ast.Expr{goIdent("_")}, []ast.Expr{goIdent(paramName)}),
-		}, catchBody.List...)
+		prefix := []ast.Stmt{}
+		if paramName != "_" {
+			prefix = append(prefix,
+				assignDefine(
+					[]ast.Expr{goIdent(paramName)},
+					[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "From"), goIdent("r"))},
+				),
+				assignStmt([]ast.Expr{goIdent("_")}, []ast.Expr{goIdent(paramName)}),
+			)
+		}
+		catchBody.List = append(prefix, catchBody.List...)
 
 		recoverBlock := blockStmt(
 			&ast.IfStmt{
@@ -603,13 +602,17 @@ func (l *Lowerer) lowerTryCatchInline(s *hir.TryCatchStmt) ast.Stmt {
 		paramName = l.emitName(s.Catch.Param)
 	}
 
-	catchBody.List = append([]ast.Stmt{
-		assignDefine(
-			[]ast.Expr{goIdent(paramName)},
-			[]ast.Expr{goIdent(catchName)},
-		),
-		assignStmt([]ast.Expr{goIdent("_")}, []ast.Expr{goIdent(paramName)}),
-	}, catchBody.List...)
+	prefix := []ast.Stmt{}
+	if paramName != "_" {
+		prefix = append(prefix,
+			assignDefine(
+				[]ast.Expr{goIdent(paramName)},
+				[]ast.Expr{goIdent(catchName)},
+			),
+			assignStmt([]ast.Expr{goIdent("_")}, []ast.Expr{goIdent(paramName)}),
+		)
+	}
+	catchBody.List = append(prefix, catchBody.List...)
 
 	tryBody := blockStmt()
 	if s.Try != nil {
