@@ -76,6 +76,27 @@ func registerGlobalObjects(ctx *tcontext.TranspilerContext) {
 		},
 	})
 
+	ctx.RegisterGlobal(&tcontext.GlobalObject{
+		Name: "Bun",
+		TransformCall: func(method string, args []ast.Expr, imp tcontext.Imports) ast.Expr {
+			imp.AddImport("github.com/nnstd/gun/runtime/bun")
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			switch method {
+			case "serve":
+				if len(args) > 0 {
+					return callExpr(selectorExpr(ident("bun"), "Serve"), jsvalueWrapLit(args[0]))
+				}
+				return callExpr(selectorExpr(ident("bun"), "Serve"), callExpr(selectorExpr(ident("jsvalue"), "NewObject")))
+			default:
+				return nil
+			}
+		},
+		TransformMember: func(prop string, imp tcontext.Imports) ast.Expr {
+			imp.AddImport("github.com/nnstd/gun/runtime/bun")
+			return callExpr(selectorExpr(selectorExpr(ident("bun"), "AsJSValue"), "Get"), stringLit(prop))
+		},
+	})
+
 	// Error types as global objects (for static methods like Error.captureStackTrace)
 	for _, errType := range []string{"Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError"} {
 		et := errType // capture
@@ -298,7 +319,6 @@ func registerConstructors(ctx *tcontext.TranspilerContext) {
 		},
 	})
 
-
 	ctx.RegisterConstructor(&tcontext.Constructor{
 		Name: "IntlSegmenter",
 		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
@@ -306,6 +326,17 @@ func registerConstructors(ctx *tcontext.TranspilerContext) {
 			return callExpr(selectorExpr(selectorExpr(ident("intl"), "Segmenter"), "Call"), args...)
 		},
 	})
+
+	for _, ctorName := range []string{"Headers", "Request", "Response"} {
+		name := ctorName
+		ctx.RegisterConstructor(&tcontext.Constructor{
+			Name: name,
+			Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+				imp.AddImport("github.com/nnstd/gun/runtime/web")
+				return callExpr(selectorExpr(selectorExpr(ident("web"), name), "Call"), args...)
+			},
+		})
+	}
 }
 
 // registerIdentifierMappings registers global identifiers and their Go equivalents.
@@ -464,6 +495,25 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 	})
 
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Bun",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddImport("github.com/nnstd/gun/runtime/bun")
+			return selectorExpr(ident("bun"), "AsJSValue")
+		},
+	})
+
+	for _, identName := range []string{"Headers", "Request", "Response"} {
+		name := identName
+		ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+			Name: name,
+			Transform: func(imp tcontext.Imports) ast.Expr {
+				imp.AddImport("github.com/nnstd/gun/runtime/web")
+				return selectorExpr(ident("web"), name)
+			},
+		})
+	}
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "require",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
@@ -578,6 +628,10 @@ func registerKnownGlobals(ctx *tcontext.TranspilerContext) {
 	// Additional globals without full transform registrations
 	ctx.MarkKnownGlobal("Date")
 	ctx.MarkKnownGlobal("RegExp")
+	ctx.MarkKnownGlobal("Bun")
+	ctx.MarkKnownGlobal("Headers")
+	ctx.MarkKnownGlobal("Request")
+	ctx.MarkKnownGlobal("Response")
 	ctx.MarkKnownGlobal("Symbol")
 	ctx.MarkKnownGlobal("module")
 	ctx.MarkKnownGlobal("require")

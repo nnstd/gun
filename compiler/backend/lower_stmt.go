@@ -510,6 +510,10 @@ func (l *Lowerer) lowerSwitchStmt(s *hir.SwitchStmt) *ast.SwitchStmt {
 func (l *Lowerer) lowerTryCatchStmt(s *hir.TryCatchStmt) ast.Stmt {
 	l.jsvalueImport()
 
+	if s.Catch != nil && s.Finally == nil && blockHasLoopControl(s.Catch.Body) && !blockHasReturn(s.Try) {
+		return l.lowerTryCatchInline(s)
+	}
+
 	var stmts []ast.Stmt
 
 	// Build defer+recover for catch
@@ -590,6 +594,85 @@ func (l *Lowerer) lowerTryCatchStmt(s *hir.TryCatchStmt) ast.Stmt {
 	return &ast.BlockStmt{List: stmts}
 }
 
+func (l *Lowerer) lowerTryCatchInline(s *hir.TryCatchStmt) ast.Stmt {
+	catchName := l.nextSyntheticName("_caught")
+	catchBody := l.lowerBlock(s.Catch.Body)
+
+	paramName := "_"
+	if s.Catch.Param != nil {
+		paramName = l.emitName(s.Catch.Param)
+	}
+
+	catchBody.List = append([]ast.Stmt{
+		assignDefine(
+			[]ast.Expr{goIdent(paramName)},
+			[]ast.Expr{goIdent(catchName)},
+		),
+		assignStmt([]ast.Expr{goIdent("_")}, []ast.Expr{goIdent(paramName)}),
+	}, catchBody.List...)
+
+	tryBody := blockStmt()
+	if s.Try != nil {
+		for _, st := range s.Try.Stmts {
+			gs := l.lowerStmt(st)
+			if gs == nil {
+				continue
+			}
+			if block, ok := gs.(*ast.BlockStmt); ok {
+				tryBody.List = append(tryBody.List, block.List...)
+			} else {
+				tryBody.List = append(tryBody.List, gs)
+			}
+		}
+	}
+	tryBody.List = append(tryBody.List, returnStmt(goIdent("nil")))
+
+	iifeBody := []ast.Stmt{
+		&ast.DeferStmt{
+			Call: &ast.CallExpr{
+				Fun: &ast.FuncLit{
+					Type: &ast.FuncType{Params: fieldList()},
+					Body: blockStmt(
+						&ast.IfStmt{
+							Init: assignDefine(
+								[]ast.Expr{goIdent("r")},
+								[]ast.Expr{callExpr(goIdent("recover"))},
+							),
+							Cond: &ast.BinaryExpr{X: goIdent("r"), Op: token.NEQ, Y: goIdent("nil")},
+							Body: blockStmt(
+								assignStmt(
+									[]ast.Expr{goIdent(catchName)},
+									[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "From"), goIdent("r"))},
+								),
+							),
+						},
+					),
+				},
+			},
+		},
+	}
+	iifeBody = append(iifeBody, tryBody.List...)
+
+	catchingCall := &ast.CallExpr{
+		Fun: &ast.FuncLit{
+			Type: &ast.FuncType{
+				Params:  fieldList(),
+				Results: fieldList(goField("", jsValuePtrType())),
+			},
+			Body: &ast.BlockStmt{List: iifeBody},
+		},
+	}
+
+	return &ast.BlockStmt{List: []ast.Stmt{
+		&ast.DeclStmt{Decl: varDecl(catchName, jsValuePtrType(), nil)},
+		exprStmt(catchingCall),
+		&ast.IfStmt{
+			Cond: &ast.BinaryExpr{X: goIdent(catchName), Op: token.NEQ, Y: goIdent("nil")},
+			Body: catchBody,
+		},
+	}}
+}
+
 // lowerAssignStmt handles assignment expressions as statements.
 // Member assignments: obj.prop = val → obj.Set("prop", val)
 // Subscript assignments: obj[key] = val → obj.Set(key, val)
@@ -614,10 +697,10 @@ func (l *Lowerer) lowerAssignStmt(assign *hir.AssignExpr) ast.Stmt {
 			if assign.Op != hir.OpAssign {
 				// Augmented: obj.prop += val → obj.Set("prop", jsvalue.Add(obj.Get("prop"), val))
 				helperName := mapAssignOpToJSValue(assign.Op)
-				current := callExpr(selectorExpr(obj, "Get"), stringLit(mem.Property))
+				current := callExpr(selectorExpr(obj, "Get"), l.lowerClassMemberKey(mem.Property, mem.Private, nil))
 				val = callExpr(selectorExpr(goIdent("jsvalue"), helperName), current, val)
 			}
-			return exprStmt(callExpr(selectorExpr(obj, "Set"), stringLit(mem.Property), val))
+			return exprStmt(callExpr(selectorExpr(obj, "Set"), l.lowerClassMemberKey(mem.Property, mem.Private, nil), val))
 		}
 	}
 
@@ -688,6 +771,96 @@ func stripTopLevelReturns(block *ast.BlockStmt) {
 			}
 		}
 	}
+}
+
+func blockHasLoopControl(block *hir.BlockStmt) bool {
+	if block == nil {
+		return false
+	}
+	for _, stmt := range block.Stmts {
+		if stmtHasLoopControl(stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtHasLoopControl(stmt hir.Stmt) bool {
+	switch s := stmt.(type) {
+	case *hir.BreakStmt, *hir.ContinueStmt:
+		return true
+	case *hir.BlockStmt:
+		return blockHasLoopControl(s)
+	case *hir.IfStmt:
+		if blockHasLoopControl(s.Then) {
+			return true
+		}
+		return stmtHasLoopControl(s.Else)
+	case *hir.SwitchStmt:
+		for _, cc := range s.Cases {
+			for _, bodyStmt := range cc.Body {
+				if stmtHasLoopControl(bodyStmt) {
+					return true
+				}
+			}
+		}
+	case *hir.TryCatchStmt:
+		if blockHasLoopControl(s.Try) {
+			return true
+		}
+		if s.Catch != nil && blockHasLoopControl(s.Catch.Body) {
+			return true
+		}
+		if blockHasLoopControl(s.Finally) {
+			return true
+		}
+	}
+	return false
+}
+
+func blockHasReturn(block *hir.BlockStmt) bool {
+	if block == nil {
+		return false
+	}
+	for _, stmt := range block.Stmts {
+		if stmtHasReturn(stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtHasReturn(stmt hir.Stmt) bool {
+	switch s := stmt.(type) {
+	case *hir.ReturnStmt:
+		return true
+	case *hir.BlockStmt:
+		return blockHasReturn(s)
+	case *hir.IfStmt:
+		if blockHasReturn(s.Then) {
+			return true
+		}
+		return stmtHasReturn(s.Else)
+	case *hir.SwitchStmt:
+		for _, cc := range s.Cases {
+			for _, bodyStmt := range cc.Body {
+				if stmtHasReturn(bodyStmt) {
+					return true
+				}
+			}
+		}
+	case *hir.TryCatchStmt:
+		if blockHasReturn(s.Try) {
+			return true
+		}
+		if s.Catch != nil && blockHasReturn(s.Catch.Body) {
+			return true
+		}
+		if blockHasReturn(s.Finally) {
+			return true
+		}
+	}
+	return false
 }
 
 // ensureBool wraps a JSValue expression with .Bool() for use in Go conditions.

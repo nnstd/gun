@@ -377,6 +377,9 @@ func findRelativeImports(source []byte) []string {
 	lines := strings.Split(string(source), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") || strings.HasPrefix(line, "*") || strings.HasPrefix(line, "*/") {
+			continue
+		}
 		// Match: from "./..." or from '../...'
 		idx := strings.Index(line, "from ")
 		if idx < 0 {
@@ -507,6 +510,9 @@ func findNodeModuleImports(source []byte) []string {
 	lines := strings.Split(string(source), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") || strings.HasPrefix(line, "*") || strings.HasPrefix(line, "*/") {
+			continue
+		}
 		idx := strings.Index(line, "from ")
 		if idx < 0 {
 			continue

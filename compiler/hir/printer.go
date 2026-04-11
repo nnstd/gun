@@ -409,6 +409,8 @@ func (p *printer) exprStr(e Expr) string {
 			return fmt.Sprintf("%s#%d", e.Sym.OriginalName, e.Sym.ID)
 		}
 		return e.Name
+	case *PrivateIdentifierExpr:
+		return "#" + e.Name
 	case *Literal:
 		return e.Value
 	case *TemplateLiteral:
@@ -441,9 +443,14 @@ func (p *printer) exprStr(e Expr) string {
 	case *NewExpr:
 		return fmt.Sprintf("new %s(...)", p.exprStr(e.Callee))
 	case *MemberExpr:
+		if e.Private {
+			return fmt.Sprintf("%s.#%s", p.exprStr(e.Object), e.Property)
+		}
 		return fmt.Sprintf("%s.%s", p.exprStr(e.Object), e.Property)
 	case *ComputedMemberExpr:
 		return fmt.Sprintf("%s[%s]", p.exprStr(e.Object), p.exprStr(e.Property))
+	case *ClassExpr:
+		return "class { ... }"
 	case *TernaryExpr:
 		return fmt.Sprintf("(%s ? %s : %s)", p.exprStr(e.Cond), p.exprStr(e.Then), p.exprStr(e.Else))
 	case *ArrowFunc:

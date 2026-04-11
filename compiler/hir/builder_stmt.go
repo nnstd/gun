@@ -199,7 +199,7 @@ func (b *Builder) buildForStmt(node *sitter.Node) *ForStmt {
 	bodyNode := node.ChildByFieldName("body")
 
 	var init Stmt
-	if initNode != nil {
+	if initNode != nil && initNode.IsNamed() && initNode.Kind() != "empty_statement" {
 		switch initNode.Kind() {
 		case "lexical_declaration", "variable_declaration":
 			init = b.buildVarDecl(initNode, false)
@@ -212,12 +212,12 @@ func (b *Builder) buildForStmt(node *sitter.Node) *ForStmt {
 	}
 
 	var cond Expr
-	if condNode != nil {
+	if condNode != nil && condNode.IsNamed() && condNode.Kind() != "empty_statement" {
 		cond = b.buildExpr(condNode)
 	}
 
 	var post Expr
-	if updateNode != nil {
+	if updateNode != nil && updateNode.IsNamed() && updateNode.Kind() != "empty_statement" {
 		post = b.buildExpr(updateNode)
 	}
 

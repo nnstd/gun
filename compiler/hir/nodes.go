@@ -97,6 +97,16 @@ type ClassDecl struct {
 	Exported    bool
 }
 
+// ClassExpr represents a class expression.
+type ClassExpr struct {
+	Name        string
+	Parent      Expr
+	Constructor *ClassConstructor
+	Methods     []*ClassMethod
+	Properties  []*ClassProperty
+	StaticInits []Expr
+}
+
 // ClassConstructor is the constructor of a class.
 type ClassConstructor struct {
 	Params []*Param
@@ -105,21 +115,23 @@ type ClassConstructor struct {
 
 // ClassMethod is a method on a class.
 type ClassMethod struct {
-	Name     string // method name (original TS name)
-	Params   []*Param
-	Body     *BlockStmt
-	IsStatic bool
-	IsGetter bool
-	IsSetter bool
-	Computed Expr // non-nil if the method name is computed: [expr]()
+	Name      string // method name (original TS name)
+	Params    []*Param
+	Body      *BlockStmt
+	IsStatic  bool
+	IsGetter  bool
+	IsSetter  bool
+	IsPrivate bool
+	Computed  Expr // non-nil if the method name is computed: [expr]()
 }
 
 // ClassProperty is a property declaration in a class body.
 type ClassProperty struct {
-	Name     string
-	Value    Expr // initial value (may be nil)
-	IsStatic bool
-	Computed Expr // non-nil if computed name
+	Name      string
+	Value     Expr // initial value (may be nil)
+	IsStatic  bool
+	IsPrivate bool
+	Computed  Expr // non-nil if computed name
 }
 
 // EnumDecl represents an enum declaration.
@@ -181,7 +193,7 @@ type TopLevelStmt struct {
 
 // ExportDecl wraps a declaration that is being exported.
 type ExportDecl struct {
-	Decl      Decl   // the underlying declaration (may be nil for re-exports)
+	Decl      Decl // the underlying declaration (may be nil for re-exports)
 	IsDefault bool
 	// For export clauses: export { a, b }
 	Names []ExportName
@@ -360,6 +372,11 @@ type Identifier struct {
 	Name string         // raw name when Sym is nil
 }
 
+// PrivateIdentifierExpr is a private name like #value.
+type PrivateIdentifierExpr struct {
+	Name string
+}
+
 // Literal is a primitive literal value.
 type Literal struct {
 	Kind  LiteralKind
@@ -434,9 +451,9 @@ const (
 	OpExp // **
 
 	// Comparison
-	OpEq      // ===
-	OpNEq     // !==
-	OpEqLoose // ==
+	OpEq       // ===
+	OpNEq      // !==
+	OpEqLoose  // ==
 	OpNEqLoose // !=
 	OpLt
 	OpGt
@@ -444,8 +461,8 @@ const (
 	OpGtE
 
 	// Logical
-	OpAnd // &&
-	OpOr  // ||
+	OpAnd     // &&
+	OpOr      // ||
 	OpNullish // ??
 
 	// Bitwise
@@ -508,22 +525,22 @@ type AssignExpr struct {
 type AssignOp int
 
 const (
-	OpAssign AssignOp = iota // =
-	OpAddAssign              // +=
-	OpSubAssign              // -=
-	OpMulAssign              // *=
-	OpDivAssign              // /=
-	OpModAssign              // %=
-	OpBitAndAssign           // &=
-	OpBitOrAssign            // |=
-	OpBitXorAssign           // ^=
-	OpShlAssign              // <<=
-	OpShrAssign              // >>=
-	OpUShrAssign             // >>>=
-	OpNullishAssign          // ??=
-	OpAndAssign              // &&=
-	OpOrAssign               // ||=
-	OpExpAssign              // **=
+	OpAssign        AssignOp = iota // =
+	OpAddAssign                     // +=
+	OpSubAssign                     // -=
+	OpMulAssign                     // *=
+	OpDivAssign                     // /=
+	OpModAssign                     // %=
+	OpBitAndAssign                  // &=
+	OpBitOrAssign                   // |=
+	OpBitXorAssign                  // ^=
+	OpShlAssign                     // <<=
+	OpShrAssign                     // >>=
+	OpUShrAssign                    // >>>=
+	OpNullishAssign                 // ??=
+	OpAndAssign                     // &&=
+	OpOrAssign                      // ||=
+	OpExpAssign                     // **=
 )
 
 // CallExpr is a function or method call.
@@ -542,7 +559,8 @@ type NewExpr struct {
 type MemberExpr struct {
 	Object   Expr
 	Property string // property name
-	Optional bool   // true for optional chaining: obj?.prop
+	Private  bool
+	Optional bool // true for optional chaining: obj?.prop
 }
 
 // ComputedMemberExpr is a computed property access: obj[expr].
@@ -560,10 +578,10 @@ type TernaryExpr struct {
 
 // ArrowFunc is an arrow function expression.
 type ArrowFunc struct {
-	Params  []*Param
-	Body    *BlockStmt // nil if ExprBody is set
+	Params   []*Param
+	Body     *BlockStmt // nil if ExprBody is set
 	ExprBody Expr       // concise body: () => expr (nil if Body is set)
-	IsAsync bool
+	IsAsync  bool
 }
 
 // FuncExpr is a function expression.
@@ -629,6 +647,8 @@ func (*VarDecl) hirNode()       {}
 func (*VarDecl) hirDecl()       {}
 func (*ClassDecl) hirNode()     {}
 func (*ClassDecl) hirDecl()     {}
+func (*ClassExpr) hirNode()     {}
+func (*ClassExpr) hirExpr()     {}
 func (*EnumDecl) hirNode()      {}
 func (*EnumDecl) hirDecl()      {}
 func (*InterfaceDecl) hirNode() {}
@@ -674,63 +694,66 @@ func (*LabeledStmt) hirNode()  {}
 func (*LabeledStmt) hirStmt()  {}
 func (*EmptyStmt) hirNode()    {}
 func (*EmptyStmt) hirStmt()    {}
+
 // VarDecl is also a valid statement (let/const in blocks)
 func (*VarDecl) hirStmt() {}
 
-func (*Identifier) hirNode()           {}
-func (*Identifier) hirExpr()           {}
-func (*Literal) hirNode()              {}
-func (*Literal) hirExpr()              {}
-func (*TemplateLiteral) hirNode()      {}
-func (*TemplateLiteral) hirExpr()      {}
+func (*Identifier) hirNode()            {}
+func (*Identifier) hirExpr()            {}
+func (*PrivateIdentifierExpr) hirNode() {}
+func (*PrivateIdentifierExpr) hirExpr() {}
+func (*Literal) hirNode()               {}
+func (*Literal) hirExpr()               {}
+func (*TemplateLiteral) hirNode()       {}
+func (*TemplateLiteral) hirExpr()       {}
 func (*TaggedTemplateLiteral) hirNode() {}
 func (*TaggedTemplateLiteral) hirExpr() {}
-func (*ArrayLiteral) hirNode()         {}
-func (*ArrayLiteral) hirExpr()         {}
-func (*ObjectLiteral) hirNode()        {}
-func (*ObjectLiteral) hirExpr()        {}
-func (*SpreadExpr) hirNode()           {}
-func (*SpreadExpr) hirExpr()           {}
-func (*BinaryExpr) hirNode()           {}
-func (*BinaryExpr) hirExpr()           {}
-func (*UnaryExpr) hirNode()            {}
-func (*UnaryExpr) hirExpr()            {}
-func (*UpdateExpr) hirNode()           {}
-func (*UpdateExpr) hirExpr()           {}
-func (*AssignExpr) hirNode()           {}
-func (*AssignExpr) hirExpr()           {}
-func (*CallExpr) hirNode()             {}
-func (*CallExpr) hirExpr()             {}
-func (*NewExpr) hirNode()              {}
-func (*NewExpr) hirExpr()              {}
-func (*MemberExpr) hirNode()           {}
-func (*MemberExpr) hirExpr()           {}
-func (*ComputedMemberExpr) hirNode()   {}
-func (*ComputedMemberExpr) hirExpr()   {}
-func (*TernaryExpr) hirNode()          {}
-func (*TernaryExpr) hirExpr()          {}
-func (*ArrowFunc) hirNode()            {}
-func (*ArrowFunc) hirExpr()            {}
-func (*FuncExpr) hirNode()             {}
-func (*FuncExpr) hirExpr()             {}
-func (*SequenceExpr) hirNode()         {}
-func (*SequenceExpr) hirExpr()         {}
-func (*AwaitExpr) hirNode()            {}
-func (*AwaitExpr) hirExpr()            {}
-func (*YieldExpr) hirNode()            {}
-func (*YieldExpr) hirExpr()            {}
-func (*TypeAssertExpr) hirNode()       {}
-func (*TypeAssertExpr) hirExpr()       {}
-func (*NonNullExpr) hirNode()          {}
-func (*NonNullExpr) hirExpr()          {}
-func (*ParenExpr) hirNode()            {}
-func (*ParenExpr) hirExpr()            {}
-func (*ThisExpr) hirNode()             {}
-func (*ThisExpr) hirExpr()             {}
-func (*SuperExpr) hirNode()            {}
-func (*SuperExpr) hirExpr()            {}
-func (*MetaPropertyExpr) hirNode()     {}
-func (*MetaPropertyExpr) hirExpr()     {}
+func (*ArrayLiteral) hirNode()          {}
+func (*ArrayLiteral) hirExpr()          {}
+func (*ObjectLiteral) hirNode()         {}
+func (*ObjectLiteral) hirExpr()         {}
+func (*SpreadExpr) hirNode()            {}
+func (*SpreadExpr) hirExpr()            {}
+func (*BinaryExpr) hirNode()            {}
+func (*BinaryExpr) hirExpr()            {}
+func (*UnaryExpr) hirNode()             {}
+func (*UnaryExpr) hirExpr()             {}
+func (*UpdateExpr) hirNode()            {}
+func (*UpdateExpr) hirExpr()            {}
+func (*AssignExpr) hirNode()            {}
+func (*AssignExpr) hirExpr()            {}
+func (*CallExpr) hirNode()              {}
+func (*CallExpr) hirExpr()              {}
+func (*NewExpr) hirNode()               {}
+func (*NewExpr) hirExpr()               {}
+func (*MemberExpr) hirNode()            {}
+func (*MemberExpr) hirExpr()            {}
+func (*ComputedMemberExpr) hirNode()    {}
+func (*ComputedMemberExpr) hirExpr()    {}
+func (*TernaryExpr) hirNode()           {}
+func (*TernaryExpr) hirExpr()           {}
+func (*ArrowFunc) hirNode()             {}
+func (*ArrowFunc) hirExpr()             {}
+func (*FuncExpr) hirNode()              {}
+func (*FuncExpr) hirExpr()              {}
+func (*SequenceExpr) hirNode()          {}
+func (*SequenceExpr) hirExpr()          {}
+func (*AwaitExpr) hirNode()             {}
+func (*AwaitExpr) hirExpr()             {}
+func (*YieldExpr) hirNode()             {}
+func (*YieldExpr) hirExpr()             {}
+func (*TypeAssertExpr) hirNode()        {}
+func (*TypeAssertExpr) hirExpr()        {}
+func (*NonNullExpr) hirNode()           {}
+func (*NonNullExpr) hirExpr()           {}
+func (*ParenExpr) hirNode()             {}
+func (*ParenExpr) hirExpr()             {}
+func (*ThisExpr) hirNode()              {}
+func (*ThisExpr) hirExpr()              {}
+func (*SuperExpr) hirNode()             {}
+func (*SuperExpr) hirExpr()             {}
+func (*MetaPropertyExpr) hirNode()      {}
+func (*MetaPropertyExpr) hirExpr()      {}
 
 func (*ObjectPattern) hirNode()    {}
 func (*ObjectPattern) hirPattern() {}

@@ -106,6 +106,9 @@ func (b *Builder) buildExpr(node *sitter.Node) Expr {
 	case "new_expression":
 		return b.buildNewExpr(node)
 
+	case "class", "class_expression", "class_declaration", "abstract_class_declaration":
+		return b.buildClassExpr(node)
+
 	case "member_expression":
 		return b.buildMemberExpr(node)
 
@@ -188,6 +191,9 @@ func (b *Builder) buildExpr(node *sitter.Node) Expr {
 
 	case "super":
 		return &SuperExpr{}
+
+	case "private_property_identifier":
+		return &PrivateIdentifierExpr{Name: strings.TrimPrefix(b.nodeText(node), "#")}
 
 	case "meta_property":
 		meta := ""
@@ -583,6 +589,22 @@ func (b *Builder) buildNewExpr(node *sitter.Node) *NewExpr {
 	return &NewExpr{Callee: callee, Args: args}
 }
 
+func (b *Builder) buildClassExpr(node *sitter.Node) Expr {
+	parts := b.buildClassParts(node)
+	name := ""
+	if nameNode := node.ChildByFieldName("name"); nameNode != nil {
+		name = b.nodeText(nameNode)
+	}
+	return &ClassExpr{
+		Name:        name,
+		Parent:      parts.parent,
+		Constructor: parts.constructor,
+		Methods:     parts.methods,
+		Properties:  parts.properties,
+		StaticInits: parts.staticInits,
+	}
+}
+
 func (b *Builder) buildMemberExpr(node *sitter.Node) Expr {
 	objNode := node.ChildByFieldName("object")
 	propNode := node.ChildByFieldName("property")
@@ -606,8 +628,12 @@ func (b *Builder) buildMemberExpr(node *sitter.Node) Expr {
 	}
 	obj := b.buildExpr(objNode)
 	prop := b.nodeText(propNode)
+	isPrivate := propNode.Kind() == "private_property_identifier"
+	if isPrivate {
+		prop = strings.TrimPrefix(prop, "#")
+	}
 
-	return &MemberExpr{Object: obj, Property: prop, Optional: isOptional}
+	return &MemberExpr{Object: obj, Property: prop, Private: isPrivate, Optional: isOptional}
 }
 
 func (b *Builder) buildComputedMemberExpr(node *sitter.Node) Expr {

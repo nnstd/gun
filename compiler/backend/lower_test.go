@@ -358,6 +358,37 @@ func TestRoundTripClass(t *testing.T) {
 	assertContains(t, out, `"speak"`)
 }
 
+func TestRoundTripPrivateClassFieldsAndMethods(t *testing.T) {
+	out := lowerTS(t, `
+		class Counter {
+			#count = 1;
+			#inc() { this.#count += 1; return this.#count; }
+			value() { return this.#inc(); }
+			static #label = "counter";
+			static label() { return this.#label; }
+		}
+	`)
+	assertContains(t, out, `PropertyKey(jsvalue.NewSymbol("Counter.#count"))`)
+	assertContains(t, out, `PropertyKey(jsvalue.NewSymbol("Counter.#inc"))`)
+	assertContains(t, out, `PropertyKey(jsvalue.NewSymbol("Counter.#label"))`)
+	assertNotContains(t, out, `Get("#count")`)
+	assertNotContains(t, out, `Set("#count"`)
+	assertNotContains(t, out, `MethodCall("#inc"`)
+}
+
+func TestRoundTripPrivateClassExpression(t *testing.T) {
+	out := lowerTS(t, `
+		const Box = class Box {
+			#value = 1;
+			get() { return this.#value; }
+		};
+	`)
+	assertContains(t, out, `PropertyKey(jsvalue.NewSymbol("Box.#value"))`)
+	assertContains(t, out, `return _class`)
+	assertNotContains(t, out, `Get("#value")`)
+	assertNotContains(t, out, `Set("#value"`)
+}
+
 func TestRoundTripEnum(t *testing.T) {
 	out := lowerTS(t, `enum Direction { Up, Down, Left, Right }`)
 	assertContains(t, out, "Direction")

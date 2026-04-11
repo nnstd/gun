@@ -43,6 +43,9 @@ type Lowerer struct {
 	currentClassName string                              // set during class constructor/method lowering
 	insideFunc       int                                 // >0 when inside a function body
 	insideMethod     int                                 // >0 when inside a method body (_args[0] is this)
+	privateKeys      map[string]string
+	syntheticCounter int
+	needsBunWait     bool
 }
 
 // Lower converts an HIR module to a Go AST file.
@@ -97,6 +100,12 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 	// Ensure main() exists for runnable packages
 	if mod.Package == "main" {
 		l.getOrCreateMain()
+		if l.needsBunWait {
+			l.addImport("github.com/nnstd/gun/runtime/bun")
+			if mainFn := l.findMainFunc(); mainFn != nil {
+				mainFn.Body.List = append(mainFn.Body.List, exprStmt(callExpr(selectorExpr(goIdent("bun"), "Wait"))))
+			}
+		}
 	}
 
 	// Emit init() for collected setup statements (class methods, enum members, etc.)
@@ -137,6 +146,15 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 	}
 
 	return file
+}
+
+func (l *Lowerer) findMainFunc() *ast.FuncDecl {
+	for _, d := range l.decls {
+		if fd, ok := d.(*ast.FuncDecl); ok && fd.Name != nil && fd.Name.Name == "main" {
+			return fd
+		}
+	}
+	return nil
 }
 
 func (l *Lowerer) addImport(pkg string) {
@@ -243,24 +261,104 @@ func (l *Lowerer) lowerVarDecl(d *hir.VarDecl) {
 func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 	l.jsvalueImport()
 	name := l.emitName(d.Symbol)
+	privateKeys := l.collectPrivateKeys(name, d.Properties, d.Methods)
+	for _, decl := range l.lowerPrivateKeyDecls(name, privateKeys) {
+		l.decls = append(l.decls, decl)
+	}
 
-	// Build constructor function body
-	// Constructor signature: func(this *jsvalue.JSValue, _args ...*jsvalue.JSValue) *jsvalue.JSValue
-	// Parameters are unpacked from _args (offset 0, since 'this' is separate in NewClass)
-	// Track class name for super() lowering
+	prevClassName := l.currentClassName
+	prevPrivateKeys := l.privateKeys
 	l.currentClassName = name
-	defer func() { l.currentClassName = "" }()
+	l.privateKeys = privateKeys
+	defer func() {
+		l.currentClassName = prevClassName
+		l.privateKeys = prevPrivateKeys
+	}()
 
+	var parentExpr ast.Expr = goIdent("nil")
+	if d.Parent != nil {
+		parentExpr = l.lowerExpr(d.Parent)
+	}
+
+	ctorLit := l.lowerClassConstructor(name, d.Parent != nil, d.Constructor, d.Properties, d.Methods)
+	l.decls = append(l.decls, varDecl(name, nil,
+		callExpr(selectorExpr(goIdent("jsvalue"), "NewClass"), ctorLit, parentExpr)))
+
+	l.initStmts = append(l.initStmts, l.lowerClassSetups(goIdent(name), d.Properties, d.Methods, d.StaticInits)...)
+}
+
+func (l *Lowerer) collectPrivateKeys(className string, props []*hir.ClassProperty, methods []*hir.ClassMethod) map[string]string {
+	keys := make(map[string]string)
+	add := func(member string) {
+		if member == "" {
+			return
+		}
+		if _, ok := keys[member]; ok {
+			return
+		}
+		keys[member] = l.nextSyntheticName(fmt.Sprintf("_private_%s_%s", symbol.Sanitize(className), symbol.Sanitize(member)))
+	}
+	for _, prop := range props {
+		if prop.IsPrivate {
+			add(prop.Name)
+		}
+	}
+	for _, method := range methods {
+		if method.IsPrivate {
+			add(method.Name)
+		}
+	}
+	return keys
+}
+
+func (l *Lowerer) lowerPrivateKeyDecls(className string, keys map[string]string) []ast.Decl {
+	if len(keys) == 0 {
+		return nil
+	}
+	l.jsvalueImport()
+	var decls []ast.Decl
+	for member, goName := range keys {
+		desc := fmt.Sprintf("%s.#%s", className, member)
+		value := callExpr(
+			selectorExpr(goIdent("jsvalue"), "PropertyKey"),
+			callExpr(selectorExpr(goIdent("jsvalue"), "NewSymbol"), stringLit(desc)),
+		)
+		decls = append(decls, varDecl(goName, nil, value))
+	}
+	return decls
+}
+
+func (l *Lowerer) nextSyntheticName(base string) string {
+	l.syntheticCounter++
+	name := fmt.Sprintf("%s_%d", base, l.syntheticCounter)
+	l.symtab.ReserveNameStr(name)
+	return name
+}
+
+func (l *Lowerer) lowerClassConstructor(className string, hasParent bool, ctor *hir.ClassConstructor, props []*hir.ClassProperty, methods []*hir.ClassMethod) *ast.FuncLit {
 	var ctorBody *ast.BlockStmt
-	if d.Constructor != nil {
-		ctorBody = l.lowerFuncBody(d.Constructor.Params, d.Constructor.Body)
+	if ctor != nil {
+		ctorBody = l.lowerFuncBody(ctor.Params, ctor.Body)
 	} else {
 		ctorBody = blockStmt()
+		if hasParent {
+			superCall := callExpr(selectorExpr(goIdent(className), "CallSuper"), goIdent("this"), goIdent("_args"))
+			superCall.Ellipsis = 1
+			ctorBody.List = append(ctorBody.List, exprStmt(superCall))
+		}
 	}
-	// Ensure constructor returns nil (constructors return this implicitly)
+
+	instanceInits := l.lowerClassInstanceInits(props, methods)
+	if len(instanceInits) > 0 {
+		insertAt := 0
+		if hasParent && len(ctorBody.List) > 0 && isCallSuperStmt(ctorBody.List[0], className) {
+			insertAt = 1
+		}
+		ctorBody.List = append(ctorBody.List[:insertAt], append(instanceInits, ctorBody.List[insertAt:]...)...)
+	}
 	ctorBody.List = append(ctorBody.List, returnStmt(goIdent("nil")))
-	// Constructor has signature: func(this *jsvalue.JSValue, _args ...*jsvalue.JSValue) *jsvalue.JSValue
-	ctorLit := &ast.FuncLit{
+
+	return &ast.FuncLit{
 		Type: &ast.FuncType{
 			Params: fieldList(
 				goField("this", jsValuePtrType()),
@@ -273,68 +371,106 @@ func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 		},
 		Body: ctorBody,
 	}
+}
 
-	// jsvalue.NewClass(ctorFn, parent) — parent is nil if no extends
-	var parentExpr ast.Expr = goIdent("nil")
-	if d.Parent != nil {
-		parentExpr = l.lowerExpr(d.Parent)
+func isCallSuperStmt(stmt ast.Stmt, className string) bool {
+	exprStmt, ok := stmt.(*ast.ExprStmt)
+	if !ok {
+		return false
 	}
-	classArgs := []ast.Expr{ctorLit, parentExpr}
-	newClassCall := callExpr(selectorExpr(goIdent("jsvalue"), "NewClass"), classArgs...)
-	l.decls = append(l.decls, varDecl(name, nil, newClassCall))
+	call, ok := exprStmt.X.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel == nil || sel.Sel.Name != "CallSuper" {
+		return false
+	}
+	id, ok := sel.X.(*ast.Ident)
+	return ok && id.Name == className
+}
 
-	// Static properties
-	for _, prop := range d.Properties {
-		if !prop.IsStatic || prop.Value == nil {
+func (l *Lowerer) lowerClassInstanceInits(props []*hir.ClassProperty, methods []*hir.ClassMethod) []ast.Stmt {
+	var stmts []ast.Stmt
+	for _, prop := range props {
+		if prop.IsStatic {
 			continue
 		}
-		val := l.lowerExpr(prop.Value)
-		val = jsvalueWrapLit(val)
-		setCall := callExpr(selectorExpr(goIdent(name), "Set"), stringLit(prop.Name), val)
-		l.initStmts = append(l.initStmts, exprStmt(setCall))
+		var value ast.Expr = callExpr(selectorExpr(goIdent("jsvalue"), "NewUndefined"))
+		if prop.Value != nil {
+			value = jsvalueWrapLit(l.lowerExpr(prop.Value))
+		}
+		stmts = append(stmts, exprStmt(callExpr(selectorExpr(goIdent("this"), "Set"), l.lowerClassMemberKey(prop.Name, prop.IsPrivate, prop.Computed), value)))
 	}
+	for _, method := range methods {
+		if method.IsStatic || !method.IsPrivate {
+			continue
+		}
+		stmts = append(stmts, exprStmt(callExpr(selectorExpr(goIdent("this"), "Set"), l.lowerClassMemberKey(method.Name, true, nil), l.lowerClassMethodValue(method))))
+	}
+	return stmts
+}
 
-	// Side-effect expressions from computed property names (e.g. WeakMap inits)
-	for _, expr := range d.StaticInits {
-		lowered := l.lowerExpr(expr)
-		if lowered != nil {
-			l.initStmts = append(l.initStmts, exprStmt(lowered))
+func (l *Lowerer) lowerClassSetups(classRef ast.Expr, props []*hir.ClassProperty, methods []*hir.ClassMethod, staticInits []hir.Expr) []ast.Stmt {
+	var stmts []ast.Stmt
+	for _, prop := range props {
+		if !prop.IsStatic {
+			continue
+		}
+		var value ast.Expr = callExpr(selectorExpr(goIdent("jsvalue"), "NewUndefined"))
+		if prop.Value != nil {
+			value = jsvalueWrapLit(l.lowerExpr(prop.Value))
+		}
+		stmts = append(stmts, exprStmt(callExpr(selectorExpr(classRef, "Set"), l.lowerClassMemberKey(prop.Name, prop.IsPrivate, prop.Computed), value)))
+	}
+	for _, expr := range staticInits {
+		if lowered := l.lowerExpr(expr); lowered != nil {
+			stmts = append(stmts, exprStmt(lowered))
 		}
 	}
-
-	// Methods: ClassName.Get("prototype").Set("method", jsvalue.NewFunction(...))
-	for _, m := range d.Methods {
-		// Instance methods: first _args element is 'this'
-		var methodBody *ast.BlockStmt
-		if !m.IsStatic {
-			// Prepend: this := _args[0]; remaining params from _args[1:]
-			methodBody = l.lowerMethodBody(m.Params, m.Body)
-		} else {
-			methodBody = l.lowerFuncBody(m.Params, m.Body)
+	for _, method := range methods {
+		if !method.IsStatic && method.IsPrivate {
+			continue
 		}
-		methodLit := l.wrapAsJSValueFunc(m.Params, methodBody)
-		methodFn := callExpr(selectorExpr(
-			callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), methodLit),
-			"MarkAsMethod"))
-
-		// Use computed expression for dynamic method names (e.g. [kSymbol])
-		var methodKey ast.Expr
-		if m.Computed != nil {
-			l.addImport("fmt")
-			methodKey = callExpr(selectorExpr(goIdent("fmt"), "Sprint"), l.lowerExpr(m.Computed))
-		} else {
-			methodKey = stringLit(m.Name)
+		if !method.IsStatic && !method.IsPrivate {
+			proto := callExpr(selectorExpr(classRef, "Get"), stringLit("prototype"))
+			stmts = append(stmts, exprStmt(callExpr(selectorExpr(proto, "Set"), l.lowerClassMemberKey(method.Name, false, method.Computed), l.lowerClassMethodValue(method))))
+			continue
 		}
-
-		var setCall ast.Expr
-		if m.IsStatic {
-			setCall = callExpr(selectorExpr(goIdent(name), "Set"), methodKey, methodFn)
-		} else {
-			proto := callExpr(selectorExpr(goIdent(name), "Get"), stringLit("prototype"))
-			setCall = callExpr(selectorExpr(proto, "Set"), methodKey, methodFn)
-		}
-		l.initStmts = append(l.initStmts, exprStmt(setCall))
+		stmts = append(stmts, exprStmt(callExpr(selectorExpr(classRef, "Set"), l.lowerClassMemberKey(method.Name, method.IsPrivate, method.Computed), l.lowerClassMethodValue(method))))
 	}
+	return stmts
+}
+
+func (l *Lowerer) lowerClassMethodValue(m *hir.ClassMethod) ast.Expr {
+	var methodBody *ast.BlockStmt
+	if !m.IsStatic {
+		methodBody = l.lowerMethodBody(m.Params, m.Body)
+	} else {
+		methodBody = l.lowerFuncBody(m.Params, m.Body)
+	}
+	methodLit := l.wrapAsJSValueFunc(m.Params, methodBody)
+	return callExpr(selectorExpr(
+		callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), methodLit),
+		"MarkAsMethod"))
+}
+
+func (l *Lowerer) lowerClassMemberKey(name string, isPrivate bool, computed hir.Expr) ast.Expr {
+	if isPrivate {
+		return l.privateKeyExpr(name)
+	}
+	if computed != nil {
+		l.addImport("fmt")
+		return callExpr(selectorExpr(goIdent("fmt"), "Sprint"), l.lowerExpr(computed))
+	}
+	return stringLit(name)
+}
+
+func (l *Lowerer) privateKeyExpr(name string) ast.Expr {
+	if key, ok := l.privateKeys[name]; ok {
+		return goIdent(key)
+	}
+	return stringLit("#" + name)
 }
 
 func (l *Lowerer) lowerEnumDecl(d *hir.EnumDecl) {

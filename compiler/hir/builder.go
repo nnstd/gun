@@ -14,6 +14,14 @@ type Builder struct {
 	pkgName string
 }
 
+type classParts struct {
+	parent      Expr
+	constructor *ClassConstructor
+	methods     []*ClassMethod
+	properties  []*ClassProperty
+	staticInits []Expr
+}
+
 // BuildModule creates an HIR Module from a tree-sitter CST root node.
 func BuildModule(root *sitter.Node, source []byte, pkgName string) *Module {
 	symtab := symbol.NewTable()
@@ -240,47 +248,43 @@ func (b *Builder) buildClassDecl(node *sitter.Node, exported bool) *ClassDecl {
 	name := b.nodeText(nameNode)
 	sym := b.symtab.Define(name, symbol.KindClass)
 	sym.Exported = exported
+	parts := b.buildClassParts(node)
 
-	// Check for extends
-	var parent Expr
+	decl := &ClassDecl{
+		Symbol:      sym,
+		Parent:      parts.parent,
+		Constructor: parts.constructor,
+		Methods:     parts.methods,
+		Properties:  parts.properties,
+		StaticInits: parts.staticInits,
+		Exported:    exported,
+	}
+	return decl
+}
+
+func (b *Builder) buildClassParts(node *sitter.Node) *classParts {
+	parts := &classParts{}
+
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		if child.Kind() == "class_heritage" {
 			for j := uint(0); j < child.NamedChildCount(); j++ {
 				hChild := child.NamedChild(j)
-				if hChild.Kind() == "extends_clause" {
-					if hChild.NamedChildCount() > 0 {
-						parent = b.buildExpr(hChild.NamedChild(0))
-					}
+				if hChild.Kind() == "extends_clause" && hChild.NamedChildCount() > 0 {
+					parts.parent = b.buildExpr(hChild.NamedChild(0))
 				}
 			}
 		}
-	}
-
-	// Find class body
-	var bodyNode *sitter.Node
-	for i := uint(0); i < node.NamedChildCount(); i++ {
-		child := node.NamedChild(i)
 		if child.Kind() == "class_body" {
-			bodyNode = child
+			b.buildClassBody(parts, child)
 			break
 		}
 	}
 
-	decl := &ClassDecl{
-		Symbol:   sym,
-		Parent:   parent,
-		Exported: exported,
-	}
-
-	if bodyNode != nil {
-		b.buildClassBody(decl, bodyNode)
-	}
-
-	return decl
+	return parts
 }
 
-func (b *Builder) buildClassBody(decl *ClassDecl, node *sitter.Node) {
+func (b *Builder) buildClassBody(parts *classParts, node *sitter.Node) {
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		switch child.Kind() {
@@ -294,9 +298,13 @@ func (b *Builder) buildClassBody(decl *ClassDecl, node *sitter.Node) {
 			// Computed property name: [(expr1, expr2, ..., name)] or [varName]
 			// Extract side-effect expressions and use the last as the method name.
 			var computedExpr Expr
+			isPrivate := nameNode.Kind() == "private_property_identifier"
+			if isPrivate {
+				name = strings.TrimPrefix(name, "#")
+			}
 			if nameNode.Kind() == "computed_property_name" {
 				sideEffects, methodName := b.extractComputedPropertyName(nameNode)
-				decl.StaticInits = append(decl.StaticInits, sideEffects...)
+				parts.staticInits = append(parts.staticInits, sideEffects...)
 				name = methodName
 				// For simple computed names like [kSymbol], build expression for dynamic dispatch
 				if nameNode.NamedChildCount() == 1 {
@@ -331,19 +339,20 @@ func (b *Builder) buildClassBody(decl *ClassDecl, node *sitter.Node) {
 			}
 
 			if name == "constructor" {
-				decl.Constructor = &ClassConstructor{
+				parts.constructor = &ClassConstructor{
 					Params: params,
 					Body:   body,
 				}
 			} else {
-				decl.Methods = append(decl.Methods, &ClassMethod{
-					Name:     name,
-					Params:   params,
-					Body:     body,
-					IsStatic: isStatic,
-					IsGetter: isGetter,
-					IsSetter: isSetter,
-					Computed: computedExpr,
+				parts.methods = append(parts.methods, &ClassMethod{
+					Name:      name,
+					Params:    params,
+					Body:      body,
+					IsStatic:  isStatic,
+					IsGetter:  isGetter,
+					IsSetter:  isSetter,
+					IsPrivate: isPrivate,
+					Computed:  computedExpr,
 				})
 			}
 		case "public_field_definition":
@@ -352,6 +361,10 @@ func (b *Builder) buildClassBody(decl *ClassDecl, node *sitter.Node) {
 				continue
 			}
 			name := b.nodeText(nameNode)
+			isPrivate := nameNode.Kind() == "private_property_identifier"
+			if isPrivate {
+				name = strings.TrimPrefix(name, "#")
+			}
 			var value Expr
 			valueNode := child.ChildByFieldName("value")
 			if valueNode != nil {
@@ -363,10 +376,11 @@ func (b *Builder) buildClassBody(decl *ClassDecl, node *sitter.Node) {
 					isStatic = true
 				}
 			}
-			decl.Properties = append(decl.Properties, &ClassProperty{
-				Name:     name,
-				Value:    value,
-				IsStatic: isStatic,
+			parts.properties = append(parts.properties, &ClassProperty{
+				Name:      name,
+				Value:     value,
+				IsStatic:  isStatic,
+				IsPrivate: isPrivate,
 			})
 		}
 	}

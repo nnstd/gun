@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
 	"path"
@@ -52,6 +53,9 @@ func (l *Lowerer) lowerExpr(e hir.Expr) ast.Expr {
 	case *hir.NewExpr:
 		return l.lowerNewExpr(e)
 
+	case *hir.ClassExpr:
+		return l.lowerClassExpr(e)
+
 	case *hir.MemberExpr:
 		return l.lowerMemberExpr(e)
 
@@ -102,6 +106,9 @@ func (l *Lowerer) lowerExpr(e hir.Expr) ast.Expr {
 
 	case *hir.SuperExpr:
 		return goIdent("super")
+
+	case *hir.PrivateIdentifierExpr:
+		return l.privateKeyExpr(e.Name)
 
 	case *hir.MetaPropertyExpr:
 		if e.Meta == "import" && e.Property == "meta" {
@@ -415,6 +422,10 @@ func (l *Lowerer) lowerBinaryExpr(e *hir.BinaryExpr) ast.Expr {
 	// Special operators
 	switch e.Op {
 	case hir.OpIn:
+		if priv, ok := e.Left.(*hir.PrivateIdentifierExpr); ok {
+			return callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"),
+				callExpr(selectorExpr(right, "HasOwnProperty"), l.privateKeyExpr(priv.Name)))
+		}
 		// key in obj → jsvalue.NewBool(obj.HasOwnProperty(fmt.Sprint(key)))
 		l.addImport("fmt")
 		return callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"),
@@ -480,12 +491,17 @@ func (l *Lowerer) lowerAssignExpr(e *hir.AssignExpr) ast.Expr {
 
 	right := l.lowerExpr(e.Right)
 
-	// Member assignment expression: obj.prop = val → IIFE { obj.Set("prop", val); return val }
-	if mem, ok := e.Left.(*hir.MemberExpr); ok && e.Op == hir.OpAssign && l.exprIsJSValue(mem.Object) {
+	// Member assignment expression: obj.prop = val / obj.prop += val / obj.#x ??= val
+	if mem, ok := e.Left.(*hir.MemberExpr); ok && l.exprIsJSValue(mem.Object) {
 		l.jsvalueImport()
 		obj := l.lowerExpr(mem.Object)
 		val := l.wrapAsJSValue(right)
-		setCall := callExpr(selectorExpr(obj, "Set"), stringLit(mem.Property), val)
+		if e.Op != hir.OpAssign {
+			helperName := mapAssignOpToJSValue(e.Op)
+			current := callExpr(selectorExpr(obj, "Get"), l.lowerClassMemberKey(mem.Property, mem.Private, nil))
+			val = callExpr(selectorExpr(goIdent("jsvalue"), helperName), current, val)
+		}
+		setCall := callExpr(selectorExpr(obj, "Set"), l.lowerClassMemberKey(mem.Property, mem.Private, nil), val)
 		return &ast.CallExpr{
 			Fun: &ast.FuncLit{
 				Type: &ast.FuncType{Params: fieldList(), Results: fieldList(goField("", jsValuePtrType()))},
@@ -565,18 +581,23 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 
 	// Check for builtin method calls: console.log(), Math.floor(), JSON.parse(), etc.
 	if mem, ok := e.Func.(*hir.MemberExpr); ok {
-		if id, ok := mem.Object.(*hir.Identifier); ok {
-			objName := id.Name
-			if id.Sym != nil {
-				objName = id.Sym.OriginalName
-			}
-			if l.ctx != nil {
-				var args []ast.Expr
-				for _, a := range e.Args {
-					args = append(args, l.lowerExpr(a))
+		if !mem.Private {
+			if id, ok := mem.Object.(*hir.Identifier); ok {
+				objName := id.Name
+				if id.Sym != nil {
+					objName = id.Sym.OriginalName
 				}
-				if result := l.ctx.TransformBuiltinCall(objName, mem.Property, args, l); result != nil {
-					return result
+				if l.ctx != nil {
+					var args []ast.Expr
+					for _, a := range e.Args {
+						args = append(args, l.lowerExpr(a))
+					}
+					if objName == "Bun" && mem.Property == "serve" {
+						l.needsBunWait = true
+					}
+					if result := l.ctx.TransformBuiltinCall(objName, mem.Property, args, l); result != nil {
+						return result
+					}
 				}
 			}
 		}
@@ -586,7 +607,7 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 			l.jsvalueImport()
 			obj := l.lowerExpr(mem.Object)
 			argExprs, hasSpread := l.lowerCallArgs(e.Args, true)
-			wrappedArgs := append([]ast.Expr{stringLit(mem.Property)}, argExprs...)
+			wrappedArgs := append([]ast.Expr{l.lowerClassMemberKey(mem.Property, mem.Private, nil)}, argExprs...)
 			// For complex receivers, wrap in IIFE to evaluate once
 			if !l.isSimpleExpr(obj) {
 				recv := goIdent("_recv")
@@ -827,6 +848,60 @@ func (l *Lowerer) lowerNewExpr(e *hir.NewExpr) ast.Expr {
 	return callExpr(selectorExpr(callee, "Call"), args...)
 }
 
+func (l *Lowerer) lowerClassExpr(e *hir.ClassExpr) ast.Expr {
+	l.jsvalueImport()
+
+	symbolicName := e.Name
+	if symbolicName == "" {
+		symbolicName = fmt.Sprintf("anonymousClass%d", l.syntheticCounter+1)
+	}
+	privateKeys := l.collectPrivateKeys(symbolicName, e.Properties, e.Methods)
+
+	prevClassName := l.currentClassName
+	prevPrivateKeys := l.privateKeys
+	l.privateKeys = privateKeys
+	defer func() {
+		l.currentClassName = prevClassName
+		l.privateKeys = prevPrivateKeys
+	}()
+
+	var parentExpr ast.Expr = goIdent("nil")
+	if e.Parent != nil {
+		parentExpr = l.lowerExpr(e.Parent)
+	}
+
+	stmts := make([]ast.Stmt, 0, len(privateKeys)+4)
+	for member, goName := range privateKeys {
+		desc := fmt.Sprintf("%s.#%s", symbolicName, member)
+		value := callExpr(
+			selectorExpr(goIdent("jsvalue"), "PropertyKey"),
+			callExpr(selectorExpr(goIdent("jsvalue"), "NewSymbol"), stringLit(desc)),
+		)
+		stmts = append(stmts, assignDefine([]ast.Expr{goIdent(goName)}, []ast.Expr{value}))
+	}
+
+	classVar := goIdent("_class")
+	l.currentClassName = classVar.Name
+	ctorLit := l.lowerClassConstructor(classVar.Name, e.Parent != nil, e.Constructor, e.Properties, e.Methods)
+	stmts = append(stmts,
+		assignDefine([]ast.Expr{classVar}, []ast.Expr{
+			callExpr(selectorExpr(goIdent("jsvalue"), "NewClass"), ctorLit, parentExpr),
+		}),
+	)
+	stmts = append(stmts, l.lowerClassSetups(classVar, e.Properties, e.Methods, e.StaticInits)...)
+	stmts = append(stmts, returnStmt(classVar))
+
+	return &ast.CallExpr{
+		Fun: &ast.FuncLit{
+			Type: &ast.FuncType{
+				Params:  fieldList(),
+				Results: fieldList(goField("", jsValuePtrType())),
+			},
+			Body: &ast.BlockStmt{List: stmts},
+		},
+	}
+}
+
 func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 	// Optional chaining: a?.b → IIFE with null check
 	if e.Optional {
@@ -841,22 +916,25 @@ func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 	}
 
 	// Check for builtin member access through context (e.g. process.env)
-	if id, ok := e.Object.(*hir.Identifier); ok {
-		name := id.Name
-		if id.Sym != nil {
-			name = id.Sym.OriginalName
-		}
-		if l.ctx != nil {
-			if expr := l.ctx.TransformBuiltinMember(name, e.Property, l); expr != nil {
-				return expr
+	if !e.Private {
+		if id, ok := e.Object.(*hir.Identifier); ok {
+			name := id.Name
+			if id.Sym != nil {
+				name = id.Sym.OriginalName
+			}
+			if l.ctx != nil {
+				if expr := l.ctx.TransformBuiltinMember(name, e.Property, l); expr != nil {
+					return expr
+				}
 			}
 		}
 	}
 
 	obj := l.lowerExpr(e.Object)
+	key := l.lowerClassMemberKey(e.Property, e.Private, nil)
 
 	// .length → .Len() for JSValue, len() for typed
-	if e.Property == "length" {
+	if !e.Private && e.Property == "length" {
 		if l.exprIsJSValue(e.Object) {
 			return callExpr(selectorExpr(obj, "Len"))
 		}
@@ -866,7 +944,7 @@ func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 	// JSValue receivers → .Get("prop")
 	if l.exprIsJSValue(e.Object) {
 		l.jsvalueImport()
-		return callExpr(selectorExpr(obj, "Get"), stringLit(e.Property))
+		return callExpr(selectorExpr(obj, "Get"), key)
 	}
 
 	// Known globals — check if the resolved expression is a package ident (typed)
@@ -884,7 +962,7 @@ func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 				return selectorExpr(obj, symbol.Capitalize(e.Property))
 			}
 			// Not a bare ident — it's a JSValue expression (e.g. error.Error)
-			return callExpr(selectorExpr(obj, "Get"), stringLit(e.Property))
+			return callExpr(selectorExpr(obj, "Get"), key)
 		}
 		// Imported known-module symbols → capitalize
 		if id.Sym != nil {
@@ -896,7 +974,7 @@ func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 
 	// Default for unknown: use .Get() (safer — assumes JSValue)
 	l.jsvalueImport()
-	return callExpr(selectorExpr(obj, "Get"), stringLit(e.Property))
+	return callExpr(selectorExpr(obj, "Get"), key)
 }
 
 // lowerOptionalMember handles a?.b → IIFE with jsvalue.Eq null check.
@@ -934,7 +1012,7 @@ func (l *Lowerer) lowerOptionalMember(e *hir.MemberExpr) ast.Expr {
 					Cond: nullCheck,
 					Body: blockStmt(returnStmt(callExpr(selectorExpr(goIdent("jsvalue"), "NewUndefined")))),
 				},
-				returnStmt(callExpr(selectorExpr(goIdent(tmpName), "Get"), stringLit(e.Property))),
+				returnStmt(callExpr(selectorExpr(goIdent(tmpName), "Get"), l.lowerClassMemberKey(e.Property, e.Private, nil))),
 			),
 		},
 	}
@@ -971,7 +1049,7 @@ func (l *Lowerer) exprIsJSValue(e hir.Expr) bool {
 			return true
 		}
 		return false
-	case *hir.ThisExpr, *hir.CallExpr, *hir.NewExpr, *hir.MemberExpr,
+	case *hir.ThisExpr, *hir.CallExpr, *hir.NewExpr, *hir.ClassExpr, *hir.MemberExpr,
 		*hir.ComputedMemberExpr, *hir.ArrayLiteral, *hir.ObjectLiteral,
 		*hir.BinaryExpr, *hir.UnaryExpr, *hir.ArrowFunc, *hir.FuncExpr,
 		*hir.TernaryExpr, *hir.TemplateLiteral:
