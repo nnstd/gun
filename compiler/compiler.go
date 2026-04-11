@@ -28,6 +28,19 @@ func Compile(source []byte, pkgName, moduleName string, samePackageImports bool)
 	return CompileWithExports(source, pkgName, moduleName, "", samePackageImports, nil)
 }
 
+// CompileWithOptLevel transpiles TypeScript source code using the multi-stage
+// pipeline at the requested optimization level.
+func CompileWithOptLevel(source []byte, pkgName, moduleName string, samePackageImports bool, optLevel int) ([]byte, error) {
+	tree, err := parseTypeScript(source)
+	if err != nil {
+		return nil, fmt.Errorf("parse: %w", err)
+	}
+	defer tree.Close()
+
+	p := newDefaultPipeline(optLevel)
+	return p.CompileTree(tree.RootNode(), source, pkgName, moduleName, samePackageImports)
+}
+
 // CompileWithExports transpiles TypeScript source with knowledge of cross-file exports.
 // exports provides metadata about symbols exported from other files in the same package.
 func CompileWithExports(source []byte, pkgName, moduleName, currentFile string, samePackageImports bool, exports PackageExports) ([]byte, error) {
@@ -66,19 +79,7 @@ func CompileWithExports(source []byte, pkgName, moduleName, currentFile string, 
 // (HIR → MIR → SSA → Passes → Backend). This is the experimental path that uses
 // hygienic symbol IDs and the full optimization pipeline.
 func CompileNewPipeline(source []byte, pkgName, moduleName string, optLevel int) ([]byte, error) {
-	tree, err := parseTypeScript(source)
-	if err != nil {
-		return nil, fmt.Errorf("parse: %w", err)
-	}
-	defer tree.Close()
-
-	ctx := tcontext.New()
-	RegisterDefaultBuiltins(ctx)
-
-	level := pipeline.OptLevel(optLevel)
-	p := pipeline.NewWithContext(level, ctx)
-
-	return p.CompileTree(tree.RootNode(), source, pkgName, moduleName, false)
+	return CompileWithOptLevel(source, pkgName, moduleName, false, optLevel)
 }
 
 // CompilePackage transpiles multiple TypeScript files that belong to the
@@ -135,6 +136,19 @@ func CompilePackage(files map[string][]byte, pkgName, moduleName, entryFile stri
 		results[name] = out
 	}
 	return results, nil
+}
+
+// CompilePackageWithOptLevel transpiles multiple TypeScript files that belong to
+// the same Go package using the multi-stage pipeline.
+func CompilePackageWithOptLevel(files map[string][]byte, pkgName, moduleName, entryFile string, optLevel int) (map[string][]byte, error) {
+	p := newDefaultPipeline(optLevel)
+	return p.CompilePackage(files, pkgName, moduleName, entryFile)
+}
+
+func newDefaultPipeline(optLevel int) *pipeline.Pipeline {
+	ctx := tcontext.New()
+	RegisterDefaultBuiltins(ctx)
+	return pipeline.NewWithContext(pipeline.OptLevel(optLevel), ctx)
 }
 
 // renameDefaultExport replaces "Default" declarations in compiled output

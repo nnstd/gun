@@ -31,18 +31,18 @@ type CrossFileExport struct {
 type Lowerer struct {
 	symtab           *symbol.Table
 	ctx              *context.TranspilerContext
-	imports          map[string]string                    // Go import path → alias
+	imports          map[string]string // Go import path → alias
 	decls            []ast.Decl
-	importedSyms     map[*symbol.Symbol]importResolution  // how each imported symbol resolves to Go
-	moduleName       string                               // Go module name for relative import resolution
-	samePackage      bool                                 // treat relative imports as same-package refs
-	varTypes         map[string]string                    // variable name → module type (e.g. "hono")
-	crossFileExports map[string]bool                      // Go names from other files (prevents .Get() dispatch)
-	initStmts        []ast.Stmt                           // statements for init() function
-	pkgName          string                               // Go package name
-	currentClassName string                               // set during class constructor/method lowering
-	insideFunc       int                                  // >0 when inside a function body
-	insideMethod     int                                  // >0 when inside a method body (_args[0] is this)
+	importedSyms     map[*symbol.Symbol]importResolution // how each imported symbol resolves to Go
+	moduleName       string                              // Go module name for relative import resolution
+	samePackage      bool                                // treat relative imports as same-package refs
+	varTypes         map[string]string                   // variable name → module type (e.g. "hono")
+	crossFileExports map[string]bool                     // Go names from other files (prevents .Get() dispatch)
+	initStmts        []ast.Stmt                          // statements for init() function
+	pkgName          string                              // Go package name
+	currentClassName string                              // set during class constructor/method lowering
+	insideFunc       int                                 // >0 when inside a function body
+	insideMethod     int                                 // >0 when inside a method body (_args[0] is this)
 }
 
 // Lower converts an HIR module to a Go AST file.
@@ -66,7 +66,7 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 		samePackage:      samePackageImports,
 		crossFileExports: cfe,
 		pkgName:          mod.Package,
-		varTypes:     make(map[string]string),
+		varTypes:         make(map[string]string),
 	}
 
 	// Reserve cross-file export names in the symbol table so local symbols
@@ -84,6 +84,11 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 	}
 	for _, d := range mod.Declarations {
 		l.lowerDecl(d)
+	}
+
+	// SWC interop: synthesize var Default = PrimaryExport when requested
+	if mod.SynthesizeDefault != "" {
+		l.decls = append(l.decls, varDecl("Default", nil, goIdent(mod.SynthesizeDefault)))
 	}
 
 	// Fix init cycles: split self-referencing vars into forward decl + init()
@@ -504,6 +509,9 @@ func (l *Lowerer) lowerExportDefault(d *hir.ExportDecl) {
 	}
 }
 
+// synthesizeDefaultExport creates var Default = PrimaryExport when a module
+// has named exports but no default export. This matches SWC's interop behavior:
+// `import X from 'module'` resolves to the primary named export.
 func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 	// Resolve the module path to Go import path + package name
 	goImportPath, goPkgName, isKnown := l.resolveModule(d.ModulePath)
@@ -861,16 +869,29 @@ func (l *Lowerer) fixInitCycles(decls []ast.Decl) []ast.Decl {
 // exprReferencesIdent checks if an AST expression references an identifier by name.
 func exprReferencesIdent(expr ast.Expr, name string) bool {
 	found := false
-	ast.Inspect(expr, func(n ast.Node) bool {
+	var walk func(ast.Node, ast.Node)
+	walk = func(n ast.Node, parent ast.Node) {
 		if found {
-			return false
+			return
 		}
 		if id, ok := n.(*ast.Ident); ok && id.Name == name {
+			// Ignore selector field names like pkg.Default; those are property
+			// accesses, not references to the variable being initialized.
+			if sel, ok := parent.(*ast.SelectorExpr); ok && sel.Sel == id {
+				return
+			}
 			found = true
-			return false
+			return
 		}
-		return true
-	})
+		ast.Inspect(n, func(child ast.Node) bool {
+			if child == nil || child == n {
+				return true
+			}
+			walk(child, n)
+			return false
+		})
+	}
+	walk(expr, nil)
 	return found
 }
 
@@ -1084,6 +1105,17 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 			continue
 		}
 		name := l.emitName(p.Symbol)
+		if p.Rest {
+			restCall := callExpr(selectorExpr(goIdent("jsvalue"), "NewArray"),
+				&ast.SliceExpr{X: goIdent("_args"), Low: intLit(itoa(idx))})
+			restCall.Ellipsis = 1
+			stmts = append(stmts, &ast.AssignStmt{
+				Lhs: []ast.Expr{goIdent(name)},
+				Tok: token.DEFINE,
+				Rhs: []ast.Expr{restCall},
+			})
+			continue
+		}
 		stmts = append(stmts, &ast.DeclStmt{
 			Decl: varDecl(name, jsValuePtrType(), nil),
 		})
@@ -1146,6 +1178,7 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 func forwardDeclareVars(stmts []ast.Stmt) []ast.Stmt {
 	// Step 1: Identify all := declarations
 	declared := make(map[string]int) // name → index of first := decl
+	bareVarDecls := make(map[string]int)
 	for i, s := range stmts {
 		if assign, ok := s.(*ast.AssignStmt); ok && assign.Tok == token.DEFINE {
 			for _, lhs := range assign.Lhs {
@@ -1156,14 +1189,35 @@ func forwardDeclareVars(stmts []ast.Stmt) []ast.Stmt {
 				}
 			}
 		}
+		if decl, ok := s.(*ast.DeclStmt); ok {
+			if gd, ok := decl.Decl.(*ast.GenDecl); ok && gd.Tok == token.VAR {
+				for _, spec := range gd.Specs {
+					if vs, ok := spec.(*ast.ValueSpec); ok {
+						for _, name := range vs.Names {
+							if _, exists := bareVarDecls[name.Name]; !exists {
+								bareVarDecls[name.Name] = i
+							}
+						}
+					}
+				}
+			}
+		}
 	}
-	if len(declared) == 0 {
+	if len(declared) == 0 && len(bareVarDecls) == 0 {
 		return stmts
 	}
 
 	// Step 2: Detect forward references (variables used before their := position)
 	forwarded := make(map[string]bool)
 	for name, declIdx := range declared {
+		for i := 0; i < declIdx; i++ {
+			if stmtReferencesIdent(stmts[i], name) {
+				forwarded[name] = true
+				break
+			}
+		}
+	}
+	for name, declIdx := range bareVarDecls {
 		for i := 0; i < declIdx; i++ {
 			if stmtReferencesIdent(stmts[i], name) {
 				forwarded[name] = true
@@ -1192,12 +1246,53 @@ func forwardDeclareVars(stmts []ast.Stmt) []ast.Stmt {
 		stmts[i] = s
 	}
 
+	// Remove original bare var declarations that have now been hoisted.
+	var filtered []ast.Stmt
+	for _, s := range stmts {
+		if decl, ok := s.(*ast.DeclStmt); ok {
+			if gd, ok := decl.Decl.(*ast.GenDecl); ok && gd.Tok == token.VAR {
+				allForwarded := true
+				for _, spec := range gd.Specs {
+					if vs, ok := spec.(*ast.ValueSpec); ok {
+						for _, name := range vs.Names {
+							if !forwarded[name.Name] {
+								allForwarded = false
+							}
+						}
+					}
+				}
+				if allForwarded {
+					continue
+				}
+			}
+		}
+		filtered = append(filtered, s)
+	}
+	stmts = filtered
+
 	// Final step: hoist forward-declared function assignments right after var
 	// declarations (JS function hoisting). Only hoist functions that were
 	// actually forward-declared — these are the ones whose := was split.
 	var hoisted []ast.Stmt
 	var remaining []ast.Stmt
 	for _, s := range stmts {
+		if decl, ok := s.(*ast.DeclStmt); ok {
+			if gd, ok := decl.Decl.(*ast.GenDecl); ok && gd.Tok == token.VAR {
+				keep := false
+				for _, spec := range gd.Specs {
+					if vs, ok := spec.(*ast.ValueSpec); ok {
+						for _, name := range vs.Names {
+							if !forwarded[name.Name] {
+								keep = true
+							}
+						}
+					}
+				}
+				if !keep {
+					continue
+				}
+			}
+		}
 		if assign, ok := s.(*ast.AssignStmt); ok && assign.Tok == token.ASSIGN {
 			if len(assign.Lhs) == 1 {
 				if id, ok := assign.Lhs[0].(*ast.Ident); ok && forwarded[id.Name] && isFuncValuedAssign(assign) {
@@ -1260,11 +1355,17 @@ func forwardDeclareVars(stmts []ast.Stmt) []ast.Stmt {
 // function body. Variables that are written (declared or assigned) but never
 // read are eliminated: var decls are removed, := becomes _ =, = becomes _ =.
 func eliminateUnusedVars(stmts []ast.Stmt) []ast.Stmt {
+	// Only locals declared in this function body are eligible for elimination.
+	// Assignments to outer/package scope vars may have effects outside the current
+	// body and must not be rewritten to `_ =`.
+	locals := make(map[string]bool)
+	collectLocalDecls(stmts, locals)
+
 	// Phase 1: Collect writes and reads across the entire body (recursively)
 	writes := make(map[string]bool)
 	reads := make(map[string]bool)
 	for _, s := range stmts {
-		collectWritesAndReads(s, writes, reads)
+		collectWritesAndReads(s, writes, reads, locals)
 	}
 
 	// Phase 2: Find write-only variables (written but never read)
@@ -1285,10 +1386,42 @@ func eliminateUnusedVars(stmts []ast.Stmt) []ast.Stmt {
 	return filterUnusedDecls(stmts, unused)
 }
 
+func collectLocalDecls(stmts []ast.Stmt, locals map[string]bool) {
+	for _, s := range stmts {
+		ast.Inspect(s, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.AssignStmt:
+				if n.Tok != token.DEFINE {
+					return true
+				}
+				for _, lhs := range n.Lhs {
+					if id, ok := lhs.(*ast.Ident); ok && id.Name != "_" {
+						locals[id.Name] = true
+					}
+				}
+			case *ast.GenDecl:
+				if n.Tok != token.VAR {
+					return true
+				}
+				for _, spec := range n.Specs {
+					if vs, ok := spec.(*ast.ValueSpec); ok {
+						for _, name := range vs.Names {
+							if name.Name != "_" {
+								locals[name.Name] = true
+							}
+						}
+					}
+				}
+			}
+			return true
+		})
+	}
+}
+
 // collectWritesAndReads walks a statement recursively, recording which
 // identifiers appear in write positions (LHS of assignment, var decl names)
 // vs read positions (everything else).
-func collectWritesAndReads(node ast.Node, writes, reads map[string]bool) {
+func collectWritesAndReads(node ast.Node, writes, reads, locals map[string]bool) {
 	// Track idents that are in write positions so we skip them as reads
 	writeIdents := make(map[*ast.Ident]bool)
 
@@ -1297,7 +1430,7 @@ func collectWritesAndReads(node ast.Node, writes, reads map[string]bool) {
 		switch n := n.(type) {
 		case *ast.AssignStmt:
 			for _, lhs := range n.Lhs {
-				if id, ok := lhs.(*ast.Ident); ok {
+				if id, ok := lhs.(*ast.Ident); ok && (n.Tok == token.DEFINE || locals[id.Name]) {
 					writeIdents[id] = true
 					if id.Name != "_" {
 						writes[id.Name] = true
@@ -1426,8 +1559,12 @@ func isFuncValuedAssign(assign *ast.AssignStmt) bool {
 func stmtReferencesIdent(s ast.Stmt, name string) bool {
 	found := false
 	ast.Inspect(s, func(n ast.Node) bool {
-		if found { return false }
-		if id, ok := n.(*ast.Ident); ok && id.Name == name { found = true }
+		if found {
+			return false
+		}
+		if id, ok := n.(*ast.Ident); ok && id.Name == name {
+			found = true
+		}
 		return !found
 	})
 	return found
@@ -1449,44 +1586,67 @@ func hirBodyUsesThis(body *hir.BlockStmt) bool {
 		case *hir.ThisExpr:
 			found = true
 		case *hir.BinaryExpr:
-			walk(e.Left); walk(e.Right)
+			walk(e.Left)
+			walk(e.Right)
 		case *hir.UnaryExpr:
 			walk(e.Operand)
 		case *hir.CallExpr:
 			walk(e.Func)
-			for _, a := range e.Args { walk(a) }
+			for _, a := range e.Args {
+				walk(a)
+			}
 		case *hir.MemberExpr:
 			walk(e.Object)
 		case *hir.ComputedMemberExpr:
-			walk(e.Object); walk(e.Property)
+			walk(e.Object)
+			walk(e.Property)
 		case *hir.AssignExpr:
-			walk(e.Left); walk(e.Right)
+			walk(e.Left)
+			walk(e.Right)
 		case *hir.TernaryExpr:
-			walk(e.Cond); walk(e.Then); walk(e.Else)
+			walk(e.Cond)
+			walk(e.Then)
+			walk(e.Else)
 		case *hir.ArrayLiteral:
-			for _, el := range e.Elements { walk(el) }
+			for _, el := range e.Elements {
+				walk(el)
+			}
 		case *hir.ObjectLiteral:
-			for _, p := range e.Properties { walk(p.Value) }
+			for _, p := range e.Properties {
+				walk(p.Value)
+			}
 		case *hir.SpreadExpr:
 			walk(e.Value)
 		case *hir.NewExpr:
 			walk(e.Callee)
-			for _, a := range e.Args { walk(a) }
+			for _, a := range e.Args {
+				walk(a)
+			}
 		case *hir.UpdateExpr:
 			walk(e.Operand)
 		case *hir.ArrowFunc:
 			if e.Body != nil {
-				for _, st := range e.Body.Stmts { walkStmt(st) }
+				for _, st := range e.Body.Stmts {
+					walkStmt(st)
+				}
 			}
-			if e.ExprBody != nil { walk(e.ExprBody) }
+			if e.ExprBody != nil {
+				walk(e.ExprBody)
+			}
 		case *hir.FuncExpr:
 			if e.Body != nil {
-				for _, st := range e.Body.Stmts { walkStmt(st) }
+				for _, st := range e.Body.Stmts {
+					walkStmt(st)
+				}
 			}
 		case *hir.TemplateLiteral:
-			for _, p := range e.Parts { walk(p) }
+			for _, p := range e.Parts {
+				walk(p)
+			}
 		case *hir.SequenceExpr:
-			for _, ex := range e.Exprs { walk(ex) }
+			for _, ex := range e.Exprs {
+				walk(ex)
+			}
 		case *hir.ParenExpr:
 			walk(e.Expr)
 		}
@@ -1501,38 +1661,80 @@ func hirBodyUsesThis(body *hir.BlockStmt) bool {
 		case *hir.ReturnStmt:
 			walk(s.Value)
 		case *hir.VarDecl:
-			for _, d := range s.Declarators { walk(d.Init) }
+			for _, d := range s.Declarators {
+				walk(d.Init)
+			}
 		case *hir.IfStmt:
 			walk(s.Cond)
-			if s.Then != nil { for _, st := range s.Then.Stmts { walkStmt(st) } }
-			if s.Else != nil { walkStmt(s.Else) }
+			if s.Then != nil {
+				for _, st := range s.Then.Stmts {
+					walkStmt(st)
+				}
+			}
+			if s.Else != nil {
+				walkStmt(s.Else)
+			}
 		case *hir.ForStmt:
-			walkStmt(s.Init); walk(s.Cond); walk(s.Post)
-			if s.Body != nil { for _, st := range s.Body.Stmts { walkStmt(st) } }
+			walkStmt(s.Init)
+			walk(s.Cond)
+			walk(s.Post)
+			if s.Body != nil {
+				for _, st := range s.Body.Stmts {
+					walkStmt(st)
+				}
+			}
 		case *hir.WhileStmt:
 			walk(s.Cond)
-			if s.Body != nil { for _, st := range s.Body.Stmts { walkStmt(st) } }
+			if s.Body != nil {
+				for _, st := range s.Body.Stmts {
+					walkStmt(st)
+				}
+			}
 		case *hir.BlockStmt:
-			for _, st := range s.Stmts { walkStmt(st) }
+			for _, st := range s.Stmts {
+				walkStmt(st)
+			}
 		case *hir.ThrowStmt:
 			walk(s.Value)
 		case *hir.SwitchStmt:
 			walk(s.Tag)
 			for _, c := range s.Cases {
-				for _, st := range c.Body { walkStmt(st) }
+				for _, st := range c.Body {
+					walkStmt(st)
+				}
 			}
 		case *hir.TryCatchStmt:
-			if s.Try != nil { for _, st := range s.Try.Stmts { walkStmt(st) } }
-			if s.Catch != nil && s.Catch.Body != nil { for _, st := range s.Catch.Body.Stmts { walkStmt(st) } }
+			if s.Try != nil {
+				for _, st := range s.Try.Stmts {
+					walkStmt(st)
+				}
+			}
+			if s.Catch != nil && s.Catch.Body != nil {
+				for _, st := range s.Catch.Body.Stmts {
+					walkStmt(st)
+				}
+			}
 		case *hir.DoWhileStmt:
 			walk(s.Cond)
-			if s.Body != nil { for _, st := range s.Body.Stmts { walkStmt(st) } }
+			if s.Body != nil {
+				for _, st := range s.Body.Stmts {
+					walkStmt(st)
+				}
+			}
 		case *hir.ForOfStmt:
 			walk(s.Value)
-			if s.Body != nil { for _, st := range s.Body.Stmts { walkStmt(st) } }
+			if s.Body != nil {
+				for _, st := range s.Body.Stmts {
+					walkStmt(st)
+				}
+			}
 		case *hir.ForInStmt:
 			walk(s.Value)
-			if s.Body != nil { for _, st := range s.Body.Stmts { walkStmt(st) } }
+			if s.Body != nil {
+				for _, st := range s.Body.Stmts {
+					walkStmt(st)
+				}
+			}
 		}
 	}
 	for _, s := range body.Stmts {

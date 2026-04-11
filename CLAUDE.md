@@ -23,7 +23,7 @@ go run . run file.ts                  # transpile, build, and execute
 
 ## Architecture
 
-The project has two compilation paths. The **production path** (used by the CLI) goes through the original `Transformer`. The **new pipeline** (tested independently) goes through HIR → MIR → SSA → Backend. Both share the same symbol table and TranspilerContext foundations.
+The project has two compilation paths. The **default path** goes through the new pipeline (HIR → MIR → SSA → Backend). The original `Transformer` remains in the tree as a legacy implementation/reference path. Both share the same symbol table and TranspilerContext foundations.
 
 ### Production Path
 

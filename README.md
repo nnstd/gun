@@ -35,6 +35,7 @@ Transpile and compile to a native binary:
 ```bash
 gun build file.ts                  # produces ./file binary
 gun build file.ts -o mybin         # custom output path
+gun build file.ts -O2             # enable pipeline optimizations
 ```
 
 ### Run
@@ -44,6 +45,7 @@ Transpile, compile, and execute in one step:
 ```bash
 gun run file.ts
 gun run file.ts -- --flag arg      # pass arguments to the program
+gun run file.ts -O1                # run with pipeline optimizations enabled
 ```
 
 ### Options
@@ -54,6 +56,7 @@ gun run file.ts -- --flag arg      # pass arguments to the program
 | `-p, --pkg` | Go package name (default: `main`) |
 | `-v, --verbose` | Verbose output |
 | `--ast` | Print the tree-sitter AST instead of transpiling |
+| `-O` | Pipeline optimization level: `0`, `1`, or `2` |
 
 ## Example
 
@@ -84,7 +87,9 @@ Gun uses an **all-JSValue architecture** — all transpiled variables, parameter
 TypeScript source
        ↓  tree-sitter
      CST
-       ↓  transformer
+       ↓  HIR → MIR → SSA
+   Optimized IR
+       ↓  backend
    Go AST (go/ast)
        ↓  go/format
    Go source

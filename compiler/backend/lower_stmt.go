@@ -39,19 +39,18 @@ func (l *Lowerer) lowerBlock(b *hir.BlockStmt) *ast.BlockStmt {
 	return &ast.BlockStmt{List: stmts}
 }
 
-// hoistFunctions reorders HIR statements to match JS hoisting semantics:
-// All VarDecl statements (both function-valued and regular) are moved before
-// non-VarDecl statements. This ensures that all declarations are visible
-// before any code that references them, matching JS's function hoisting
-// and preventing "undefined" errors from forward references.
+// hoistFunctions reorders HIR statements to match JS hoisting semantics for
+// local function declarations only. Regular local variables must preserve
+// source order because their initializers and surrounding statements can have
+// observable side effects.
 func hoistFunctions(stmts []hir.Stmt) []hir.Stmt {
 	var decls []hir.Stmt
 	var rest []hir.Stmt
 	for _, s := range stmts {
-		if _, ok := s.(*hir.VarDecl); ok {
+		if isFuncDecl(s) {
 			decls = append(decls, s)
 		} else if block, ok := s.(*hir.BlockStmt); ok {
-			// Recursively extract VarDecl from nested blocks
+			// Recursively extract function-valued declarations from nested blocks.
 			innerDecls, innerRest := extractVarDecls(block.Stmts)
 			decls = append(decls, innerDecls...)
 			if len(innerRest) > 0 {
@@ -67,11 +66,11 @@ func hoistFunctions(stmts []hir.Stmt) []hir.Stmt {
 	return append(decls, rest...)
 }
 
-// extractVarDecls separates VarDecl statements from other statements,
-// recursing into nested BlockStmts.
+// extractVarDecls separates function-valued VarDecl statements from other
+// statements, recursing into nested BlockStmts.
 func extractVarDecls(stmts []hir.Stmt) (decls, rest []hir.Stmt) {
 	for _, s := range stmts {
-		if _, ok := s.(*hir.VarDecl); ok {
+		if isFuncDecl(s) {
 			decls = append(decls, s)
 		} else if block, ok := s.(*hir.BlockStmt); ok {
 			innerDecls, innerRest := extractVarDecls(block.Stmts)

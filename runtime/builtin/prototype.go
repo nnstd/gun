@@ -132,7 +132,7 @@ func initObjectPrototype() {
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
 			if len(args) >= 2 { return NewBool(args[0].HasOwnProperty(args[1].String())) }
 			return NewBool(false)
-		}),
+		}).MarkAsMethod(),
 		Writable: true, Enumerable: false, Configurable: true,
 	})
 	ObjectPrototype.DefineProperty("valueOf", &PropertyDescriptor{

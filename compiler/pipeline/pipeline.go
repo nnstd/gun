@@ -13,6 +13,7 @@ import (
 	"github.com/nnstd/gun/compiler/backend"
 	"github.com/nnstd/gun/compiler/context"
 	"github.com/nnstd/gun/compiler/hir"
+	"github.com/nnstd/gun/compiler/symbol"
 	"github.com/nnstd/gun/compiler/mir"
 	"github.com/nnstd/gun/compiler/passes"
 	"github.com/nnstd/gun/compiler/ssa"
@@ -104,6 +105,11 @@ func (p *Pipeline) CompileTree(root *sitter.Node, source []byte, pkgName, module
 		mirMod = ssa.DeSSA(ssaMod)
 	}
 
+	// SWC interop: if module has named exports but no default, synthesize one
+	if hirMod.SynthesizeDefault == "" && !samePackageImports {
+		synthesizeDefaultIfNeeded(hirMod)
+	}
+
 	// Stage 6: Backend lowering (HIR → Go AST)
 	// Note: currently the backend lowers from HIR directly.
 	// Once MIR→Go lowering is implemented, this will use mirMod instead.
@@ -135,6 +141,33 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 		tree.Close()
 		hirModules[name] = hirMod
 		allExports[name] = backend.ScanHIRExports(hirMod)
+	}
+
+	// Phase 1b: Synthesize Default export for modules with named exports
+	// but no explicit default (SWC interop). Only add to the entry file.
+	hasDefault := false
+	for _, exps := range allExports {
+		for _, exp := range exps {
+			if exp.GoName == "Default" {
+				hasDefault = true
+			}
+		}
+	}
+	if !hasDefault && entryFile != "" {
+		if entryExps := allExports[entryFile]; entryExps != nil {
+			// Find the primary named export (first exported class or function)
+			for _, exp := range entryExps {
+				if exp.GoName != "" && exp.GoName != "Default" {
+					allExports[entryFile] = append(allExports[entryFile],
+						backend.CrossFileExport{GoName: "Default", IsJSValue: true})
+					// Mark the entry HIR module to synthesize var Default = PrimaryExport
+					if entryMod, ok := hirModules[entryFile]; ok {
+						entryMod.SynthesizeDefault = exp.GoName
+					}
+					break
+				}
+			}
+		}
 	}
 
 	// Phase 2: Detect conflicting Default exports
@@ -223,6 +256,36 @@ func renameDefaultExport(source []byte, fileName string) []byte {
 	s = strings.ReplaceAll(s, "\tDefault = ", "\t"+name+" = ")
 	s = strings.ReplaceAll(s, "\nDefault = ", "\n"+name+" = ")
 	return []byte(s)
+}
+
+// synthesizeDefaultIfNeeded checks if a module has named exports but no default,
+// and sets SynthesizeDefault to the primary named export (SWC interop).
+func synthesizeDefaultIfNeeded(mod *hir.Module) {
+	hasDefault := false
+	var primaryExport string
+	for _, d := range mod.Declarations {
+		if ed, ok := d.(*hir.ExportDecl); ok {
+			if ed.IsDefault {
+				hasDefault = true
+				return
+			}
+			if ed.Decl != nil {
+				switch inner := ed.Decl.(type) {
+				case *hir.ClassDecl:
+					if inner.Symbol != nil && primaryExport == "" {
+						primaryExport = symbol.Capitalize(inner.Symbol.OriginalName)
+					}
+				case *hir.FuncDecl:
+					if inner.Symbol != nil && primaryExport == "" {
+						primaryExport = symbol.Capitalize(inner.Symbol.OriginalName)
+					}
+				}
+			}
+		}
+	}
+	if !hasDefault && primaryExport != "" {
+		mod.SynthesizeDefault = primaryExport
+	}
 }
 
 // parseTypeScript is a helper to parse TypeScript source into a tree-sitter tree.

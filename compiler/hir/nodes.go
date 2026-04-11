@@ -15,10 +15,11 @@ import "github.com/nnstd/gun/compiler/symbol"
 
 // Module represents a single TypeScript file.
 type Module struct {
-	Package      string
-	Imports      []*ImportDecl
-	Declarations []Decl
-	SymbolTable  *symbol.Table
+	Package           string
+	Imports           []*ImportDecl
+	Declarations      []Decl
+	SymbolTable       *symbol.Table
+	SynthesizeDefault string // if set, emit var Default = <this Go name> (SWC interop)
 }
 
 // --------------------------------------------------------------------

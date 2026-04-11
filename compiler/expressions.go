@@ -1328,7 +1328,7 @@ func isStringLitNode(node *sitter.Node) bool {
 func isBoolReturningMethod(name string) bool {
 	switch name {
 	case "MatchString", "HasPrefix", "HasSuffix", "Contains", "ContainsAny",
-		"EqualFold", "IsNaN", "IsInf":
+		"EqualFold":
 		return true
 	}
 	return false
@@ -1488,6 +1488,10 @@ func isJSValueCallExpr(call *ast.CallExpr) bool {
 		if id, ok := sel.X.(*ast.Ident); ok && id.Name == "jsvalue" {
 			return true
 		}
+		// Gun runtime package functions also operate in JSValue space.
+		if id, ok := sel.X.(*ast.Ident); ok && isRuntimePackage(id.Name) {
+			return true
+		}
 	}
 	// IIFE: func(...) *jsvalue.JSValue { ... }(args)
 	if fnLit, ok := call.Fun.(*ast.FuncLit); ok {
@@ -1506,6 +1510,9 @@ func isJSValueExpr(expr ast.Expr) bool {
 		return true
 	}
 	if isJSValueGet(expr) {
+		return true
+	}
+	if call, ok := expr.(*ast.CallExpr); ok && isJSValueCallExpr(call) {
 		return true
 	}
 	// IIFE (immediately invoked function expression) that returns *jsvalue.JSValue

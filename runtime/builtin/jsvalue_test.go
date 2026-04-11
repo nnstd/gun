@@ -257,6 +257,16 @@ func TestNullish(t *testing.T) {
 	}
 }
 
+func TestHasOwnPropertyCallUsesThisArg(t *testing.T) {
+	obj := NewObject()
+	obj.Set("name", NewString("gun"))
+
+	got := Prototype.Get("hasOwnProperty").MethodCall("call", obj, NewString("name"))
+	if !got.Bool() {
+		t.Fatal("expected hasOwnProperty.call(obj, 'name') to be true")
+	}
+}
+
 func TestIncDec(t *testing.T) {
 	if Inc(NewNumber(5)).Number() != 6 {
 		t.Error("Inc(5) should be 6")

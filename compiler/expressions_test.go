@@ -173,6 +173,16 @@ function f(x: number): string { if (isOk(x)) { return "yes"; } return "no"; }`
 	assertContains(t, out, ".Bool()")
 }
 
+func TestIsNaNTernaryConditionUsesJSValueTruthiness(t *testing.T) {
+	ts := `function f(val) {
+	const num = Number(val);
+	return isNaN(num) ? val : num;
+}`
+	out := compile(t, ts)
+	assertContains(t, out, "math.IsNaN(jsvalue.From(num)).Bool()")
+	assertNotContains(t, out, "if math.IsNaN(jsvalue.From(num)) {")
+}
+
 func TestEnsureBoolTypedLocalNotNilChecked(t *testing.T) {
 	// Variables initialized from false are now JSValue — uses != nil && .Bool()
 	ts := `function f(s) {

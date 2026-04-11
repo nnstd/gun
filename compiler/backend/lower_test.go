@@ -515,8 +515,8 @@ func TestRoundTripImportDefault(t *testing.T) {
 	// Note: lowerTS uses empty context, so "fs" is not a known module.
 	// It gets treated as a transpiled module. Test via CLI for full resolution.
 	out := lowerTS(t, `import fs from "fs"; const d = fs.readFileSync("x");`)
-	assertContains(t, out, `"fs"`)   // import path present
-	assertContains(t, out, "fs")     // package name used
+	assertContains(t, out, `"fs"`) // import path present
+	assertContains(t, out, "fs")   // package name used
 }
 
 func TestRoundTripImportNamed(t *testing.T) {
@@ -684,6 +684,79 @@ func TestUnusedVarElimination(t *testing.T) {
 	// x is unused, should be replaced with _
 	assertContains(t, out, "_ =")
 	assertContains(t, out, "return")
+}
+
+func TestUnusedVarEliminationKeepsOuterScopeAssignment(t *testing.T) {
+	out := lowerTS(t, `
+		let shim;
+		function setShim(_shim) {
+			shim = _shim;
+			return shim;
+		}
+		function getShim() {
+			return shim;
+		}
+	`)
+	assertContains(t, out, "shim = jsvalue.From(_shim)")
+	assertNotContains(t, out, "_ = jsvalue.From(_shim)")
+}
+
+func TestMethodRestParamUsesRemainingArgsSlice(t *testing.T) {
+	out := lowerTS(t, `
+		class Bag {
+			collect(...args) {
+				return args.length;
+			}
+		}
+	`)
+	assertContains(t, out, "args := jsvalue.NewArray(_args[1:]...)")
+}
+
+func TestDefaultExportObjectWithImportedDefaultDoesNotTriggerInitCycleSplit(t *testing.T) {
+	out := lowerTS(t, `
+		import parser from "yargs-parser";
+		export default { parser };
+	`)
+	assertContains(t, out, "var Default =")
+	assertNotContains(t, out, "func init()")
+}
+
+func TestLowerBlockPreservesNonFunctionStatementOrder(t *testing.T) {
+	out := lowerTS(t, `
+		function f(obj) {
+			const app = obj.make();
+			app.start();
+			const result = app.finish();
+			return result;
+		}
+	`)
+	startIdx := strings.Index(out, `MethodCall("start")`)
+	resultIdx := strings.Index(out, "result :=")
+	if startIdx == -1 || resultIdx == -1 {
+		t.Fatalf("expected both start call and result declaration in output:\n%s", out)
+	}
+	if startIdx > resultIdx {
+		t.Fatalf("non-function statements were reordered:\n%s", out)
+	}
+}
+
+func TestForwardDeclareBareLocalVarBeforeClosureReference(t *testing.T) {
+	out := lowerTS(t, `
+		function f() {
+			const self = {};
+			self.help = function() { return cachedHelpMessage; };
+			let cachedHelpMessage;
+			return self;
+		}
+	`)
+	declIdx := strings.Index(out, "var cachedHelpMessage *jsvalue.JSValue")
+	helpIdx := strings.Index(out, `Set("help"`)
+	if declIdx == -1 || helpIdx == -1 {
+		t.Fatalf("expected cachedHelpMessage decl and help assignment in output:\n%s", out)
+	}
+	if declIdx > helpIdx {
+		t.Fatalf("bare local var was not hoisted before closure reference:\n%s", out)
+	}
 }
 
 // --- Function hoisting tests ---
