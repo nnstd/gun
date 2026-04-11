@@ -759,6 +759,16 @@ func TestForwardDeclareBareLocalVarBeforeClosureReference(t *testing.T) {
 	}
 }
 
+func TestComputedMemberAugmentedAssignUsesCurrentValue(t *testing.T) {
+	out := lowerTS(t, `
+		function f(rows, i, word) {
+			rows[i] += word;
+		}
+	`)
+	assertContains(t, out, `rows.Set(fmt.Sprint(i), jsvalue.Add(`)
+	assertContains(t, out, `rows.Get(fmt.Sprint(i))`)
+}
+
 // --- Function hoisting tests ---
 
 func TestFunctionHoistingInBody(t *testing.T) {

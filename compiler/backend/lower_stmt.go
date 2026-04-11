@@ -629,6 +629,12 @@ func (l *Lowerer) lowerAssignStmt(assign *hir.AssignExpr) ast.Stmt {
 			obj := l.lowerExpr(comp.Object)
 			key := l.lowerExpr(comp.Property)
 			val := l.wrapAsJSValue(right)
+			if assign.Op != hir.OpAssign {
+				helperName := mapAssignOpToJSValue(assign.Op)
+				current := callExpr(selectorExpr(obj, "Get"),
+					callExpr(selectorExpr(goIdent("fmt"), "Sprint"), key))
+				val = callExpr(selectorExpr(goIdent("jsvalue"), helperName), current, val)
+			}
 			return exprStmt(callExpr(selectorExpr(obj, "Set"),
 				callExpr(selectorExpr(goIdent("fmt"), "Sprint"), key), val))
 		}

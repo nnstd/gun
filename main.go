@@ -129,7 +129,11 @@ func (cmd *RunCmd) Run() error {
 	}
 
 	absInput, _ := filepath.Abs(cmd.Input)
-	run := exec.Command(binPath, cmd.Args...)
+	args := append([]string(nil), cmd.Args...)
+	if len(args) > 0 && args[0] == "--" {
+		args = args[1:]
+	}
+	run := exec.Command(binPath, args...)
 	run.Env = append(os.Environ(), "GUN_ENTRY_SCRIPT="+absInput)
 	run.Stdin = os.Stdin
 	run.Stdout = os.Stdout

@@ -1,6 +1,7 @@
 package hir
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/nnstd/gun/compiler/symbol"
@@ -30,7 +31,14 @@ func (b *Builder) buildExpr(node *sitter.Node) Expr {
 		raw := b.nodeText(node)
 		// Strip surrounding quotes if present
 		if len(raw) >= 2 && (raw[0] == '\'' || raw[0] == '"' || raw[0] == '`') {
-			raw = raw[1 : len(raw)-1]
+			quoted := raw
+			if unquoted, err := strconv.Unquote(quoted); err == nil {
+				raw = unquoted
+			} else {
+				raw = raw[1 : len(raw)-1]
+			}
+		} else {
+			raw = decodeJSStringFragment(raw)
 		}
 		return &Literal{Kind: LitString, Value: raw}
 
@@ -213,7 +221,9 @@ func (b *Builder) buildTemplateLiteral(node *sitter.Node) *TemplateLiteral {
 		child := node.NamedChild(i)
 		switch child.Kind() {
 		case "string_fragment", "template_content":
-			tl.Parts = append(tl.Parts, &Literal{Kind: LitString, Value: b.nodeText(child)})
+			tl.Parts = append(tl.Parts, &Literal{Kind: LitString, Value: decodeJSStringFragment(b.nodeText(child))})
+		case "escape_sequence":
+			tl.Parts = append(tl.Parts, &Literal{Kind: LitString, Value: decodeJSStringFragment(b.nodeText(child))})
 		case "template_substitution":
 			if child.NamedChildCount() > 0 {
 				tl.Parts = append(tl.Parts, b.buildExpr(child.NamedChild(0)))
@@ -223,6 +233,17 @@ func (b *Builder) buildTemplateLiteral(node *sitter.Node) *TemplateLiteral {
 		}
 	}
 	return tl
+}
+
+func decodeJSStringFragment(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	quoted := `"` + strings.ReplaceAll(raw, `"`, `\"`) + `"`
+	if unquoted, err := strconv.Unquote(quoted); err == nil {
+		return unquoted
+	}
+	return raw
 }
 
 func (b *Builder) buildArrayLiteral(node *sitter.Node) *ArrayLiteral {

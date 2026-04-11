@@ -74,3 +74,31 @@ func TestTranspileProject_BuiltGunTestMatchesCLIParity(t *testing.T) {
 		})
 	}
 }
+
+func TestRunCommandStripsPassthroughSeparatorForChildArgs(t *testing.T) {
+	entry := filepath.Join(t.TempDir(), "argv.ts")
+	if err := os.WriteFile(entry, []byte(`console.log(JSON.stringify(process.argv));`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "gocache"))
+
+	cmd := exec.Command("go", "run", ".", "run", entry, "--", "--help")
+	cmd.Dir = "/Users/nikita/Work/gun"
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+
+	got := strings.TrimSpace(stdout.String())
+	if strings.Contains(got, ",--,--help") {
+		t.Fatalf("child argv still contains passthrough separator: %s", got)
+	}
+	if !strings.Contains(got, ",--help") {
+		t.Fatalf("expected child argv to contain --help: %s", got)
+	}
+}

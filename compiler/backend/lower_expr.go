@@ -495,12 +495,18 @@ func (l *Lowerer) lowerAssignExpr(e *hir.AssignExpr) ast.Expr {
 	}
 
 	// Computed member assignment: obj[key] = val → IIFE { obj.Set(key, val); return val }
-	if comp, ok := e.Left.(*hir.ComputedMemberExpr); ok && e.Op == hir.OpAssign && l.exprIsJSValue(comp.Object) {
+	if comp, ok := e.Left.(*hir.ComputedMemberExpr); ok && l.exprIsJSValue(comp.Object) {
 		l.jsvalueImport()
 		l.addImport("fmt")
 		obj := l.lowerExpr(comp.Object)
 		key := l.lowerExpr(comp.Property)
 		val := l.wrapAsJSValue(right)
+		if e.Op != hir.OpAssign {
+			helperName := mapAssignOpToJSValue(e.Op)
+			current := callExpr(selectorExpr(obj, "Get"),
+				callExpr(selectorExpr(goIdent("fmt"), "Sprint"), key))
+			val = callExpr(selectorExpr(goIdent("jsvalue"), helperName), current, val)
+		}
 		setCall := callExpr(selectorExpr(obj, "Set"),
 			callExpr(selectorExpr(goIdent("fmt"), "Sprint"), key), val)
 		return &ast.CallExpr{
@@ -791,6 +797,23 @@ func (l *Lowerer) lowerNewExpr(e *hir.NewExpr) ast.Expr {
 			}
 			if expr := l.ctx.TransformBuiltinNew(name, args, l); expr != nil {
 				return expr
+			}
+		}
+	}
+	if mem, ok := e.Callee.(*hir.MemberExpr); ok {
+		if obj, ok := mem.Object.(*hir.Identifier); ok {
+			name := symbol.Capitalize(obj.Name) + symbol.Capitalize(mem.Property)
+			if obj.Sym != nil {
+				name = symbol.Capitalize(obj.Sym.OriginalName) + symbol.Capitalize(mem.Property)
+			}
+			if l.ctx != nil {
+				var args []ast.Expr
+				for _, a := range e.Args {
+					args = append(args, l.lowerExpr(a))
+				}
+				if expr := l.ctx.TransformBuiltinNew(name, args, l); expr != nil {
+					return expr
+				}
 			}
 		}
 	}
