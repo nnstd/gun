@@ -206,19 +206,23 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 	// file-specific aliases so flattened packages preserve module boundaries.
 	for fileName, exps := range allExports {
 		aliases := make(map[string]string)
+		usedAliases := make(map[string]int)
 		for _, exp := range exps {
 			exportName := exp.GoName
-			if exportName == "Default" {
-				aliases["default"] = exportName
+			originalName := exp.OriginalName
+			if exportName == "Default" || originalName == "default" {
+				alias := exportName
 				if fileName != entryFile {
-					aliases["default"] = fileDefaultName(fileName)
+					alias = fileDefaultName(fileName)
 				}
+				aliases["default"] = makeUniqueAlias(alias, usedAliases)
 				continue
 			}
-			aliases[exportName] = exportName
+			alias := exportName
 			if fileName != entryFile {
-				aliases[exportName] = fileSpecificExportName(fileName, exportName)
+				alias = fileSpecificExportName(fileName, originalName)
 			}
+			aliases[originalName] = makeUniqueAlias(alias, usedAliases)
 		}
 		exportAliases[fileName] = aliases
 	}
@@ -260,7 +264,7 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 				}
 			}
 			for _, n := range imp.Named {
-				if alias := targetAliases[symbol.Capitalize(n.OriginalName)]; alias != "" {
+				if alias := targetAliases[n.OriginalName]; alias != "" {
 					importNameMap[imp.ModulePath+"\x00"+n.OriginalName] = alias
 				}
 			}
@@ -308,7 +312,7 @@ func fileSpecificExportName(fileName, exportName string) string {
 		parts = parts[len(parts)-3:]
 	}
 	name := ""
-	for _, r := range strings.Join(parts, "_") {
+	for _, r := range strings.Join(parts, "_") + "_" + exportName {
 		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
 			name += string(r)
 		} else {
@@ -318,7 +322,16 @@ func fileSpecificExportName(fileName, exportName string) string {
 	if name == "" {
 		name = "File"
 	}
-	return strings.ToUpper(name[:1]) + name[1:] + symbol.Capitalize(exportName)
+	return strings.ToUpper(name[:1]) + name[1:]
+}
+
+func makeUniqueAlias(alias string, used map[string]int) string {
+	if used[alias] == 0 {
+		used[alias] = 1
+		return alias
+	}
+	used[alias]++
+	return fmt.Sprintf("%s_%d", alias, used[alias])
 }
 
 func resolvePackageImportFile(currentFile, importPath string, files map[string][]byte) string {

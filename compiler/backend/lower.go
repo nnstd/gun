@@ -23,8 +23,9 @@ type importResolution struct {
 
 // CrossFileExport describes a symbol exported from another file in the same package.
 type CrossFileExport struct {
-	GoName    string
-	IsJSValue bool
+	OriginalName string
+	GoName       string
+	IsJSValue    bool
 }
 
 // Lowerer converts an HIR Module into a go/ast.File.
@@ -641,7 +642,7 @@ func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 	}
 	for _, n := range d.Names {
 		goName := symbol.Capitalize(symbol.Sanitize(n.ExportedName))
-		if alias, ok := l.exportAliasMap[symbol.Capitalize(n.ExportedName)]; ok {
+		if alias, ok := l.exportAliasMap[n.ExportedName]; ok {
 			goName = alias
 		}
 		var rhs ast.Expr = goIdent(symbol.Sanitize(n.LocalName))
@@ -659,7 +660,7 @@ func (l *Lowerer) maybeEmitExportAlias(exportedName, localGoName string) {
 	if l.exportAliasMap == nil {
 		return
 	}
-	goName, ok := l.exportAliasMap[symbol.Capitalize(exportedName)]
+	goName, ok := l.exportAliasMap[exportedName]
 	if !ok || goName == "" || goName == localGoName {
 		return
 	}
@@ -1222,6 +1223,9 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 		}
 	}
 
+	// Hoist function declarations within the body, but keep param unpacking/setup
+	// statements ahead of any hoisted assignments.
+	setupBarrier := len(stmts)
 	// Hoist function declarations to top of body (JS hoisting semantics)
 	hoistedBody := hoistFunctions(body.Stmts)
 
@@ -1246,7 +1250,7 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 	}
 
 	// Forward-declare variables used before their := definition
-	stmts = forwardDeclareVars(stmts)
+	stmts = forwardDeclareVars(stmts, setupBarrier)
 
 	// Replace unused := variables with _ to satisfy Go's "declared and not used" rule
 	stmts = eliminateUnusedVars(stmts)
@@ -1369,6 +1373,8 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 		}
 	}
 
+	// Keep receiver/parameter setup statements ahead of any hoisted assignments.
+	setupBarrier := len(stmts)
 	// Lower body statements, flattening inline blocks
 	for _, s := range body.Stmts {
 		gs := l.lowerStmt(s)
@@ -1390,7 +1396,7 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 	}
 
 	// Forward-declare variables used before their := definition
-	stmts = forwardDeclareVars(stmts)
+	stmts = forwardDeclareVars(stmts, setupBarrier)
 
 	// Replace unused := variables with _ to satisfy Go's "declared and not used" rule
 	stmts = eliminateUnusedVars(stmts)
@@ -1401,7 +1407,13 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 // forwardDeclareVars scans Go statements for variables used before their :=
 // declaration. Adds `var name *jsvalue.JSValue` at top and changes := to =.
 // Also hoists function-valued assignments to the top (JS function hoisting).
-func forwardDeclareVars(stmts []ast.Stmt) []ast.Stmt {
+func forwardDeclareVars(stmts []ast.Stmt, hoistBarrier int) []ast.Stmt {
+	if hoistBarrier < 0 {
+		hoistBarrier = 0
+	}
+	if hoistBarrier > len(stmts) {
+		hoistBarrier = len(stmts)
+	}
 	// Step 1: Identify all := declarations
 	declared := make(map[string]int) // name → index of first := decl
 	bareVarDecls := make(map[string]int)
@@ -1440,6 +1452,23 @@ func forwardDeclareVars(stmts []ast.Stmt) []ast.Stmt {
 			if stmtReferencesIdent(stmts[i], name) {
 				forwarded[name] = true
 				break
+			}
+		}
+	}
+	// Self-referential function literals also need forward declarations because
+	// Go does not put a := variable in scope on its own RHS.
+	for _, s := range stmts {
+		assign, ok := s.(*ast.AssignStmt)
+		if !ok || assign.Tok != token.DEFINE || !isFuncValuedAssign(assign) {
+			continue
+		}
+		for _, lhs := range assign.Lhs {
+			id, ok := lhs.(*ast.Ident)
+			if !ok {
+				continue
+			}
+			if assignRHSReferencesIdent(assign, id.Name) {
+				forwarded[id.Name] = true
 			}
 		}
 	}
@@ -1530,6 +1559,31 @@ func forwardDeclareVars(stmts []ast.Stmt) []ast.Stmt {
 		remaining = append(remaining, s)
 	}
 	if len(hoisted) > 0 {
+		prefixDeclared := make(map[string]bool)
+		for i := 0; i < hoistBarrier && i < len(stmts); i++ {
+			inspectWithoutNestedFuncLits(stmts[i], func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.AssignStmt:
+					for _, lhs := range n.Lhs {
+						if id, ok := lhs.(*ast.Ident); ok {
+							prefixDeclared[id.Name] = true
+						}
+					}
+				case *ast.GenDecl:
+					if n.Tok != token.VAR {
+						return true
+					}
+					for _, spec := range n.Specs {
+						if vs, ok := spec.(*ast.ValueSpec); ok {
+							for _, name := range vs.Names {
+								prefixDeclared[name.Name] = true
+							}
+						}
+					}
+				}
+				return true
+			})
+		}
 		// Hoisted function bodies may reference variables (argv, flags, etc.)
 		// that are assigned later. These variables need var declarations before
 		// the hoisted code. Scan hoisted functions for referenced names and
@@ -1538,30 +1592,36 @@ func forwardDeclareVars(stmts []ast.Stmt) []ast.Stmt {
 		for name := range forwarded {
 			existingDecls[name] = true
 		}
-		// Find all = assignments in remaining (these are variable assignments)
+		// Find all later local names in remaining statements, including bare
+		// var declarations and nested assignments inside control flow.
 		assignedNames := make(map[string]bool)
+		assignedTypes := make(map[string]ast.Expr)
 		for _, s := range remaining {
-			if assign, ok := s.(*ast.AssignStmt); ok {
-				for _, lhs := range assign.Lhs {
-					if id, ok := lhs.(*ast.Ident); ok {
-						assignedNames[id.Name] = true
+			inspectWithoutNestedFuncLits(s, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.AssignStmt:
+					for _, lhs := range n.Lhs {
+						if id, ok := lhs.(*ast.Ident); ok {
+							assignedNames[id.Name] = true
+							if _, exists := assignedTypes[id.Name]; !exists {
+								assignedTypes[id.Name] = jsValuePtrType()
+							}
+						}
 					}
-				}
-			}
-		}
-		// Check which names hoisted functions reference that aren't declared yet
-		var extraDecls []ast.Stmt
-		for _, s := range hoisted {
-			ast.Inspect(s, func(n ast.Node) bool {
-				if id, ok := n.(*ast.Ident); ok && !existingDecls[id.Name] && assignedNames[id.Name] {
-					existingDecls[id.Name] = true
-					extraDecls = append(extraDecls, &ast.DeclStmt{Decl: varDecl(id.Name, jsValuePtrType(), nil)})
-					// Change the corresponding := in remaining to = since we forward-declared it
-					for _, rs := range remaining {
-						if assign, ok := rs.(*ast.AssignStmt); ok && assign.Tok == token.DEFINE {
-							for _, lhs := range assign.Lhs {
-								if lid, ok := lhs.(*ast.Ident); ok && lid.Name == id.Name {
-									assign.Tok = token.ASSIGN
+				case *ast.GenDecl:
+					if n.Tok != token.VAR {
+						return true
+					}
+					for _, spec := range n.Specs {
+						if vs, ok := spec.(*ast.ValueSpec); ok {
+							for _, name := range vs.Names {
+								assignedNames[name.Name] = true
+								if _, exists := assignedTypes[name.Name]; !exists {
+									if vs.Type != nil {
+										assignedTypes[name.Name] = vs.Type
+									} else {
+										assignedTypes[name.Name] = jsValuePtrType()
+									}
 								}
 							}
 						}
@@ -1570,11 +1630,93 @@ func forwardDeclareVars(stmts []ast.Stmt) []ast.Stmt {
 				return true
 			})
 		}
+		// Check which names hoisted functions reference that aren't declared yet
+		var extraDecls []ast.Stmt
+		for _, s := range hoisted {
+			ast.Inspect(s, func(n ast.Node) bool {
+				if id, ok := n.(*ast.Ident); ok && !existingDecls[id.Name] && !prefixDeclared[id.Name] && assignedNames[id.Name] {
+					existingDecls[id.Name] = true
+					forwarded[id.Name] = true
+					declType := assignedTypes[id.Name]
+					if declType == nil {
+						declType = jsValuePtrType()
+					}
+					extraDecls = append(extraDecls, &ast.DeclStmt{Decl: varDecl(id.Name, declType, nil)})
+					// Change the corresponding := in remaining to = since we forward-declared it
+					for _, rs := range remaining {
+						inspectWithoutNestedFuncLits(rs, func(n ast.Node) bool {
+							assign, ok := n.(*ast.AssignStmt)
+							if !ok || assign.Tok != token.DEFINE {
+								return true
+							}
+							for _, lhs := range assign.Lhs {
+								if lid, ok := lhs.(*ast.Ident); ok && lid.Name == id.Name {
+									assign.Tok = token.ASSIGN
+								}
+							}
+							return true
+						})
+					}
+				}
+				return true
+			})
+		}
+		// Remove original bare var declarations for any names newly forwarded
+		// while scanning hoisted function captures.
+		var refiltered []ast.Stmt
+		for _, s := range remaining {
+			if decl, ok := s.(*ast.DeclStmt); ok {
+				if gd, ok := decl.Decl.(*ast.GenDecl); ok && gd.Tok == token.VAR {
+					allForwarded := true
+					for _, spec := range gd.Specs {
+						if vs, ok := spec.(*ast.ValueSpec); ok {
+							for _, name := range vs.Names {
+								if !forwarded[name.Name] {
+									allForwarded = false
+								}
+							}
+						}
+					}
+					if allForwarded {
+						continue
+					}
+				}
+			}
+			refiltered = append(refiltered, s)
+		}
+		remaining = refiltered
 		fwd = append(fwd, extraDecls...)
-		return append(append(fwd, hoisted...), remaining...)
+		var prefix []ast.Stmt
+		var post []ast.Stmt
+		for i, s := range remaining {
+			if i < hoistBarrier {
+				prefix = append(prefix, s)
+			} else {
+				post = append(post, s)
+			}
+		}
+		out := append([]ast.Stmt{}, fwd...)
+		out = append(out, prefix...)
+		out = append(out, hoisted...)
+		out = append(out, post...)
+		return out
 	}
 
 	return append(fwd, stmts...)
+}
+
+func inspectWithoutNestedFuncLits(root ast.Node, fn func(ast.Node) bool) {
+	first := true
+	ast.Inspect(root, func(n ast.Node) bool {
+		if n == nil {
+			return fn(n)
+		}
+		if _, ok := n.(*ast.FuncLit); ok && !first {
+			return false
+		}
+		first = false
+		return fn(n)
+	})
 }
 
 // eliminateUnusedVars performs SWC-style write/read analysis on an entire
@@ -1782,6 +1924,23 @@ func isFuncValuedAssign(assign *ast.AssignStmt) bool {
 	return false
 }
 
+func assignRHSReferencesIdent(assign *ast.AssignStmt, name string) bool {
+	for _, rhs := range assign.Rhs {
+		found := false
+		ast.Inspect(rhs, func(n ast.Node) bool {
+			if id, ok := n.(*ast.Ident); ok && id.Name == name {
+				found = true
+				return false
+			}
+			return !found
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
 func stmtReferencesIdent(s ast.Stmt, name string) bool {
 	found := false
 	ast.Inspect(s, func(n ast.Node) bool {
@@ -1860,11 +2019,8 @@ func hirBodyUsesThis(body *hir.BlockStmt) bool {
 				walk(e.ExprBody)
 			}
 		case *hir.FuncExpr:
-			if e.Body != nil {
-				for _, st := range e.Body.Stmts {
-					walkStmt(st)
-				}
-			}
+			// Regular function expressions have their own `this`.
+			// Do not treat nested function bodies as outer-body `this` usage.
 		case *hir.TemplateLiteral:
 			for _, p := range e.Parts {
 				walk(p)

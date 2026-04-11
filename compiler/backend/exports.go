@@ -15,8 +15,9 @@ func ScanHIRExports(mod *hir.Module) []CrossFileExport {
 		case *hir.FuncDecl:
 			if d.Symbol != nil && d.Exported {
 				exports = append(exports, CrossFileExport{
-					GoName:    symbol.Capitalize(d.Symbol.OriginalName),
-					IsJSValue: true,
+					OriginalName: d.Symbol.OriginalName,
+					GoName:       symbol.Capitalize(d.Symbol.OriginalName),
+					IsJSValue:    true,
 				})
 			}
 		case *hir.VarDecl:
@@ -24,8 +25,9 @@ func ScanHIRExports(mod *hir.Module) []CrossFileExport {
 				for _, decl := range d.Declarators {
 					if decl.Symbol != nil {
 						exports = append(exports, CrossFileExport{
-							GoName:    symbol.Capitalize(decl.Symbol.OriginalName),
-							IsJSValue: true,
+							OriginalName: decl.Symbol.OriginalName,
+							GoName:       symbol.Capitalize(decl.Symbol.OriginalName),
+							IsJSValue:    true,
 						})
 					}
 				}
@@ -33,32 +35,36 @@ func ScanHIRExports(mod *hir.Module) []CrossFileExport {
 		case *hir.ClassDecl:
 			if d.Symbol != nil && d.Exported {
 				exports = append(exports, CrossFileExport{
-					GoName:    symbol.Capitalize(d.Symbol.OriginalName),
-					IsJSValue: true,
+					OriginalName: d.Symbol.OriginalName,
+					GoName:       symbol.Capitalize(d.Symbol.OriginalName),
+					IsJSValue:    true,
 				})
 			}
 		case *hir.EnumDecl:
 			if d.Symbol != nil && d.Exported {
 				exports = append(exports, CrossFileExport{
-					GoName:    symbol.Capitalize(d.Symbol.OriginalName),
-					IsJSValue: true,
+					OriginalName: d.Symbol.OriginalName,
+					GoName:       symbol.Capitalize(d.Symbol.OriginalName),
+					IsJSValue:    true,
 				})
 			}
 		case *hir.ExportDecl:
-			if d.Decl != nil {
+			if d.Decl != nil && !d.IsDefault {
 				subExports := scanExportedDecl(d)
 				exports = append(exports, subExports...)
 			}
 			for _, n := range d.Names {
 				exports = append(exports, CrossFileExport{
-					GoName:    symbol.Capitalize(n.ExportedName),
-					IsJSValue: true,
+					OriginalName: n.ExportedName,
+					GoName:       symbol.Capitalize(n.ExportedName),
+					IsJSValue:    true,
 				})
 			}
 			if d.IsDefault {
 				exports = append(exports, CrossFileExport{
-					GoName:    "Default",
-					IsJSValue: true,
+					OriginalName: "default",
+					GoName:       "Default",
+					IsJSValue:    true,
 				})
 			}
 		}
@@ -109,6 +115,9 @@ func ScanHIRTopLevelNames(mod *hir.Module) []string {
 				names = append(names, "Default")
 			}
 			if d.Decl != nil {
+				// Default exports can still emit a named top-level symbol
+				// (e.g. `export default function Foo() {}` -> `var Foo`, `var Default = Foo`).
+				// Reserve both the default alias and the named declaration.
 				scanDecl(d.Decl, true)
 			}
 		}
@@ -126,31 +135,35 @@ func scanExportedDecl(d *hir.ExportDecl) []CrossFileExport {
 	case *hir.FuncDecl:
 		if inner.Symbol != nil {
 			exports = append(exports, CrossFileExport{
-				GoName:    symbol.Capitalize(inner.Symbol.OriginalName),
-				IsJSValue: true,
+				OriginalName: inner.Symbol.OriginalName,
+				GoName:       symbol.Capitalize(inner.Symbol.OriginalName),
+				IsJSValue:    true,
 			})
 		}
 	case *hir.VarDecl:
 		for _, decl := range inner.Declarators {
 			if decl.Symbol != nil {
 				exports = append(exports, CrossFileExport{
-					GoName:    symbol.Capitalize(decl.Symbol.OriginalName),
-					IsJSValue: true,
+					OriginalName: decl.Symbol.OriginalName,
+					GoName:       symbol.Capitalize(decl.Symbol.OriginalName),
+					IsJSValue:    true,
 				})
 			}
 		}
 	case *hir.ClassDecl:
 		if inner.Symbol != nil {
 			exports = append(exports, CrossFileExport{
-				GoName:    symbol.Capitalize(inner.Symbol.OriginalName),
-				IsJSValue: true,
+				OriginalName: inner.Symbol.OriginalName,
+				GoName:       symbol.Capitalize(inner.Symbol.OriginalName),
+				IsJSValue:    true,
 			})
 		}
 	case *hir.EnumDecl:
 		if inner.Symbol != nil {
 			exports = append(exports, CrossFileExport{
-				GoName:    symbol.Capitalize(inner.Symbol.OriginalName),
-				IsJSValue: true,
+				OriginalName: inner.Symbol.OriginalName,
+				GoName:       symbol.Capitalize(inner.Symbol.OriginalName),
+				IsJSValue:    true,
 			})
 		}
 	}
