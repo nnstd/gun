@@ -481,8 +481,29 @@ func (l *Lowerer) lowerBinaryExpr(e *hir.BinaryExpr) ast.Expr {
 			callExpr(selectorExpr(right, "HasOwnProperty"),
 				callExpr(selectorExpr(goIdent("fmt"), "Sprint"), left)))
 	case hir.OpInstanceof:
-		// a instanceof B → a != nil (simplified)
-		return &ast.BinaryExpr{X: left, Op: token.NEQ, Y: goIdent("nil")}
+		if id, ok := e.Right.(*hir.Identifier); ok {
+			name := id.Name
+			if id.Sym != nil {
+				name = id.Sym.OriginalName
+			}
+			if name == "Promise" {
+				return callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"),
+					&ast.BinaryExpr{
+						X:  callExpr(selectorExpr(callExpr(selectorExpr(left, "Get"), stringLit("then")), "TypeString")),
+						Op: token.EQL,
+						Y:  stringLit("function"),
+					},
+				)
+			}
+		}
+		// Conservative fallback: only objects/functions can satisfy instanceof.
+		return callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"),
+			&ast.BinaryExpr{
+				X:  callExpr(selectorExpr(left, "TypeString")),
+				Op: token.EQL,
+				Y:  stringLit("object"),
+			},
+		)
 	}
 
 	// JSValue binary operations: jsvalue.Op(left, right)

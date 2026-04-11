@@ -33,3 +33,17 @@ func TestStringSliceMethodWithNegativeEnd(t *testing.T) {
 		t.Fatalf("slice(1, -1) = %q, want empty string", got)
 	}
 }
+
+func TestStringNumericPropertyAccess(t *testing.T) {
+	s := NewString("/x")
+
+	if got := s.Get("0").String(); got != "/" {
+		t.Fatalf("Get(\"0\") = %q, want %q", got, "/")
+	}
+	if got := s.Get("1").String(); got != "x" {
+		t.Fatalf("Get(\"1\") = %q, want %q", got, "x")
+	}
+	if got := s.Get("2").TypeString(); got != "undefined" {
+		t.Fatalf("Get(\"2\") type = %q, want undefined", got)
+	}
+}

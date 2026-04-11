@@ -48,6 +48,12 @@ func (v *JSValue) Get(name string) *JSValue {
 			return NewUndefined()
 		}
 	}
+	// For strings, numeric string keys access characters (JS: str["0"] === str[0])
+	if v.typ == TypeString {
+		if idx, ok := parseArrayIndex(name); ok {
+			return v.Index(idx)
+		}
+	}
 	// Walk own properties, then prototype chain. For getters, pass the original
 	// receiver (v) as 'this' so Map/Set size getters can access their data.
 	for cur := v; cur != nil; cur = cur.prototype {

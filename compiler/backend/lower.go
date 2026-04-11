@@ -41,6 +41,7 @@ type Lowerer struct {
 	reservedNames    map[string]bool
 	importNameMap    map[string]string
 	exportAliasMap   map[string]string
+	eagerVarInits    map[symbol.ID]bool
 	crossFileExports map[string]bool // Go names from other files (prevents .Get() dispatch)
 	initStmts        []ast.Stmt      // statements for init() function
 	pkgName          string          // Go package name
@@ -78,6 +79,7 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 		reservedNames:    reserved,
 		importNameMap:    importNameMap,
 		exportAliasMap:   exportAliasMap,
+		eagerVarInits:    make(map[symbol.ID]bool),
 		crossFileExports: cfe,
 		pkgName:          mod.Package,
 		varTypes:         make(map[string]string),
@@ -623,7 +625,7 @@ func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 				inner.Symbol.Exported = true
 			}
 			l.lowerFuncDecl(inner)
-			l.maybeEmitExportAlias(inner.Symbol.OriginalName, l.emitName(inner.Symbol))
+			l.maybeEmitExportAlias(inner.Symbol, l.emitName(inner.Symbol))
 		case *hir.VarDecl:
 			for _, decl := range inner.Declarators {
 				if decl.Symbol != nil {
@@ -633,7 +635,7 @@ func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 			l.lowerVarDecl(inner)
 			for _, decl := range inner.Declarators {
 				if decl.Symbol != nil {
-					l.maybeEmitExportAlias(decl.Symbol.OriginalName, l.emitName(decl.Symbol))
+					l.maybeEmitExportAlias(decl.Symbol, l.emitName(decl.Symbol))
 				}
 			}
 		case *hir.ClassDecl:
@@ -641,25 +643,25 @@ func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 				inner.Symbol.Exported = true
 			}
 			l.lowerClassDecl(inner)
-			l.maybeEmitExportAlias(inner.Symbol.OriginalName, l.emitName(inner.Symbol))
+			l.maybeEmitExportAlias(inner.Symbol, l.emitName(inner.Symbol))
 		case *hir.EnumDecl:
 			if inner.Symbol != nil {
 				inner.Symbol.Exported = true
 			}
 			l.lowerEnumDecl(inner)
-			l.maybeEmitExportAlias(inner.Symbol.OriginalName, l.emitName(inner.Symbol))
+			l.maybeEmitExportAlias(inner.Symbol, l.emitName(inner.Symbol))
 		case *hir.InterfaceDecl:
 			if inner.Symbol != nil {
 				inner.Symbol.Exported = true
 			}
 			l.lowerInterfaceDecl(inner)
-			l.maybeEmitExportAlias(inner.Symbol.OriginalName, l.emitName(inner.Symbol))
+			l.maybeEmitExportAlias(inner.Symbol, l.emitName(inner.Symbol))
 		case *hir.TypeAliasDecl:
 			if inner.Symbol != nil {
 				inner.Symbol.Exported = true
 			}
 			l.lowerTypeAliasDecl(inner)
-			l.maybeEmitExportAlias(inner.Symbol.OriginalName, l.emitName(inner.Symbol))
+			l.maybeEmitExportAlias(inner.Symbol, l.emitName(inner.Symbol))
 		default:
 			l.lowerDecl(d.Decl)
 		}
@@ -670,22 +672,39 @@ func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 			goName = alias
 		}
 		var rhs ast.Expr = goIdent(symbol.Sanitize(n.LocalName))
-		if sym := l.symtab.Lookup(n.LocalName); sym != nil {
+		var sym *symbol.Symbol
+		if lookedUp := l.symtab.Lookup(n.LocalName); lookedUp != nil {
+			sym = lookedUp
 			rhs = l.lowerIdentifier(&hir.Identifier{Sym: sym, Name: n.LocalName})
 		}
 		if id, ok := rhs.(*ast.Ident); ok && id.Name == goName {
+			continue
+		}
+		if sym != nil && sym.Kind == symbol.KindVariable && !l.eagerVarInits[sym.ID] {
+			l.jsvalueImport()
+			l.decls = append(l.decls, varDecl(goName, jsValuePtrType(), nil))
+			l.initStmts = append(l.initStmts, assignStmt([]ast.Expr{goIdent(goName)}, []ast.Expr{rhs}))
 			continue
 		}
 		l.decls = append(l.decls, varDecl(goName, nil, rhs))
 	}
 }
 
-func (l *Lowerer) maybeEmitExportAlias(exportedName, localGoName string) {
+func (l *Lowerer) maybeEmitExportAlias(sym *symbol.Symbol, localGoName string) {
 	if l.exportAliasMap == nil {
 		return
 	}
-	goName, ok := l.exportAliasMap[exportedName]
+	if sym == nil {
+		return
+	}
+	goName, ok := l.exportAliasMap[sym.OriginalName]
 	if !ok || goName == "" || goName == localGoName {
+		return
+	}
+	if sym.Kind == symbol.KindVariable && !l.eagerVarInits[sym.ID] {
+		l.jsvalueImport()
+		l.decls = append(l.decls, varDecl(goName, jsValuePtrType(), nil))
+		l.initStmts = append(l.initStmts, assignStmt([]ast.Expr{goIdent(goName)}, []ast.Expr{goIdent(localGoName)}))
 		return
 	}
 	l.decls = append(l.decls, varDecl(goName, nil, goIdent(localGoName)))
@@ -982,6 +1001,12 @@ func (l *Lowerer) prescan(mod *hir.Module) {
 
 	for _, d := range mod.Declarations {
 		switch d := d.(type) {
+		case *hir.VarDecl:
+			for _, decl := range d.Declarators {
+				if decl.Symbol != nil && decl.Init != nil && !hirExprReferencesName(decl.Init, decl.Symbol.OriginalName) {
+					l.eagerVarInits[decl.Symbol.ID] = true
+				}
+			}
 		case *hir.FuncDecl:
 			if d.Symbol != nil && d.Symbol.FuncInfo != nil {
 				// Already captured by HIR builder
@@ -995,6 +1020,9 @@ func (l *Lowerer) prescan(mod *hir.Module) {
 					for _, decl := range vd.Declarators {
 						if decl.Symbol != nil {
 							decl.Symbol.Exported = true
+							if decl.Init != nil && !hirExprReferencesName(decl.Init, decl.Symbol.OriginalName) {
+								l.eagerVarInits[decl.Symbol.ID] = true
+							}
 						}
 					}
 				}
@@ -2150,6 +2178,186 @@ func hirBodyUsesThis(body *hir.BlockStmt) bool {
 		}
 	}
 	return false
+}
+
+func hirExprReferencesName(expr hir.Expr, name string) bool {
+	found := false
+	var walk func(hir.Expr)
+	walk = func(e hir.Expr) {
+		if found || e == nil {
+			return
+		}
+		switch e := e.(type) {
+		case *hir.Identifier:
+			if e.Name == name || (e.Sym != nil && e.Sym.OriginalName == name) {
+				found = true
+			}
+		case *hir.BinaryExpr:
+			walk(e.Left)
+			walk(e.Right)
+		case *hir.UnaryExpr:
+			walk(e.Operand)
+		case *hir.CallExpr:
+			walk(e.Func)
+			for _, a := range e.Args {
+				walk(a)
+			}
+		case *hir.MemberExpr:
+			walk(e.Object)
+		case *hir.ComputedMemberExpr:
+			walk(e.Object)
+			walk(e.Property)
+		case *hir.AssignExpr:
+			walk(e.Left)
+			walk(e.Right)
+		case *hir.TernaryExpr:
+			walk(e.Cond)
+			walk(e.Then)
+			walk(e.Else)
+		case *hir.ArrayLiteral:
+			for _, el := range e.Elements {
+				walk(el)
+			}
+		case *hir.ObjectLiteral:
+			for _, p := range e.Properties {
+				walk(p.Value)
+			}
+		case *hir.SpreadExpr:
+			walk(e.Value)
+		case *hir.NewExpr:
+			walk(e.Callee)
+			for _, a := range e.Args {
+				walk(a)
+			}
+		case *hir.UpdateExpr:
+			walk(e.Operand)
+		case *hir.ArrowFunc:
+			if e.ExprBody != nil {
+				walk(e.ExprBody)
+			}
+			if e.Body != nil {
+				for _, st := range e.Body.Stmts {
+					walkStmtExprRefs(st, name, &found)
+					if found {
+						return
+					}
+				}
+			}
+		case *hir.FuncExpr:
+			if e.Body != nil {
+				for _, st := range e.Body.Stmts {
+					walkStmtExprRefs(st, name, &found)
+					if found {
+						return
+					}
+				}
+			}
+		case *hir.TemplateLiteral:
+			for _, p := range e.Parts {
+				walk(p)
+			}
+		case *hir.SequenceExpr:
+			for _, ex := range e.Exprs {
+				walk(ex)
+			}
+		case *hir.ParenExpr:
+			walk(e.Expr)
+		}
+	}
+	walk(expr)
+	return found
+}
+
+func walkStmtExprRefs(stmt hir.Stmt, name string, found *bool) {
+	if stmt == nil || *found {
+		return
+	}
+	switch s := stmt.(type) {
+	case *hir.ExprStmt:
+		if hirExprReferencesName(s.Expr, name) {
+			*found = true
+		}
+	case *hir.ReturnStmt:
+		if hirExprReferencesName(s.Value, name) {
+			*found = true
+		}
+	case *hir.VarDecl:
+		for _, d := range s.Declarators {
+			if hirExprReferencesName(d.Init, name) {
+				*found = true
+				return
+			}
+		}
+	case *hir.IfStmt:
+		if hirExprReferencesName(s.Cond, name) {
+			*found = true
+			return
+		}
+		for _, st := range s.Then.Stmts {
+			walkStmtExprRefs(st, name, found)
+			if *found {
+				return
+			}
+		}
+		walkStmtExprRefs(s.Else, name, found)
+	case *hir.ForStmt:
+		walkStmtExprRefs(s.Init, name, found)
+		if *found || hirExprReferencesName(s.Cond, name) || hirExprReferencesName(s.Post, name) {
+			*found = true
+			return
+		}
+		for _, st := range s.Body.Stmts {
+			walkStmtExprRefs(st, name, found)
+			if *found {
+				return
+			}
+		}
+	case *hir.BlockStmt:
+		for _, st := range s.Stmts {
+			walkStmtExprRefs(st, name, found)
+			if *found {
+				return
+			}
+		}
+	case *hir.SwitchStmt:
+		if hirExprReferencesName(s.Tag, name) {
+			*found = true
+			return
+		}
+		for _, c := range s.Cases {
+			for _, st := range c.Body {
+				walkStmtExprRefs(st, name, found)
+				if *found {
+					return
+				}
+			}
+		}
+	case *hir.TryCatchStmt:
+		if s.Try != nil {
+			for _, st := range s.Try.Stmts {
+				walkStmtExprRefs(st, name, found)
+				if *found {
+					return
+				}
+			}
+		}
+		if s.Catch != nil && s.Catch.Body != nil {
+			for _, st := range s.Catch.Body.Stmts {
+				walkStmtExprRefs(st, name, found)
+				if *found {
+					return
+				}
+			}
+		}
+		if s.Finally != nil {
+			for _, st := range s.Finally.Stmts {
+				walkStmtExprRefs(st, name, found)
+				if *found {
+					return
+				}
+			}
+		}
+	}
 }
 
 func (l *Lowerer) wrapAsJSValueFunc(params []*hir.Param, body *ast.BlockStmt) *ast.FuncLit {
