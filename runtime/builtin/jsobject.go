@@ -164,8 +164,8 @@ func DefineProperty(obj any, prop any, desc any) *JSValue {
 	}
 	if setter != nil && setter.funcVal != nil {
 		fn := setter
-		pd.Set = func(val *JSValue) {
-			fn.Call(val)
+		pd.Set = func(this *JSValue, val *JSValue) {
+			fn.Call(this, val)
 		}
 	}
 
@@ -176,6 +176,42 @@ func DefineProperty(obj any, prop any, desc any) *JSValue {
 	}
 
 	o.DefineProperty(p, pd)
+	return o
+}
+
+// DefineAccessor defines or updates an accessor property while preserving the
+// existing getter/setter counterpart if only one side is provided.
+func DefineAccessor(obj any, prop any, getter, setter *JSValue) *JSValue {
+	o := toJSValue(obj)
+	p := fmt.Sprint(prop)
+
+	desc := &PropertyDescriptor{
+		Enumerable:   true,
+		Configurable: true,
+	}
+	if existing := o.GetOwnProperty(p); existing != nil {
+		desc = &PropertyDescriptor{
+			Value:        existing.Value,
+			Writable:     existing.Writable,
+			Enumerable:   existing.Enumerable,
+			Configurable: existing.Configurable,
+			Get:          existing.Get,
+			Set:          existing.Set,
+		}
+	}
+	if getter != nil && getter.funcVal != nil {
+		fn := getter
+		desc.Get = func(this *JSValue) *JSValue {
+			return fn.Call(this)
+		}
+	}
+	if setter != nil && setter.funcVal != nil {
+		fn := setter
+		desc.Set = func(this *JSValue, val *JSValue) {
+			fn.Call(this, val)
+		}
+	}
+	o.DefineProperty(p, desc)
 	return o
 }
 

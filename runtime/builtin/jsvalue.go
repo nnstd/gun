@@ -2,7 +2,9 @@ package jsvalue
 
 import (
 	"fmt"
+	"math"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync/atomic"
 )
@@ -42,7 +44,7 @@ type JSValue struct {
 	regexVal   interface{} // stores GoRegex (see jsregex.go)
 	mapVal     *jsMap
 	setVal     *jsSet
-	isMethod   bool // true for class methods that expect this as _args[0]
+	isMethod   bool                                           // true for class methods that expect this as _args[0]
 	classInit  func(this *JSValue, args ...*JSValue) *JSValue // raw constructor for super() calls
 }
 
@@ -192,7 +194,47 @@ func (v *JSValue) Number() float64 {
 	if v == nil {
 		return 0
 	}
-	return v.numVal
+	switch v.typ {
+	case TypeNumber:
+		return v.numVal
+	case TypeBigInt:
+		return float64(v.bigIntVal)
+	case TypeBoolean:
+		if v.boolVal {
+			return 1
+		}
+		return 0
+	case TypeNull:
+		return 0
+	case TypeUndefined:
+		return math.NaN()
+	case TypeString:
+		s := strings.TrimSpace(v.strVal)
+		if s == "" {
+			return 0
+		}
+		if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
+			if n, err := strconv.ParseInt(s[2:], 16, 64); err == nil {
+				return float64(n)
+			}
+		}
+		if strings.HasPrefix(s, "0o") || strings.HasPrefix(s, "0O") {
+			if n, err := strconv.ParseInt(s[2:], 8, 64); err == nil {
+				return float64(n)
+			}
+		}
+		if strings.HasPrefix(s, "0b") || strings.HasPrefix(s, "0B") {
+			if n, err := strconv.ParseInt(s[2:], 2, 64); err == nil {
+				return float64(n)
+			}
+		}
+		if n, err := strconv.ParseFloat(s, 64); err == nil {
+			return n
+		}
+		return math.NaN()
+	default:
+		return math.NaN()
+	}
 }
 
 // Bool returns the JavaScript truthiness value. Nil-safe: returns false for nil.
@@ -276,7 +318,6 @@ func (v *JSValue) Index(i int) *JSValue {
 	return NewUndefined()
 }
 
-
 // IsArray returns true if the JSValue holds an array.
 func (v *JSValue) IsArray() bool {
 	return v != nil && v.arrayVal != nil
@@ -315,7 +356,6 @@ func (v *JSValue) Len() int {
 	}
 	return 0
 }
-
 
 // Call invokes the JSValue as a function with the given arguments.
 // Returns undefined if the value is not a function or nil.
@@ -393,7 +433,6 @@ func (v *JSValue) CallSuper(this *JSValue, args ...*JSValue) {
 	}
 }
 
-
 // From wraps an arbitrary Go value as a *JSValue.
 // If the value is already a *JSValue, it is returned as-is.
 // Go nil maps to undefined (not null) — matching JS semantics where
@@ -405,6 +444,20 @@ func From(v any) *JSValue {
 	switch val := v.(type) {
 	case *JSValue:
 		if val == nil {
+			return NewUndefined()
+		}
+		switch val.typ {
+		case TypeBoolean:
+			return NewBool(val.boolVal)
+		case TypeNumber:
+			return NewNumber(val.numVal)
+		case TypeBigInt:
+			return NewBigInt(val.bigIntVal)
+		case TypeString:
+			return NewString(val.strVal)
+		case TypeNull:
+			return NewNull()
+		case TypeUndefined:
 			return NewUndefined()
 		}
 		return val
@@ -568,7 +621,6 @@ func reflectToJSValue(rv reflect.Value) *JSValue {
 	return From(i)
 }
 
-
 // Truthy implements JavaScript truthiness semantics.
 // Returns false for nil, undefined, null, false, 0, NaN, and "".
 func Truthy(v *JSValue) bool {
@@ -588,7 +640,6 @@ func Truthy(v *JSValue) bool {
 		return true
 	}
 }
-
 
 // IsTruthy returns true if the JSValue is truthy in JavaScript semantics.
 // This is a method version of the Truthy function.
@@ -648,4 +699,3 @@ func TypeOf(a *JSValue) *JSValue {
 	}
 	return NewString(a.TypeString())
 }
-

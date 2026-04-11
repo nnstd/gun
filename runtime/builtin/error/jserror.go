@@ -157,7 +157,7 @@ func init() {
 		Get: func(_ *jsvalue.JSValue) *jsvalue.JSValue {
 			return jsvalue.NewNumber(float64(stackTraceLimit))
 		},
-		Set: func(v *jsvalue.JSValue) {
+		Set: func(_ *jsvalue.JSValue, v *jsvalue.JSValue) {
 			if v != nil && v.Type() == jsvalue.TypeNumber {
 				stackTraceLimit = int(v.Number())
 			}

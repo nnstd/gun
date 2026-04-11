@@ -204,9 +204,9 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 	// Phase 2b: assign package-global alias names for exported symbols.
 	// Entry-file exports keep their public names. Non-entry exports get
 	// file-specific aliases so flattened packages preserve module boundaries.
+	globalUsedAliases := make(map[string]int)
 	for fileName, exps := range allExports {
 		aliases := make(map[string]string)
-		usedAliases := make(map[string]int)
 		for _, exp := range exps {
 			exportName := exp.GoName
 			originalName := exp.OriginalName
@@ -215,14 +215,14 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 				if fileName != entryFile {
 					alias = fileDefaultName(fileName)
 				}
-				aliases["default"] = makeUniqueAlias(alias, usedAliases)
+				aliases["default"] = makeUniqueAlias(alias, globalUsedAliases)
 				continue
 			}
 			alias := exportName
 			if fileName != entryFile {
 				alias = fileSpecificExportName(fileName, originalName)
 			}
-			aliases[originalName] = makeUniqueAlias(alias, usedAliases)
+			aliases[originalName] = makeUniqueAlias(alias, globalUsedAliases)
 		}
 		exportAliases[fileName] = aliases
 	}

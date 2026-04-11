@@ -23,7 +23,7 @@ type PropertyDescriptor struct {
 	Enumerable   bool
 	Configurable bool
 	Get          func(*JSValue) *JSValue
-	Set          func(*JSValue)
+	Set          func(*JSValue, *JSValue)
 }
 
 // Get retrieves a property by name, walking the prototype chain.
@@ -73,7 +73,7 @@ func (v *JSValue) Set(name string, value *JSValue) {
 	// Check own properties first for an accessor descriptor
 	if v.properties != nil {
 		if desc, ok := v.properties[name]; ok && desc.Set != nil {
-			desc.Set(value)
+			desc.Set(v, value)
 			return
 		}
 	}
@@ -81,7 +81,7 @@ func (v *JSValue) Set(name string, value *JSValue) {
 	for proto := v.prototype; proto != nil; proto = proto.prototype {
 		if proto.properties != nil {
 			if desc, ok := proto.properties[name]; ok && desc.Set != nil {
-				desc.Set(value)
+				desc.Set(v, value)
 				return
 			}
 		}
@@ -145,4 +145,3 @@ func (v *JSValue) OwnKeys() []string {
 	}
 	return keys
 }
-

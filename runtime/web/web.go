@@ -201,8 +201,28 @@ func RequestFromHTTP(r *http.Request) *jsvalue.JSValue {
 		r.Body = io.NopCloser(strings.NewReader(body))
 	}
 
+	url := r.URL.String()
+	if r.URL != nil && !r.URL.IsAbs() {
+		scheme := "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		host := r.Host
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		target := r.RequestURI
+		if target == "" {
+			target = r.URL.RequestURI()
+		}
+		if target == "" {
+			target = r.URL.String()
+		}
+		url = scheme + "://" + host + target
+	}
+
 	req := Request.Call(
-		jsvalue.NewString(r.URL.String()),
+		jsvalue.NewString(url),
 		jsvalue.ObjectFrom(
 			"method", jsvalue.NewString(r.Method),
 			"headers", HeadersFromHTTP(r.Header),

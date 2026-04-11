@@ -284,6 +284,55 @@ func (l *Lowerer) lowerTaggedTemplate(e *hir.TaggedTemplateLiteral) ast.Expr {
 
 func (l *Lowerer) lowerArrayLiteral(e *hir.ArrayLiteral) ast.Expr {
 	l.jsvalueImport()
+	hasSpread := false
+	for _, elem := range e.Elements {
+		if _, ok := elem.(*hir.SpreadExpr); ok {
+			hasSpread = true
+			break
+		}
+	}
+	if hasSpread {
+		var stmts []ast.Stmt
+		stmts = append(stmts, assignDefine(
+			[]ast.Expr{goIdent("_arr")},
+			[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "NewArray"))},
+		))
+		for _, elem := range e.Elements {
+			if elem == nil {
+				continue
+			}
+			if spread, ok := elem.(*hir.SpreadExpr); ok {
+				val := l.lowerExpr(spread.Value)
+				merged := callExpr(goIdent("append"),
+					callExpr(selectorExpr(goIdent("_arr"), "Array")),
+					callExpr(selectorExpr(val, "Array")),
+				)
+				merged.Ellipsis = 1
+				newArr := callExpr(selectorExpr(goIdent("jsvalue"), "NewArray"), merged)
+				newArr.Ellipsis = 1
+				stmts = append(stmts, assignStmt([]ast.Expr{goIdent("_arr")}, []ast.Expr{newArr}))
+				continue
+			}
+			val := jsvalueWrapLit(l.lowerExpr(elem))
+			merged := callExpr(goIdent("append"),
+				callExpr(selectorExpr(goIdent("_arr"), "Array")),
+				val,
+			)
+			newArr := callExpr(selectorExpr(goIdent("jsvalue"), "NewArray"), merged)
+			newArr.Ellipsis = 1
+			stmts = append(stmts, assignStmt([]ast.Expr{goIdent("_arr")}, []ast.Expr{newArr}))
+		}
+		stmts = append(stmts, returnStmt(goIdent("_arr")))
+		return &ast.CallExpr{
+			Fun: &ast.FuncLit{
+				Type: &ast.FuncType{
+					Params:  fieldList(),
+					Results: fieldList(goField("", jsValuePtrType())),
+				},
+				Body: &ast.BlockStmt{List: stmts},
+			},
+		}
+	}
 	var args []ast.Expr
 	for _, elem := range e.Elements {
 		if elem == nil {

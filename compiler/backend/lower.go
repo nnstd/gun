@@ -454,6 +454,30 @@ func (l *Lowerer) lowerClassSetups(classRef ast.Expr, props []*hir.ClassProperty
 		if !method.IsStatic && method.IsPrivate {
 			continue
 		}
+		if method.IsGetter || method.IsSetter {
+			l.jsvalueImport()
+			var target ast.Expr = classRef
+			if !method.IsStatic {
+				target = callExpr(selectorExpr(classRef, "Get"), stringLit("prototype"))
+			}
+			var getter ast.Expr = goIdent("nil")
+			var setter ast.Expr = goIdent("nil")
+			methodVal := l.lowerClassMethodValue(method)
+			if method.IsGetter {
+				getter = methodVal
+			}
+			if method.IsSetter {
+				setter = methodVal
+			}
+			stmts = append(stmts, exprStmt(callExpr(
+				selectorExpr(goIdent("jsvalue"), "DefineAccessor"),
+				target,
+				l.lowerClassMemberKey(method.Name, method.IsPrivate, method.Computed),
+				getter,
+				setter,
+			)))
+			continue
+		}
 		if !method.IsStatic && !method.IsPrivate {
 			proto := callExpr(selectorExpr(classRef, "Get"), stringLit("prototype"))
 			stmts = append(stmts, exprStmt(callExpr(selectorExpr(proto, "Set"), l.lowerClassMemberKey(method.Name, false, method.Computed), l.lowerClassMethodValue(method))))

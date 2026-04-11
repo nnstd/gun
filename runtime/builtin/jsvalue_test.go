@@ -24,10 +24,21 @@ func TestFromMap(t *testing.T) {
 }
 
 func TestFromPassthrough(t *testing.T) {
-	orig := NewString("hello")
+	orig := NewObject()
 	v := From(orig)
 	if v != orig {
-		t.Error("From(*JSValue) should return the same pointer")
+		t.Error("From(*JSValue object) should return the same pointer")
+	}
+}
+
+func TestFromPrimitiveJSValueClonesValue(t *testing.T) {
+	orig := NewString("hello")
+	v := From(orig)
+	if v == orig {
+		t.Fatal("From(*JSValue string) should clone primitive values")
+	}
+	if got := v.String(); got != "hello" {
+		t.Fatalf("From(*JSValue string) = %q, want %q", got, "hello")
 	}
 }
 
