@@ -120,12 +120,41 @@ func TestNewExpressionWrapsArgsWithJSValue(t *testing.T) {
 	assertContains(t, out, "jsvalue.ObjectFrom(")
 }
 
-func TestAwaitStripped(t *testing.T) {
+func TestAwaitReturnsDiagnostic(t *testing.T) {
 	ts := `async function load(): Promise<string> { return await fetch(); }`
-	out := compile(t, ts)
-	assertNotContains(t, out, "await")
-	assertNotContains(t, out, "async")
-	assertContains(t, out, "func")
+	_, err := Compile([]byte(ts), "main", "", false)
+	assertErrorContains(t, err, "async function declarations are not implemented yet")
+	assertErrorContains(t, err, "await expressions are not implemented yet")
+}
+
+func TestAsyncObjectMethodStillRejectedOnLegacyCompile(t *testing.T) {
+	ts := `const o = { async load() { return 1; } }`
+	_, err := Compile([]byte(ts), "main", "", false)
+	assertErrorContains(t, err, "async object methods are not implemented yet")
+}
+
+func TestAwaitInParameterDefaultReturnsDiagnostic(t *testing.T) {
+	ts := `function load(value = await fetch()) { return value; }`
+	_, err := Compile([]byte(ts), "main", "", false)
+	assertErrorContains(t, err, "await expressions are not implemented yet")
+}
+
+func TestAwaitInDestructuringDefaultReturnsDiagnostic(t *testing.T) {
+	ts := `function load({ value = await fetch() }) { return value; }`
+	_, err := Compile([]byte(ts), "main", "", false)
+	assertErrorContains(t, err, "await expressions are not implemented yet")
+}
+
+func TestAsyncClassExpressionMethodStillRejectedOnLegacyCompile(t *testing.T) {
+	ts := `const Loader = class { async load() { return 1; } }`
+	_, err := Compile([]byte(ts), "main", "", false)
+	assertErrorContains(t, err, "async class methods are not implemented yet")
+}
+
+func TestAwaitInClassExpressionMethodDefaultReturnsDiagnostic(t *testing.T) {
+	ts := `const Loader = class { load(value = await fetch()) { return value; } }`
+	_, err := Compile([]byte(ts), "main", "", false)
+	assertErrorContains(t, err, "await expressions are not implemented yet")
 }
 
 func TestNewMemberExpression(t *testing.T) {

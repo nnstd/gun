@@ -145,7 +145,7 @@ func (b *Builder) buildExpr(node *sitter.Node) Expr {
 
 	case "await_expression":
 		if node.NamedChildCount() > 0 {
-			return &AwaitExpr{Value: b.buildExpr(node.NamedChild(0))}
+			return &AwaitExpr{Value: b.buildExpr(node.NamedChild(0)), Span: b.span(node)}
 		}
 		return nil
 
@@ -305,10 +305,17 @@ func (b *Builder) buildObjectLiteral(node *sitter.Node) *ObjectLiteral {
 			if bodyNode != nil {
 				body = b.buildBlock(bodyNode)
 			}
+			isAsync := false
+			for j := uint(0); j < child.ChildCount(); j++ {
+				if child.Child(j).Kind() == "async" {
+					isAsync = true
+					break
+				}
+			}
 			ol.Properties = append(ol.Properties, &Property{
 				KeyName: name,
 				Key:     &Literal{Kind: LitString, Value: name},
-				Value:   &ArrowFunc{Params: params, Body: body},
+				Value:   &ArrowFunc{Params: params, Body: body, IsAsync: isAsync, Span: b.span(child)},
 				Method:  true,
 			})
 		case "spread_element":

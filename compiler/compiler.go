@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tcontext "github.com/nnstd/gun/compiler/context"
+	"github.com/nnstd/gun/compiler/hir"
 	"github.com/nnstd/gun/compiler/pipeline"
 )
 
@@ -53,6 +54,11 @@ func CompileWithExports(source []byte, pkgName, moduleName, currentFile string, 
 		return nil, fmt.Errorf("parse: %w", err)
 	}
 	defer tree.Close()
+
+	hirMod := hir.BuildModuleWithPath(tree.RootNode(), source, pkgName, currentFile)
+	if err := hir.AsyncPhase0Error(hirMod); err != nil {
+		return nil, err
+	}
 
 	transformer := newTransformer(source, pkgName, moduleName, samePackageImports)
 

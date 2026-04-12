@@ -393,7 +393,7 @@ func (l *Lowerer) lowerObjectLiteral(e *hir.ObjectLiteral) ast.Expr {
 	var elts []ast.Expr
 	for _, prop := range e.Properties {
 		key := stringLit(prop.KeyName)
-		value := l.lowerExpr(prop.Value)
+		value := l.lowerObjectPropertyValue(prop)
 		elts = append(elts, &ast.KeyValueExpr{Key: key, Value: value})
 	}
 	mapType := &ast.MapType{
@@ -415,7 +415,7 @@ func (l *Lowerer) lowerObjectWithComputed(e *hir.ObjectLiteral) ast.Expr {
 		[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "NewObject"))},
 	))
 	for _, prop := range e.Properties {
-		value := l.lowerExpr(prop.Value)
+		value := l.lowerObjectPropertyValue(prop)
 		var keyExpr ast.Expr
 		if prop.Computed {
 			keyExpr = callExpr(selectorExpr(goIdent("fmt"), "Sprint"), l.lowerExpr(prop.Key))
@@ -462,7 +462,7 @@ func (l *Lowerer) lowerObjectWithSpreads(e *hir.ObjectLiteral) ast.Expr {
 			args = append(args, l.lowerExpr(spread.Value))
 		} else {
 			key := stringLit(prop.KeyName)
-			value := l.lowerExpr(prop.Value)
+			value := l.lowerObjectPropertyValue(prop)
 			currentElts = append(currentElts, &ast.KeyValueExpr{Key: key, Value: value})
 		}
 	}
@@ -475,6 +475,45 @@ func (l *Lowerer) lowerObjectWithSpreads(e *hir.ObjectLiteral) ast.Expr {
 		return args[0]
 	}
 	return callExpr(selectorExpr(goIdent("jsvalue"), "Assign"), args...)
+}
+
+func (l *Lowerer) lowerObjectPropertyValue(prop *hir.Property) ast.Expr {
+	if prop == nil || prop.Value == nil {
+		return callExpr(selectorExpr(goIdent("jsvalue"), "NewUndefined"))
+	}
+	if !prop.Method {
+		return l.lowerExpr(prop.Value)
+	}
+	switch fn := prop.Value.(type) {
+	case *hir.ArrowFunc:
+		body := fn.Body
+		if body == nil {
+			body = &hir.BlockStmt{Stmts: []hir.Stmt{&hir.ReturnStmt{Value: fn.ExprBody}}}
+		}
+		var methodBody *ast.BlockStmt
+		if fn.IsAsync {
+			methodBody = l.lowerAsyncFuncBody(fn.Params, body, 1, true)
+		} else {
+			methodBody = l.lowerMethodBody(fn.Params, body)
+		}
+		methodLit := l.wrapAsJSValueFunc(fn.Params, methodBody)
+		return callExpr(selectorExpr(
+			callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), methodLit),
+			"MarkAsMethod"))
+	case *hir.FuncExpr:
+		var methodBody *ast.BlockStmt
+		if fn.IsAsync {
+			methodBody = l.lowerAsyncFuncBody(fn.Params, fn.Body, 1, true)
+		} else {
+			methodBody = l.lowerMethodBody(fn.Params, fn.Body)
+		}
+		methodLit := l.wrapAsJSValueFunc(fn.Params, methodBody)
+		return callExpr(selectorExpr(
+			callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), methodLit),
+			"MarkAsMethod"))
+	default:
+		return l.lowerExpr(prop.Value)
+	}
 }
 
 func (l *Lowerer) lowerBinaryExpr(e *hir.BinaryExpr) ast.Expr {
@@ -1372,14 +1411,22 @@ func (l *Lowerer) lowerArrowFunc(e *hir.ArrowFunc) ast.Expr {
 
 	var body *ast.BlockStmt
 	if e.Body != nil {
-		body = l.lowerFuncBody(e.Params, e.Body)
+		if e.IsAsync {
+			body = l.lowerAsyncFuncBody(e.Params, e.Body, 0, false)
+		} else {
+			body = l.lowerFuncBody(e.Params, e.Body)
+		}
 	} else if e.ExprBody != nil {
 		// Concise body: () => expr → wrap as return statement in HIR body
 		val := e.ExprBody
 		hirBody := &hir.BlockStmt{
 			Stmts: []hir.Stmt{&hir.ReturnStmt{Value: val}},
 		}
-		body = l.lowerFuncBody(e.Params, hirBody)
+		if e.IsAsync {
+			body = l.lowerAsyncFuncBody(e.Params, hirBody, 0, false)
+		} else {
+			body = l.lowerFuncBody(e.Params, hirBody)
+		}
 	} else {
 		body = blockStmt()
 	}
@@ -1394,7 +1441,9 @@ func (l *Lowerer) lowerFuncExpr(e *hir.FuncExpr) ast.Expr {
 	// Regular function expressions get their own `this` binding (unlike arrow functions).
 	// If the body references `this`, use lowerMethodBody to unpack it from _args[0].
 	var body *ast.BlockStmt
-	if e.Body != nil && hirBodyUsesThis(e.Body) {
+	if e.IsAsync {
+		body = l.lowerAsyncFuncBody(e.Params, e.Body, 0, e.Body != nil && hirBodyUsesThis(e.Body))
+	} else if e.Body != nil && hirBodyUsesThis(e.Body) {
 		body = l.lowerMethodBody(e.Params, e.Body)
 	} else {
 		body = l.lowerFuncBody(e.Params, e.Body)

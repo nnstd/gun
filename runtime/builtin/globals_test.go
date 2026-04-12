@@ -21,6 +21,22 @@ func TestArrayGlobalExports(t *testing.T) {
 	}
 }
 
+func TestArrayPrototypeIsReachableFromGlobal(t *testing.T) {
+	proto := Array.Get("prototype")
+	if proto == nil || proto.TypeString() == "undefined" {
+		t.Fatal("expected Array.prototype to be reachable from global Array")
+	}
+	slice := proto.Get("slice")
+	if slice == nil || slice.TypeString() != "function" {
+		t.Fatal("expected Array.prototype.slice to be reachable from global Array")
+	}
+	arr := NewArray(NewString("a"), NewString("b"))
+	res := slice.MethodCall("call", arr)
+	if res.Len() != 2 || res.Index(0).String() != "a" || res.Index(1).String() != "b" {
+		t.Fatalf("slice.call(arr) mismatch: got %q", res.String())
+	}
+}
+
 func TestNumberGlobalExports(t *testing.T) {
 	if got := Number.Call(NewString("42")).Number(); got != 42 {
 		t.Fatalf("Number(\"42\") = %v, want 42", got)

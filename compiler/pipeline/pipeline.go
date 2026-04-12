@@ -85,6 +85,9 @@ func (p *Pipeline) CompileTreeWithPath(root *sitter.Node, source []byte, pkgName
 	if p.OnHIR != nil {
 		p.OnHIR(hirMod)
 	}
+	if err := hir.AsyncPipelinePhase1Error(hirMod); err != nil {
+		return nil, err
+	}
 
 	// Stage 2: Lower to MIR
 	mirMod := mir.Lower(hirMod)
@@ -126,6 +129,9 @@ func (p *Pipeline) CompileTreeWithPath(root *sitter.Node, source []byte, pkgName
 
 // CompileHIR compiles from an already-built HIR module.
 func (p *Pipeline) CompileHIR(hirMod *hir.Module, moduleName string, samePackageImports bool) ([]byte, error) {
+	if err := hir.AsyncPipelinePhase1Error(hirMod); err != nil {
+		return nil, err
+	}
 	goFile := backend.Lower(hirMod, p.Ctx, moduleName, samePackageImports)
 	return backend.GenerateWithSource(goFile, hirMod.SourcePath, hirMod.SourceSize)
 }
@@ -146,6 +152,9 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 		}
 		hirMod := hir.BuildModuleWithPath(tree.RootNode(), source, pkgName, name)
 		tree.Close()
+		if err := hir.AsyncPipelinePhase1Error(hirMod); err != nil {
+			return nil, err
+		}
 		hirModules[name] = hirMod
 		allExports[name] = backend.ScanHIRExports(hirMod)
 		allNames[name] = backend.ScanHIRTopLevelNames(hirMod)

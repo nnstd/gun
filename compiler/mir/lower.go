@@ -24,6 +24,9 @@ type lowerer struct {
 func (l *lowerer) lower() *Module {
 	l.module = &Module{
 		Package: l.hirMod.Package,
+		Async: AsyncIndex{
+			BySymbol: make(map[symbol.ID]AsyncFuncInfo),
+		},
 	}
 
 	for _, imp := range l.hirMod.Imports {
@@ -78,6 +81,10 @@ func (l *lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 		Symbol:   d.Symbol,
 		Exported: d.Exported,
 		IsMain:   d.Symbol != nil && (d.Symbol.OriginalName == "main" || d.Symbol.OriginalName == "init"),
+		Async: AsyncFuncInfo{
+			Declared:   d.IsAsync,
+			AwaitCount: countAwaitParams(d.Params) + countAwaitBlock(d.Body),
+		},
 	}
 
 	// Parameters
@@ -94,6 +101,9 @@ func (l *lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 	fb.buildBody(d.Body)
 
 	l.module.Functions = append(l.module.Functions, fn)
+	if d.Symbol != nil && (fn.Async.Declared || fn.Async.AwaitCount > 0) {
+		l.module.Async.BySymbol[d.Symbol.ID] = fn.Async
+	}
 }
 
 func (l *lowerer) lowerVarDecl(d *hir.VarDecl) {
@@ -182,10 +192,10 @@ func (l *lowerer) lowerExportDecl(d *hir.ExportDecl) {
 
 type funcBuilder struct {
 	*lowerer
-	fn       *Function
-	current  *BasicBlock
-	breakTo  *BasicBlock // target for break statements
-	contTo   *BasicBlock // target for continue statements
+	fn      *Function
+	current *BasicBlock
+	breakTo *BasicBlock // target for break statements
+	contTo  *BasicBlock // target for continue statements
 }
 
 func (fb *funcBuilder) buildBody(body *hir.BlockStmt) {
@@ -596,6 +606,10 @@ func (fb *funcBuilder) lowerSwitch(s *hir.SwitchStmt) {
 }
 
 func (fb *funcBuilder) lowerTryCatch(s *hir.TryCatchStmt) {
+	if fb.fn != nil && (fb.fn.Async.Declared || fb.fn.Async.AwaitCount > 0) {
+		fb.emit(&ProtectedTryCatchStmt{Node: s})
+		return
+	}
 	// try/catch is desugared:
 	// - finally → DeferStmt
 	// - catch → DeferStmt with recover
@@ -721,6 +735,10 @@ func (l *lowerer) lowerExpr(e hir.Expr) Expr {
 
 		switch f := e.(type) {
 		case *hir.ArrowFunc:
+			fn.Async = AsyncFuncInfo{
+				Declared:   f.IsAsync,
+				AwaitCount: countAwaitParams(f.Params) + countAwaitBlock(f.Body) + countAwaitExpr(f.ExprBody),
+			}
 			for _, p := range f.Params {
 				fn.Params = append(fn.Params, &Param{Symbol: p.Symbol, Rest: p.Rest})
 			}
@@ -733,6 +751,10 @@ func (l *lowerer) lowerExpr(e hir.Expr) Expr {
 				entry.Term = &ReturnTerm{Value: l.lowerExpr(f.ExprBody)}
 			}
 		case *hir.FuncExpr:
+			fn.Async = AsyncFuncInfo{
+				Declared:   f.IsAsync,
+				AwaitCount: countAwaitParams(f.Params) + countAwaitBlock(f.Body),
+			}
 			for _, p := range f.Params {
 				fn.Params = append(fn.Params, &Param{Symbol: p.Symbol, Rest: p.Rest})
 			}
@@ -765,6 +787,199 @@ func (l *lowerer) lowerExpr(e hir.Expr) Expr {
 		return &IdentExpr{Name: e.Meta + "." + e.Property}
 	default:
 		return &NilExpr{}
+	}
+}
+
+func countAwaitBlock(b *hir.BlockStmt) int {
+	if b == nil {
+		return 0
+	}
+	total := 0
+	for _, st := range b.Stmts {
+		total += countAwaitStmt(st)
+	}
+	return total
+}
+
+func countAwaitParams(params []*hir.Param) int {
+	total := 0
+	for _, p := range params {
+		if p == nil {
+			continue
+		}
+		total += countAwaitPattern(p.Pattern)
+		total += countAwaitExpr(p.Default)
+	}
+	return total
+}
+
+func countAwaitPattern(p hir.Pattern) int {
+	switch p := p.(type) {
+	case *hir.ObjectPattern:
+		total := 0
+		for _, prop := range p.Properties {
+			total += countAwaitPattern(prop.Pattern)
+			total += countAwaitExpr(prop.Default)
+		}
+		return total
+	case *hir.ArrayPattern:
+		total := 0
+		for _, elem := range p.Elements {
+			if elem == nil {
+				continue
+			}
+			total += countAwaitPattern(elem.Pattern)
+			total += countAwaitExpr(elem.Default)
+		}
+		return total
+	default:
+		return 0
+	}
+}
+
+func countAwaitStmt(s hir.Stmt) int {
+	switch s := s.(type) {
+	case *hir.BlockStmt:
+		return countAwaitBlock(s)
+	case *hir.ExprStmt:
+		return countAwaitExpr(s.Expr)
+	case *hir.ReturnStmt:
+		return countAwaitExpr(s.Value)
+	case *hir.IfStmt:
+		return countAwaitExpr(s.Cond) + countAwaitBlock(s.Then) + countAwaitStmt(s.Else)
+	case *hir.ForStmt:
+		return countAwaitStmt(s.Init) + countAwaitExpr(s.Cond) + countAwaitExpr(s.Post) + countAwaitBlock(s.Body)
+	case *hir.ForInStmt:
+		return countAwaitExpr(s.Value) + countAwaitBlock(s.Body)
+	case *hir.ForOfStmt:
+		return countAwaitExpr(s.Value) + countAwaitBlock(s.Body)
+	case *hir.WhileStmt:
+		return countAwaitExpr(s.Cond) + countAwaitBlock(s.Body)
+	case *hir.DoWhileStmt:
+		return countAwaitBlock(s.Body) + countAwaitExpr(s.Cond)
+	case *hir.SwitchStmt:
+		total := countAwaitExpr(s.Tag)
+		for _, c := range s.Cases {
+			total += countAwaitExpr(c.Value)
+			for _, st := range c.Body {
+				total += countAwaitStmt(st)
+			}
+		}
+		return total
+	case *hir.TryCatchStmt:
+		total := countAwaitBlock(s.Try) + countAwaitBlock(s.Finally)
+		if s.Catch != nil {
+			total += countAwaitBlock(s.Catch.Body)
+		}
+		return total
+	case *hir.ThrowStmt:
+		return countAwaitExpr(s.Value)
+	case *hir.LabeledStmt:
+		return countAwaitStmt(s.Stmt)
+	case *hir.VarDecl:
+		total := 0
+		for _, d := range s.Declarators {
+			total += countAwaitPattern(d.Pattern)
+			total += countAwaitExpr(d.Init)
+		}
+		return total
+	default:
+		return 0
+	}
+}
+
+func countAwaitExpr(e hir.Expr) int {
+	switch e := e.(type) {
+	case nil:
+		return 0
+	case *hir.AwaitExpr:
+		return 1 + countAwaitExpr(e.Value)
+	case *hir.ArrayLiteral:
+		total := 0
+		for _, el := range e.Elements {
+			total += countAwaitExpr(el)
+		}
+		return total
+	case *hir.ObjectLiteral:
+		total := 0
+		for _, p := range e.Properties {
+			total += countAwaitExpr(p.Key)
+			total += countAwaitExpr(p.Value)
+		}
+		return total
+	case *hir.TemplateLiteral:
+		total := 0
+		for _, part := range e.Parts {
+			total += countAwaitExpr(part)
+		}
+		return total
+	case *hir.TaggedTemplateLiteral:
+		return countAwaitExpr(e.Tag) + countAwaitExpr(e.Template)
+	case *hir.BinaryExpr:
+		return countAwaitExpr(e.Left) + countAwaitExpr(e.Right)
+	case *hir.UnaryExpr:
+		return countAwaitExpr(e.Operand)
+	case *hir.UpdateExpr:
+		return countAwaitExpr(e.Operand)
+	case *hir.AssignExpr:
+		return countAwaitExpr(e.Left) + countAwaitExpr(e.Right)
+	case *hir.CallExpr:
+		total := countAwaitExpr(e.Func)
+		for _, arg := range e.Args {
+			total += countAwaitExpr(arg)
+		}
+		return total
+	case *hir.NewExpr:
+		total := countAwaitExpr(e.Callee)
+		for _, arg := range e.Args {
+			total += countAwaitExpr(arg)
+		}
+		return total
+	case *hir.ClassExpr:
+		total := countAwaitExpr(e.Parent)
+		if e.Constructor != nil {
+			total += countAwaitBlock(e.Constructor.Body)
+		}
+		for _, m := range e.Methods {
+			total += countAwaitParams(m.Params)
+			total += countAwaitBlock(m.Body)
+		}
+		for _, p := range e.Properties {
+			total += countAwaitExpr(p.Value)
+			total += countAwaitExpr(p.Computed)
+		}
+		for _, expr := range e.StaticInits {
+			total += countAwaitExpr(expr)
+		}
+		return total
+	case *hir.MemberExpr:
+		return countAwaitExpr(e.Object)
+	case *hir.ComputedMemberExpr:
+		return countAwaitExpr(e.Object) + countAwaitExpr(e.Property)
+	case *hir.TernaryExpr:
+		return countAwaitExpr(e.Cond) + countAwaitExpr(e.Then) + countAwaitExpr(e.Else)
+	case *hir.ArrowFunc:
+		return countAwaitBlock(e.Body) + countAwaitExpr(e.ExprBody)
+	case *hir.FuncExpr:
+		return countAwaitBlock(e.Body)
+	case *hir.SpreadExpr:
+		return countAwaitExpr(e.Value)
+	case *hir.SequenceExpr:
+		total := 0
+		for _, ex := range e.Exprs {
+			total += countAwaitExpr(ex)
+		}
+		return total
+	case *hir.YieldExpr:
+		return countAwaitExpr(e.Value)
+	case *hir.TypeAssertExpr:
+		return countAwaitExpr(e.Expr)
+	case *hir.NonNullExpr:
+		return countAwaitExpr(e.Expr)
+	case *hir.ParenExpr:
+		return countAwaitExpr(e.Expr)
+	default:
+		return 0
 	}
 }
 

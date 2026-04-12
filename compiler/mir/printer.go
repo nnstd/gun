@@ -84,6 +84,9 @@ func (p *printer) printFunc(fn *Function) {
 	if fn.IsMain {
 		flags += " (main)"
 	}
+	if fn.Async.Declared {
+		flags += " (async)"
+	}
 
 	p.write("func %s(%s)%s {", name, strings.Join(params, ", "), flags)
 	p.in()
@@ -138,6 +141,8 @@ func (p *printer) printStmt(s Stmt) {
 		}
 	case *DeferStmt:
 		p.write("defer %s", p.exprStr(s.Call))
+	case *ProtectedTryCatchStmt:
+		p.write("protected-try")
 	default:
 		p.write("(unknown stmt)")
 	}

@@ -252,9 +252,7 @@ func (l *Lowerer) lowerObjectDestructuring(pat *hir.ObjectPattern, init ast.Expr
 			defVal := l.lowerExpr(prop.Default)
 			defVal = jsvalueWrapLit(defVal)
 			stmts = append(stmts, &ast.IfStmt{
-				Cond: &ast.BinaryExpr{
-					X: goIdent(defTmp), Op: token.EQL, Y: goIdent("nil"),
-				},
+				Cond: l.isNilOrUndefined(goIdent(defTmp)),
 				Body: blockStmt(assignStmt(
 					[]ast.Expr{goIdent(defTmp)},
 					[]ast.Expr{defVal},
@@ -309,9 +307,7 @@ func (l *Lowerer) lowerArrayDestructuring(pat *hir.ArrayPattern, init ast.Expr, 
 			defVal := l.lowerExpr(elem.Default)
 			defVal = jsvalueWrapLit(defVal)
 			stmts = append(stmts, &ast.IfStmt{
-				Cond: &ast.BinaryExpr{
-					X: goIdent(defTmp), Op: token.EQL, Y: goIdent("nil"),
-				},
+				Cond: l.isNilOrUndefined(goIdent(defTmp)),
 				Body: blockStmt(assignStmt(
 					[]ast.Expr{goIdent(defTmp)},
 					[]ast.Expr{defVal},
@@ -340,6 +336,18 @@ func (l *Lowerer) lowerArrayDestructuring(pat *hir.ArrayPattern, init ast.Expr, 
 		))
 	}
 	return stmts
+}
+
+func (l *Lowerer) isNilOrUndefined(expr ast.Expr) ast.Expr {
+	return &ast.BinaryExpr{
+		X:  &ast.BinaryExpr{X: expr, Op: token.EQL, Y: goIdent("nil")},
+		Op: token.LOR,
+		Y: &ast.BinaryExpr{
+			X:  callExpr(selectorExpr(expr, "TypeString")),
+			Op: token.EQL,
+			Y:  stringLit("undefined"),
+		},
+	}
 }
 
 func (l *Lowerer) lowerIfStmt(s *hir.IfStmt) *ast.IfStmt {

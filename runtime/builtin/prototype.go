@@ -2,7 +2,9 @@ package jsvalue
 
 // safeArg returns args[i] or nil if out of bounds.
 func safeArg(args []*JSValue, i int) *JSValue {
-	if i < len(args) { return args[i] }
+	if i < len(args) {
+		return args[i]
+	}
 	return nil
 }
 
@@ -71,15 +73,32 @@ func init() {
 	initArrayPrototype()
 	initMapPrototype()
 	initSetPrototype()
+
+	// Global constructor objects are initialized in a separate init and may run
+	// before this one. Patch their prototype properties here so constructor
+	// property access is stable regardless of package init order.
+	if Object != nil {
+		Object.Set("prototype", ObjectPrototype)
+	}
+	if Array != nil {
+		Array.Set("prototype", ArrayPrototype)
+	}
+	if Number != nil {
+		Number.Set("prototype", NumberPrototype)
+	}
 }
 
 func initFunctionPrototype() {
 	bindFn := NewFunction(func(args ...*JSValue) *JSValue {
-		if len(args) < 2 { return NewUndefined() }
+		if len(args) < 2 {
+			return NewUndefined()
+		}
 		origFn := args[0]
 		thisArg := args[1]
 		boundArgs := args[2:]
-		if origFn == nil || origFn.funcVal == nil { return NewUndefined() }
+		if origFn == nil || origFn.funcVal == nil {
+			return NewUndefined()
+		}
 		return NewFunction(func(callArgs ...*JSValue) *JSValue {
 			all := make([]*JSValue, 0, 1+len(boundArgs)+len(callArgs))
 			all = append(all, thisArg)
@@ -94,9 +113,13 @@ func initFunctionPrototype() {
 	})
 
 	callFn := NewFunction(func(args ...*JSValue) *JSValue {
-		if len(args) < 1 { return NewUndefined() }
+		if len(args) < 1 {
+			return NewUndefined()
+		}
 		origFn := args[0]
-		if origFn == nil || origFn.funcVal == nil { return NewUndefined() }
+		if origFn == nil || origFn.funcVal == nil {
+			return NewUndefined()
+		}
 		return origFn.funcVal(args[1:]...)
 	})
 	callFn.MarkAsMethod()
@@ -105,11 +128,17 @@ func initFunctionPrototype() {
 	})
 
 	applyFn := NewFunction(func(args ...*JSValue) *JSValue {
-		if len(args) < 1 { return NewUndefined() }
+		if len(args) < 1 {
+			return NewUndefined()
+		}
 		origFn := args[0]
-		if origFn == nil || origFn.funcVal == nil { return NewUndefined() }
+		if origFn == nil || origFn.funcVal == nil {
+			return NewUndefined()
+		}
 		callArgs := []*JSValue{}
-		if origFn.isMethod && len(args) >= 2 { callArgs = append(callArgs, args[1]) }
+		if origFn.isMethod && len(args) >= 2 {
+			callArgs = append(callArgs, args[1])
+		}
 		if len(args) >= 3 && args[2] != nil && args[2].arrayVal != nil {
 			callArgs = append(callArgs, args[2].arrayVal...)
 		}
@@ -130,13 +159,15 @@ func initObjectPrototype() {
 	})
 	ObjectPrototype.DefineProperty("hasOwnProperty", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
-			if len(args) >= 2 { return NewBool(args[0].HasOwnProperty(args[1].String())) }
+			if len(args) >= 2 {
+				return NewBool(args[0].HasOwnProperty(args[1].String()))
+			}
 			return NewBool(false)
 		}).MarkAsMethod(),
 		Writable: true, Enumerable: false, Configurable: true,
 	})
 	ObjectPrototype.DefineProperty("valueOf", &PropertyDescriptor{
-		Value: NewFunction(func(args ...*JSValue) *JSValue { return NewUndefined() }),
+		Value:    NewFunction(func(args ...*JSValue) *JSValue { return NewUndefined() }),
 		Writable: true, Enumerable: false, Configurable: true,
 	})
 }
@@ -144,7 +175,9 @@ func initObjectPrototype() {
 func initBooleanPrototype() {
 	BooleanPrototype.DefineProperty("toString", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
-			if len(args) > 0 && args[0] != nil { return NewString(args[0].String()) }
+			if len(args) > 0 && args[0] != nil {
+				return NewString(args[0].String())
+			}
 			return NewString("false")
 		}).MarkAsMethod(),
 		Writable: true, Enumerable: false, Configurable: true,

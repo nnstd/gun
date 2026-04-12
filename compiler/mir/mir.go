@@ -10,7 +10,10 @@
 // by the backend, or further transformed into SSA form for optimization.
 package mir
 
-import "github.com/nnstd/gun/compiler/symbol"
+import (
+	"github.com/nnstd/gun/compiler/hir"
+	"github.com/nnstd/gun/compiler/symbol"
+)
 
 // --------------------------------------------------------------------
 // Module
@@ -22,6 +25,7 @@ type Module struct {
 	Functions []*Function
 	Globals   []*Global
 	Imports   []*Import
+	Async     AsyncIndex
 }
 
 // Import is a Go import declaration.
@@ -50,13 +54,25 @@ type Function struct {
 	// Metadata
 	Exported bool
 	IsMain   bool // true for main/init (Go func, not JSValue)
+	Async    AsyncFuncInfo
+}
+
+// AsyncIndex summarizes async-related facts gathered during MIR lowering.
+type AsyncIndex struct {
+	BySymbol map[symbol.ID]AsyncFuncInfo
+}
+
+// AsyncFuncInfo records minimal async metadata for a lowered function.
+type AsyncFuncInfo struct {
+	Declared   bool
+	AwaitCount int
 }
 
 // Param is a function parameter.
 type Param struct {
 	Symbol  *symbol.Symbol
-	Rest    bool   // ...args
-	Default Expr   // default value (nil if required)
+	Rest    bool // ...args
+	Default Expr // default value (nil if required)
 }
 
 // Variable is a local variable.
@@ -163,11 +179,18 @@ type DeferStmt struct {
 	Call Expr // the function call to defer
 }
 
-func (*AssignStmt) mirStmt() {}
-func (*StoreStmt) mirStmt()  {}
-func (*ExprStmt) mirStmt()   {}
-func (*DeclStmt) mirStmt()   {}
-func (*DeferStmt) mirStmt()  {}
+// ProtectedTryCatchStmt preserves try/catch/finally structure for async
+// functions until async-aware lowering can consume it.
+type ProtectedTryCatchStmt struct {
+	Node *hir.TryCatchStmt
+}
+
+func (*AssignStmt) mirStmt()            {}
+func (*StoreStmt) mirStmt()             {}
+func (*ExprStmt) mirStmt()              {}
+func (*DeclStmt) mirStmt()              {}
+func (*DeferStmt) mirStmt()             {}
+func (*ProtectedTryCatchStmt) mirStmt() {}
 
 // --------------------------------------------------------------------
 // Expressions
@@ -250,7 +273,7 @@ type UnaryExpr struct {
 type UnaryOp int
 
 const (
-	OpNot    UnaryOp = iota
+	OpNot UnaryOp = iota
 	OpNeg
 	OpPos
 	OpBitNot

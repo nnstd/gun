@@ -134,6 +134,7 @@ type ClassMethod struct {
 	Name      string // method name (original TS name)
 	Params    []*Param
 	Body      *BlockStmt
+	IsAsync   bool
 	IsStatic  bool
 	IsGetter  bool
 	IsSetter  bool
@@ -640,6 +641,7 @@ type SequenceExpr struct {
 // AwaitExpr is an await expression.
 type AwaitExpr struct {
 	Value Expr
+	Span  *SourceSpan
 }
 
 // YieldExpr is a yield expression (generators).

@@ -123,9 +123,10 @@ func (b *Builder) buildStmt(node *sitter.Node) Stmt {
 				Declarators: []*Declarator{{
 					Symbol: d.Symbol,
 					Init: &ArrowFunc{
-						Params: d.Params,
-						Body:   d.Body,
-						Span:   d.Span,
+						Params:  d.Params,
+						Body:    d.Body,
+						IsAsync: d.IsAsync,
+						Span:    d.Span,
 					},
 				}},
 			}

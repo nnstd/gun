@@ -94,6 +94,47 @@ func TestLowerVariable(t *testing.T) {
 	}
 }
 
+func TestLowerAsyncFunctionMetadata(t *testing.T) {
+	mod := lowerToMIR(t, `async function load() { return await fetch(); }`)
+	if len(mod.Functions) == 0 {
+		t.Fatal("expected at least one function")
+	}
+	fn := mod.Functions[0]
+	if !fn.Async.Declared {
+		t.Fatal("expected async metadata on function")
+	}
+	if fn.Async.AwaitCount != 1 {
+		t.Fatalf("await count = %d, want 1", fn.Async.AwaitCount)
+	}
+	if got := mod.Async.BySymbol[fn.Symbol.ID].AwaitCount; got != 1 {
+		t.Fatalf("module async index await count = %d, want 1", got)
+	}
+}
+
+func TestLowerAsyncTryCatchPreservesProtectedRegion(t *testing.T) {
+	mod := lowerToMIR(t, `
+		async function load() {
+			try {
+				return await fetch();
+			} catch (err) {
+				return err;
+			}
+		}
+	`)
+	fn := mod.Functions[0]
+	found := false
+	for _, b := range fn.Blocks {
+		for _, st := range b.Stmts {
+			if _, ok := st.(*ProtectedTryCatchStmt); ok {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected protected try/catch stmt in async MIR")
+	}
+}
+
 func TestLowerIfCFG(t *testing.T) {
 	mod := lowerToMIR(t, `
 		function f() {

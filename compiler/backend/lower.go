@@ -56,6 +56,7 @@ type Lowerer struct {
 	syntheticCounter  int
 	needsBunWait      bool
 	sourcePath        string
+	asyncTempSymbols  []*symbol.Symbol
 }
 
 // Lower converts an HIR module to a Go AST file.
@@ -240,10 +241,15 @@ func (l *Lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 
 	// All other functions become jsvalue.NewFunction vars
 	l.jsvalueImport()
-	body := l.lowerFuncBody(d.Params, d.Body)
+	var body *ast.BlockStmt
 	methodLike := d.Body != nil && hirBodyUsesThis(d.Body)
-	if methodLike {
-		body = l.lowerMethodBody(d.Params, d.Body)
+	if d.IsAsync {
+		body = l.lowerAsyncFuncBody(d.Params, d.Body, 0, false)
+	} else {
+		body = l.lowerFuncBody(d.Params, d.Body)
+		if methodLike {
+			body = l.lowerMethodBody(d.Params, d.Body)
+		}
 	}
 	fnLit := setFuncLitPos(l.wrapAsJSValueFunc(d.Params, body), d.Span)
 	fnVal := callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), fnLit)
@@ -529,7 +535,13 @@ func (l *Lowerer) lowerClassSetups(classRef ast.Expr, brandKey ast.Expr, props [
 
 func (l *Lowerer) lowerClassMethodValue(m *hir.ClassMethod) ast.Expr {
 	var methodBody *ast.BlockStmt
-	if !m.IsStatic {
+	if m.IsAsync {
+		if !m.IsStatic {
+			methodBody = l.lowerAsyncFuncBody(m.Params, m.Body, 1, true)
+		} else {
+			methodBody = l.lowerAsyncFuncBody(m.Params, m.Body, 0, false)
+		}
+	} else if !m.IsStatic {
 		methodBody = l.lowerMethodBody(m.Params, m.Body)
 	} else {
 		methodBody = l.lowerFuncBody(m.Params, m.Body)
@@ -1407,7 +1419,7 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 				defVal := l.lowerExpr(p.Default)
 				defVal = jsvalueWrapLit(defVal)
 				stmts = append(stmts, &ast.IfStmt{
-					Cond: &ast.BinaryExpr{X: goIdent(tmpName), Op: token.EQL, Y: goIdent("nil")},
+					Cond: l.isNilOrUndefined(goIdent(tmpName)),
 					Body: blockStmt(assignStmt(
 						[]ast.Expr{goIdent(tmpName)},
 						[]ast.Expr{defVal},
@@ -1458,11 +1470,7 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 				defVal := l.lowerExpr(p.Default)
 				defVal = jsvalueWrapLit(defVal)
 				stmts = append(stmts, &ast.IfStmt{
-					Cond: &ast.BinaryExpr{
-						X:  goIdent(name),
-						Op: token.EQL,
-						Y:  goIdent("nil"),
-					},
+					Cond: l.isNilOrUndefined(goIdent(name)),
 					Body: blockStmt(assignStmt(
 						[]ast.Expr{goIdent(name)},
 						[]ast.Expr{defVal},
@@ -1616,7 +1624,7 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 			defVal := l.lowerExpr(p.Default)
 			defVal = jsvalueWrapLit(defVal)
 			stmts = append(stmts, &ast.IfStmt{
-				Cond: &ast.BinaryExpr{X: goIdent(name), Op: token.EQL, Y: goIdent("nil")},
+				Cond: l.isNilOrUndefined(goIdent(name)),
 				Body: blockStmt(assignStmt(
 					[]ast.Expr{goIdent(name)},
 					[]ast.Expr{defVal},

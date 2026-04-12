@@ -354,6 +354,7 @@ func (b *Builder) buildClassBody(parts *classParts, node *sitter.Node) {
 			isStatic := false
 			isGetter := false
 			isSetter := false
+			isAsync := false
 			for j := uint(0); j < child.ChildCount(); j++ {
 				ck := child.Child(j).Kind()
 				if ck == "static" {
@@ -362,6 +363,8 @@ func (b *Builder) buildClassBody(parts *classParts, node *sitter.Node) {
 					isGetter = true
 				} else if ck == "set" {
 					isSetter = true
+				} else if ck == "async" {
+					isAsync = true
 				}
 			}
 
@@ -376,6 +379,7 @@ func (b *Builder) buildClassBody(parts *classParts, node *sitter.Node) {
 					Name:      name,
 					Params:    params,
 					Body:      body,
+					IsAsync:   isAsync,
 					IsStatic:  isStatic,
 					IsGetter:  isGetter,
 					IsSetter:  isSetter,

@@ -154,6 +154,79 @@ func TestCompileHIR(t *testing.T) {
 	assertContains(t, s, "42")
 }
 
+func TestCompileTreeSupportsAsyncFunctionDeclarationPhase1(t *testing.T) {
+	tree := parseTS(t, `async function load() { return await fetch(); }`)
+	defer tree.Close()
+
+	p := New(O0)
+	out, err := p.CompileTree(tree.RootNode(), []byte(`async function load() { return await fetch(); }`), "main", "", false)
+	if err != nil {
+		t.Fatalf("expected async compile success, got %v", err)
+	}
+	assertContains(t, string(out), "promise.Promise.Call")
+}
+
+func TestCompileHIRSupportsAsyncFunctionDeclarationPhase1(t *testing.T) {
+	tree := parseTS(t, `async function load() { return await fetch(); }`)
+	defer tree.Close()
+
+	hirMod := hir.BuildModule(tree.RootNode(), []byte(`async function load() { return await fetch(); }`), "main")
+	p := New(O0)
+	out, err := p.CompileHIR(hirMod, "", false)
+	if err != nil {
+		t.Fatalf("expected async compile success, got %v", err)
+	}
+	assertContains(t, string(out), "promise.Promise.Call")
+}
+
+func TestCompilePackageSupportsAsyncFunctionDeclarationPhase1(t *testing.T) {
+	p := New(O0)
+	out, err := p.CompilePackage(map[string][]byte{
+		"entry.ts": []byte(`import { load } from "./util"; export function main() { return load(); }`),
+		"util.ts":  []byte(`export async function load() { return await Promise.resolve(1); }`),
+	}, "main", "", "entry.ts")
+	if err != nil {
+		t.Fatalf("expected async package compile success, got %v", err)
+	}
+	assertContains(t, string(out["util.ts"]), "promise.Promise.Call")
+}
+
+func TestCompileTreeRejectsAwaitInParameterDefaultPhase0(t *testing.T) {
+	tree := parseTS(t, `function load(value = await fetch()) { return value; }`)
+	defer tree.Close()
+
+	p := New(O0)
+	_, err := p.CompileTree(tree.RootNode(), []byte(`function load(value = await fetch()) { return value; }`), "main", "", false)
+	if err == nil {
+		t.Fatal("expected async diagnostic error")
+	}
+	assertContains(t, err.Error(), "await expressions are only supported inside async function declarations")
+}
+
+func TestCompileTreeSupportsAsyncArrowPhase1(t *testing.T) {
+	tree := parseTS(t, `const load = async () => { await Promise.resolve(1); return 2; }`)
+	defer tree.Close()
+
+	p := New(O0)
+	out, err := p.CompileTree(tree.RootNode(), []byte(`const load = async () => { await Promise.resolve(1); return 2; }`), "main", "", false)
+	if err != nil {
+		t.Fatalf("expected async arrow compile success, got %v", err)
+	}
+	assertContains(t, string(out), "promise.Promise.Call")
+}
+
+func TestCompileTreeSupportsAsyncFunctionExpressionPhase1(t *testing.T) {
+	tree := parseTS(t, `const load = async function() { await Promise.resolve(1); return 2; }`)
+	defer tree.Close()
+
+	p := New(O0)
+	out, err := p.CompileTree(tree.RootNode(), []byte(`const load = async function() { await Promise.resolve(1); return 2; }`), "main", "", false)
+	if err != nil {
+		t.Fatalf("expected async function expression compile success, got %v", err)
+	}
+	assertContains(t, string(out), "promise.Promise.Call")
+}
+
 // --- Various TypeScript snippets ---
 
 func TestCompileVariousSnippets(t *testing.T) {
