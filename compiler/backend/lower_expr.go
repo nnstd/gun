@@ -662,13 +662,24 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 				}
 				if l.ctx != nil {
 					var args []ast.Expr
+					hasSpread := false
 					for _, a := range e.Args {
-						args = append(args, l.lowerExpr(a))
+						if _, ok := a.(*hir.SpreadExpr); ok {
+							hasSpread = true
+							break
+						}
+					}
+					if hasSpread {
+						args, hasSpread = l.lowerCallArgs(e.Args, true)
+					} else {
+						for _, a := range e.Args {
+							args = append(args, l.lowerExpr(a))
+						}
 					}
 					if objName == "Bun" && mem.Property == "serve" {
 						l.needsBunWait = true
 					}
-					if result := l.ctx.TransformBuiltinCall(objName, mem.Property, args, l); result != nil {
+					if result := l.ctx.TransformBuiltinCall(objName, mem.Property, args, hasSpread, l); result != nil {
 						return result
 					}
 				}

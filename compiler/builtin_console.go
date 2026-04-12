@@ -1,18 +1,34 @@
 package compiler
 
-import "go/ast"
+import (
+	"go/ast"
 
-func transformConsoleCall(prop string, args []ast.Expr, addImport func(string)) ast.Expr {
-	addImport("github.com/nnstd/gun/runtime/builtin/console")
+	tcontext "github.com/nnstd/gun/compiler/context"
+)
+
+func transformConsoleCall(prop string, args []ast.Expr, hasSpread bool, imp tcontext.Imports) ast.Expr {
+	imp.AddImport("github.com/nnstd/gun/runtime/builtin/console")
+	if !hasSpread {
+		for i, arg := range args {
+			args[i] = jsvalueWrapLit(arg)
+		}
+	}
+	var call *ast.CallExpr
 	switch prop {
 	case "log":
-		return callExpr(selectorExpr(ident("console"), "Log"), args...)
+		call = callExpr(selectorExpr(ident("console"), "Log"), args...)
 	case "error":
-		return callExpr(selectorExpr(ident("console"), "Error"), args...)
+		call = callExpr(selectorExpr(ident("console"), "Error"), args...)
 	case "warn":
-		return callExpr(selectorExpr(ident("console"), "Warn"), args...)
+		call = callExpr(selectorExpr(ident("console"), "Warn"), args...)
 	case "dir":
-		return callExpr(selectorExpr(ident("console"), "Dir"), args...)
+		call = callExpr(selectorExpr(ident("console"), "Dir"), args...)
 	}
-	return nil
+	if call == nil {
+		return nil
+	}
+	if hasSpread {
+		call.Ellipsis = 1
+	}
+	return call
 }

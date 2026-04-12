@@ -16,7 +16,7 @@ func TestRegisterAndLookupGlobal(t *testing.T) {
 	ctx := New()
 	ctx.RegisterGlobal(&GlobalObject{
 		Name: "console",
-		TransformCall: func(method string, args []ast.Expr, imp Imports) ast.Expr {
+		TransformCall: func(method string, args []ast.Expr, _ bool, imp Imports) ast.Expr {
 			return nil
 		},
 	})
@@ -167,7 +167,7 @@ func TestTransformBuiltinCall(t *testing.T) {
 	called := false
 	ctx.RegisterGlobal(&GlobalObject{
 		Name: "Math",
-		TransformCall: func(method string, args []ast.Expr, imp Imports) ast.Expr {
+		TransformCall: func(method string, args []ast.Expr, _ bool, imp Imports) ast.Expr {
 			called = true
 			if method != "floor" {
 				t.Fatalf("expected method 'floor', got %q", method)
@@ -177,7 +177,7 @@ func TestTransformBuiltinCall(t *testing.T) {
 	})
 
 	imp := &mockImports{}
-	result := ctx.TransformBuiltinCall("Math", "floor", nil, imp)
+	result := ctx.TransformBuiltinCall("Math", "floor", nil, false, imp)
 	if !called {
 		t.Fatal("transform was not called")
 	}
@@ -186,7 +186,7 @@ func TestTransformBuiltinCall(t *testing.T) {
 	}
 
 	// Unknown object returns nil
-	result = ctx.TransformBuiltinCall("Unknown", "method", nil, imp)
+	result = ctx.TransformBuiltinCall("Unknown", "method", nil, false, imp)
 	if result != nil {
 		t.Fatal("expected nil for unknown object")
 	}

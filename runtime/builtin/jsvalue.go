@@ -723,7 +723,7 @@ func InstanceOf(left, right *JSValue) *JSValue {
 	if proto == nil || proto.typ == TypeUndefined || proto.typ == TypeNull {
 		return NewBool(false)
 	}
-	for cur := left.GetPrototype(); cur != nil; cur = cur.GetPrototype() {
+	for cur := left.GetPrototype(); cur != nil && cur.typ != TypeNull; cur = cur.GetPrototype() {
 		if cur == proto {
 			return NewBool(true)
 		}

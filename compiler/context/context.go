@@ -18,7 +18,7 @@ type Imports interface {
 
 // GlobalObjectTransform transforms a method call on a global object.
 // Returns nil if the method is not handled.
-type GlobalObjectTransform func(method string, args []ast.Expr, imp Imports) ast.Expr
+type GlobalObjectTransform func(method string, args []ast.Expr, hasSpread bool, imp Imports) ast.Expr
 
 // GlobalObjectMemberTransform transforms a property access on a global object.
 // Returns nil if the property is not handled.
@@ -170,12 +170,12 @@ func (c *TranspilerContext) IsKnownGlobal(name string) bool {
 
 // TransformBuiltinCall dispatches a method call on a global object.
 // Returns nil if the object or method is not recognized.
-func (c *TranspilerContext) TransformBuiltinCall(obj, method string, args []ast.Expr, imp Imports) ast.Expr {
+func (c *TranspilerContext) TransformBuiltinCall(obj, method string, args []ast.Expr, hasSpread bool, imp Imports) ast.Expr {
 	g := c.globals[obj]
 	if g == nil || g.TransformCall == nil {
 		return nil
 	}
-	return g.TransformCall(method, args, imp)
+	return g.TransformCall(method, args, hasSpread, imp)
 }
 
 // TransformBuiltinMember dispatches a property access on a global object.

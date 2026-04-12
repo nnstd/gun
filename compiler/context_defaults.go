@@ -26,42 +26,42 @@ func RegisterDefaultBuiltins(ctx *tcontext.TranspilerContext) {
 func registerGlobalObjects(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterGlobal(&tcontext.GlobalObject{
 		Name: "console",
-		TransformCall: func(method string, args []ast.Expr, imp tcontext.Imports) ast.Expr {
-			return transformConsoleCall(method, args, imp.AddImport)
+		TransformCall: func(method string, args []ast.Expr, hasSpread bool, imp tcontext.Imports) ast.Expr {
+			return transformConsoleCall(method, args, hasSpread, imp)
 		},
 	})
 
 	ctx.RegisterGlobal(&tcontext.GlobalObject{
 		Name: "Math",
-		TransformCall: func(method string, args []ast.Expr, imp tcontext.Imports) ast.Expr {
+		TransformCall: func(method string, args []ast.Expr, _ bool, imp tcontext.Imports) ast.Expr {
 			return transformMathCall(method, args, imp.AddImport)
 		},
 	})
 
 	ctx.RegisterGlobal(&tcontext.GlobalObject{
 		Name: "JSON",
-		TransformCall: func(method string, args []ast.Expr, imp tcontext.Imports) ast.Expr {
+		TransformCall: func(method string, args []ast.Expr, _ bool, imp tcontext.Imports) ast.Expr {
 			return transformJSONCall(method, args, imp.AddImport)
 		},
 	})
 
 	ctx.RegisterGlobal(&tcontext.GlobalObject{
 		Name: "Object",
-		TransformCall: func(method string, args []ast.Expr, imp tcontext.Imports) ast.Expr {
+		TransformCall: func(method string, args []ast.Expr, _ bool, imp tcontext.Imports) ast.Expr {
 			return transformObjectCall(method, args, imp.AddImport)
 		},
 	})
 
 	ctx.RegisterGlobal(&tcontext.GlobalObject{
 		Name: "Number",
-		TransformCall: func(method string, args []ast.Expr, imp tcontext.Imports) ast.Expr {
+		TransformCall: func(method string, args []ast.Expr, _ bool, imp tcontext.Imports) ast.Expr {
 			return transformNumberCall(method, args)
 		},
 	})
 
 	ctx.RegisterGlobal(&tcontext.GlobalObject{
 		Name: "process",
-		TransformCall: func(method string, args []ast.Expr, imp tcontext.Imports) ast.Expr {
+		TransformCall: func(method string, args []ast.Expr, _ bool, imp tcontext.Imports) ast.Expr {
 			return transformProcessCall(method, args, imp.AddImport)
 		},
 		TransformMember: func(prop string, imp tcontext.Imports) ast.Expr {
@@ -71,14 +71,14 @@ func registerGlobalObjects(ctx *tcontext.TranspilerContext) {
 
 	ctx.RegisterGlobal(&tcontext.GlobalObject{
 		Name: "Array",
-		TransformCall: func(method string, args []ast.Expr, imp tcontext.Imports) ast.Expr {
+		TransformCall: func(method string, args []ast.Expr, _ bool, imp tcontext.Imports) ast.Expr {
 			return transformArrayCall(method, args, imp.AddImport)
 		},
 	})
 
 	ctx.RegisterGlobal(&tcontext.GlobalObject{
 		Name: "Bun",
-		TransformCall: func(method string, args []ast.Expr, imp tcontext.Imports) ast.Expr {
+		TransformCall: func(method string, args []ast.Expr, _ bool, imp tcontext.Imports) ast.Expr {
 			imp.AddImport("github.com/nnstd/gun/runtime/bun")
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			switch method {
@@ -114,7 +114,7 @@ func registerGlobalObjects(ctx *tcontext.TranspilerContext) {
 		et := errType // capture
 		ctx.RegisterGlobal(&tcontext.GlobalObject{
 			Name: et,
-			TransformCall: func(method string, args []ast.Expr, imp tcontext.Imports) ast.Expr {
+			TransformCall: func(method string, args []ast.Expr, _ bool, imp tcontext.Imports) ast.Expr {
 				return transformErrorCall(et, method, args, imp.AddImport)
 			},
 		})

@@ -620,7 +620,7 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 			}
 
 			// Known global objects (console, Math, JSON, Object)
-			if r := t.ctx.TransformBuiltinCall(objText, prop, args, t); r != nil {
+			if r := t.ctx.TransformBuiltinCall(objText, prop, args, argsNodeHasSpread(argsNode), t); r != nil {
 				return r
 			}
 

@@ -4,38 +4,30 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/nnstd/gun/runtime/builtin"
+	jsvalue "github.com/nnstd/gun/runtime/builtin"
 )
 
-// spreadArgs handles the case where a []*jsvalue.JSValue slice is passed as
-// a single argument (from transpiled JS spread: console.log(...args)).
-// It unpacks the slice so fmt prints each element separately.
-func spreadArgs(args []any) []any {
-	if len(args) == 1 {
-		if slice, ok := args[0].([]*jsvalue.JSValue); ok {
-			out := make([]any, len(slice))
-			for i, v := range slice {
-				out[i] = v
-			}
-			return out
-		}
+func toAny(args []*jsvalue.JSValue) []any {
+	out := make([]any, len(args))
+	for i, v := range args {
+		out[i] = v
 	}
-	return args
+	return out
 }
 
-func Log(args ...any) {
-	fmt.Println(spreadArgs(args)...)
+func Log(args ...*jsvalue.JSValue) {
+	fmt.Println(toAny(args)...)
 }
 
-func Error(args ...any) {
-	fmt.Fprintln(os.Stderr, spreadArgs(args)...)
+func Error(args ...*jsvalue.JSValue) {
+	fmt.Fprintln(os.Stderr, toAny(args)...)
 }
 
-func Warn(args ...any) {
-	fmt.Fprintln(os.Stderr, spreadArgs(args)...)
+func Warn(args ...*jsvalue.JSValue) {
+	fmt.Fprintln(os.Stderr, toAny(args)...)
 }
 
-func Dir(args ...any) {
+func Dir(args ...*jsvalue.JSValue) {
 	for _, a := range args {
 		fmt.Printf("%+v\n", a)
 	}

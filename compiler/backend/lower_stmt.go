@@ -513,6 +513,10 @@ func (l *Lowerer) lowerSwitchStmt(s *hir.SwitchStmt) *ast.SwitchStmt {
 func (l *Lowerer) lowerTryCatchStmt(s *hir.TryCatchStmt) ast.Stmt {
 	l.jsvalueImport()
 
+	if s.Catch != nil && s.Finally == nil && (blockHasReturn(s.Try) || blockHasReturn(s.Catch.Body)) && !blockHasLoopControl(s.Try) {
+		return l.lowerTryCatchReturning(s)
+	}
+
 	if s.Catch != nil && s.Finally == nil && blockHasLoopControl(s.Catch.Body) && !blockHasReturn(s.Try) {
 		return l.lowerTryCatchInline(s)
 	}
@@ -601,6 +605,97 @@ func (l *Lowerer) lowerTryCatchStmt(s *hir.TryCatchStmt) ast.Stmt {
 	return &ast.BlockStmt{List: stmts}
 }
 
+func (l *Lowerer) lowerTryCatchReturning(s *hir.TryCatchStmt) ast.Stmt {
+	catchName := l.nextSyntheticName("_caught")
+	resultName := l.nextSyntheticName("_tryResult")
+	returnedName := l.nextSyntheticName("_tryReturned")
+
+	catchBody := l.lowerBlock(s.Catch.Body)
+	paramName := "_"
+	if s.Catch.Param != nil {
+		paramName = l.emitName(s.Catch.Param)
+	}
+	if paramName != "_" {
+		catchBody.List = append([]ast.Stmt{
+			assignDefine(
+				[]ast.Expr{goIdent(paramName)},
+				[]ast.Expr{goIdent(catchName)},
+			),
+			assignStmt([]ast.Expr{goIdent("_")}, []ast.Expr{goIdent(paramName)}),
+		}, catchBody.List...)
+	}
+
+	tryBody := blockStmt()
+	if s.Try != nil {
+		for _, st := range s.Try.Stmts {
+			gs := l.lowerStmt(st)
+			if gs == nil {
+				continue
+			}
+			if block, ok := gs.(*ast.BlockStmt); ok {
+				for _, child := range block.List {
+					tryBody.List = append(tryBody.List, rewriteTryReturns(child)...)
+				}
+				continue
+			}
+			tryBody.List = append(tryBody.List, rewriteTryReturns(gs)...)
+		}
+	}
+	tryBody.List = append(tryBody.List, returnStmt(goIdent("nil"), goIdent("false")))
+
+	tryCall := &ast.CallExpr{
+		Fun: &ast.FuncLit{
+			Type: &ast.FuncType{
+				Params: fieldList(),
+				Results: fieldList(
+					goField("", jsValuePtrType()),
+					goField("", goIdent("bool")),
+				),
+			},
+			Body: &ast.BlockStmt{List: append([]ast.Stmt{
+				&ast.DeferStmt{
+					Call: &ast.CallExpr{
+						Fun: &ast.FuncLit{
+							Type: &ast.FuncType{Params: fieldList()},
+							Body: blockStmt(
+								&ast.IfStmt{
+									Init: assignDefine(
+										[]ast.Expr{goIdent("r")},
+										[]ast.Expr{callExpr(goIdent("recover"))},
+									),
+									Cond: &ast.BinaryExpr{X: goIdent("r"), Op: token.NEQ, Y: goIdent("nil")},
+									Body: blockStmt(assignStmt(
+										[]ast.Expr{goIdent(catchName)},
+										[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "From"), goIdent("r"))},
+									)),
+								},
+							),
+						},
+					},
+				},
+			}, tryBody.List...)},
+		},
+	}
+
+	return &ast.BlockStmt{List: []ast.Stmt{
+		&ast.DeclStmt{Decl: varDecl(catchName, jsValuePtrType(), nil)},
+		&ast.DeclStmt{Decl: varDecl(resultName, jsValuePtrType(), nil)},
+		&ast.DeclStmt{Decl: varDecl(returnedName, goIdent("bool"), nil)},
+		assignStmt(
+			[]ast.Expr{goIdent(resultName), goIdent(returnedName)},
+			[]ast.Expr{tryCall},
+		),
+		&ast.IfStmt{
+			Cond: &ast.BinaryExpr{X: goIdent(catchName), Op: token.NEQ, Y: goIdent("nil")},
+			Body: catchBody,
+		},
+		&ast.IfStmt{
+			Cond: goIdent(returnedName),
+			Body: blockStmt(returnStmt(goIdent(resultName))),
+		},
+	}}
+}
+
 func (l *Lowerer) lowerTryCatchInline(s *hir.TryCatchStmt) ast.Stmt {
 	catchName := l.nextSyntheticName("_caught")
 	catchBody := l.lowerBlock(s.Catch.Body)
@@ -682,6 +777,57 @@ func (l *Lowerer) lowerTryCatchInline(s *hir.TryCatchStmt) ast.Stmt {
 			Body: catchBody,
 		},
 	}}
+}
+
+func rewriteTryReturns(stmt ast.Stmt) []ast.Stmt {
+	switch s := stmt.(type) {
+	case *ast.ReturnStmt:
+		results := append([]ast.Expr{}, s.Results...)
+		if len(results) == 0 {
+			results = []ast.Expr{goIdent("nil")}
+		}
+		results = append(results, goIdent("true"))
+		return []ast.Stmt{&ast.ReturnStmt{Results: results}}
+	case *ast.BlockStmt:
+		var out []ast.Stmt
+		for _, child := range s.List {
+			out = append(out, rewriteTryReturns(child)...)
+		}
+		s.List = out
+		return []ast.Stmt{s}
+	case *ast.IfStmt:
+		s.Body = blockStmt(rewriteTryReturns(s.Body)...)
+		if elseBlock, ok := s.Else.(*ast.BlockStmt); ok {
+			s.Else = blockStmt(rewriteTryReturns(elseBlock)...)
+		} else if elseIf, ok := s.Else.(*ast.IfStmt); ok {
+			rewritten := rewriteTryReturns(elseIf)
+			if len(rewritten) == 1 {
+				s.Else = rewritten[0]
+			}
+		}
+		return []ast.Stmt{s}
+	case *ast.ForStmt:
+		s.Body = blockStmt(rewriteTryReturns(s.Body)...)
+		return []ast.Stmt{s}
+	case *ast.RangeStmt:
+		s.Body = blockStmt(rewriteTryReturns(s.Body)...)
+		return []ast.Stmt{s}
+	case *ast.SwitchStmt:
+		if s.Body != nil {
+			for _, stmt := range s.Body.List {
+				if cc, ok := stmt.(*ast.CaseClause); ok {
+					var body []ast.Stmt
+					for _, child := range cc.Body {
+						body = append(body, rewriteTryReturns(child)...)
+					}
+					cc.Body = body
+				}
+			}
+		}
+		return []ast.Stmt{s}
+	default:
+		return []ast.Stmt{stmt}
+	}
 }
 
 // lowerAssignStmt handles assignment expressions as statements.
