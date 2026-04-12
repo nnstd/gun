@@ -61,3 +61,18 @@ func TestPromiseInternalSlotsAreNotEnumerable(t *testing.T) {
 		t.Fatalf("Object.keys(promise) len = %d, want 0", got)
 	}
 }
+
+func TestPromiseResolveAdoptsThenable(t *testing.T) {
+	thenable := jsvalue.ObjectFrom(
+		"then", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+			if len(args) > 0 && args[0] != nil {
+				return args[0].Call(jsvalue.NewString("thenable-ok"))
+			}
+			return jsvalue.NewUndefined()
+		}),
+	)
+	p := Promise.Get("resolve").Call(thenable)
+	if got := p.Get(promiseValueKey).String(); got != "thenable-ok" {
+		t.Fatalf("Promise.resolve(thenable) = %q, want thenable-ok", got)
+	}
+}

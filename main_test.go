@@ -483,6 +483,149 @@ load({}, []).then((result) => { console.log(result) })
 	}
 }
 
+func TestTranspileProject_AsyncForInRuns(t *testing.T) {
+	fixture := filepath.Join(t.TempDir(), "async_forin.ts")
+	if err := os.WriteFile(fixture, []byte(`async function load() {
+	let keys = ""
+	const obj = Object.fromEntries([["a", 1], ["b", 2]])
+	for (const key in obj) {
+		await Promise.resolve(0)
+		keys = keys + key
+	}
+	return keys
+}
+
+load().then((result) => { console.log(result) })
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildFixture(t, fixture)
+	cmd := exec.Command(bin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	got := strings.TrimSpace(stdout.String())
+	if got != "ab" && got != "ba" {
+		t.Fatalf("stdout mismatch: got %q want one of [ab ba]\nstderr:\n%s", got, stderr.String())
+	}
+}
+
+func TestTranspileProject_AsyncForOfRuns(t *testing.T) {
+	fixture := filepath.Join(t.TempDir(), "async_forof.ts")
+	if err := os.WriteFile(fixture, []byte(`async function load() {
+	let out = ""
+	for (const [a, b] of [[1, 2], [3, 4]]) {
+		await Promise.resolve(0)
+		out = out + (a + b)
+	}
+	return out
+}
+
+load().then((result) => { console.log(result) })
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildFixture(t, fixture)
+	cmd := exec.Command(bin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "37" {
+		t.Fatalf("stdout mismatch: got %q want %q\nstderr:\n%s", got, "37", stderr.String())
+	}
+}
+
+func TestTranspileProject_AsyncSwitchRuns(t *testing.T) {
+	fixture := filepath.Join(t.TempDir(), "async_switch.ts")
+	if err := os.WriteFile(fixture, []byte(`async function load(value) {
+	let out = ""
+	switch (await Promise.resolve(value)) {
+		case 1:
+			out = "one"
+			break
+		case 2:
+			out = "two"
+			break
+		default:
+			out = "other"
+	}
+	return out
+}
+
+load(2).then((result) => { console.log(result) })
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildFixture(t, fixture)
+	cmd := exec.Command(bin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "two" {
+		t.Fatalf("stdout mismatch: got %q want %q\nstderr:\n%s", got, "two", stderr.String())
+	}
+}
+
+func TestTranspileProject_AsyncMainRuns(t *testing.T) {
+	fixture := filepath.Join(t.TempDir(), "async_main.ts")
+	if err := os.WriteFile(fixture, []byte(`async function main() {
+	await Promise.resolve(0)
+	console.log("async-main")
+}
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildFixture(t, fixture)
+	cmd := exec.Command(bin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "async-main" {
+		t.Fatalf("stdout mismatch: got %q want %q\nstderr:\n%s", got, "async-main", stderr.String())
+	}
+}
+
+func TestTranspileProject_AsyncInitRuns(t *testing.T) {
+	fixture := filepath.Join(t.TempDir(), "async_init.ts")
+	if err := os.WriteFile(fixture, []byte(`async function init() {
+	await Promise.resolve(0)
+	console.log("async-init")
+}
+
+function main() {}
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildFixture(t, fixture)
+	cmd := exec.Command(bin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "async-init" {
+		t.Fatalf("stdout mismatch: got %q want %q\nstderr:\n%s", got, "async-init", stderr.String())
+	}
+}
+
 func TestTranspileProject_BuiltBunServeHonoFixtureResponds(t *testing.T) {
 	fixtureRoot := t.TempDir()
 	nodeModulesSource := filepath.Join("/Users/nikita/Work/gun-test", "node_modules")

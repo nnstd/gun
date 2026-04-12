@@ -298,10 +298,29 @@ func (l *Lowerer) lowerAsyncLocalDecls(body *hir.BlockStmt) []ast.Stmt {
 		case *hir.ForStmt:
 			walkStmt(s.Init)
 			walkBlock(s.Body)
+		case *hir.ForInStmt:
+			if s.Key != nil && !seen[s.Key.ID] {
+				seen[s.Key.ID] = true
+				locals = append(locals, s.Key)
+			}
+			walkBlock(s.Body)
+		case *hir.ForOfStmt:
+			if s.Elem != nil && !seen[s.Elem.ID] {
+				seen[s.Elem.ID] = true
+				locals = append(locals, s.Elem)
+			}
+			collectPattern(s.Pattern)
+			walkBlock(s.Body)
 		case *hir.WhileStmt:
 			walkBlock(s.Body)
 		case *hir.DoWhileStmt:
 			walkBlock(s.Body)
+		case *hir.SwitchStmt:
+			for _, c := range s.Cases {
+				for _, st := range c.Body {
+					walkStmt(st)
+				}
+			}
 		case *hir.TryCatchStmt:
 			if s.Catch != nil && s.Catch.Param != nil && !seen[s.Catch.Param.ID] {
 				seen[s.Catch.Param.ID] = true
@@ -511,6 +530,119 @@ func (b *asyncFuncBuilder) compileStmt(stmt hir.Stmt, next int, loop asyncLoopLa
 			return b.compileStmt(s.Init, condEntryLabel, loop, protected, finalizer)
 		}
 		return condEntryLabel
+	case *hir.ForInStmt:
+		itemsName := b.l.emitName(b.l.newAsyncTempSymbol())
+		indexName := b.l.emitName(b.l.newAsyncTempSymbol())
+		postLabel := b.newLabel()
+		prepLabel := b.newLabel()
+		bodyEntry := b.compileSeq(s.Body.Stmts, postLabel, asyncLoopLabels{breakLabel: next, continueLabel: postLabel, valid: true}, protected, finalizer)
+		itemExpr := callExpr(selectorExpr(goIdent(itemsName), "Get"), callExpr(selectorExpr(goIdent("fmt"), "Sprint"), goIdent(indexName)))
+		prepBody := []ast.Stmt{}
+		if s.Key != nil {
+			prepBody = append(prepBody, assignStmt([]ast.Expr{goIdent(b.l.emitName(s.Key))}, []ast.Expr{itemExpr}))
+		}
+		prepBody = append(prepBody, b.transition(bodyEntry)...)
+		b.addCase(prepLabel, prepBody)
+		condLabel := b.newLabel()
+		cond := b.l.ensureBool(callExpr(
+			selectorExpr(goIdent("jsvalue"), "Lt"),
+			goIdent(indexName),
+			callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"),
+				callExpr(goIdent("float64"), callExpr(selectorExpr(goIdent(itemsName), "Len")))),
+		))
+		b.addCase(condLabel, []ast.Stmt{
+			&ast.IfStmt{
+				Cond: cond,
+				Body: blockStmt(b.transition(prepLabel)...),
+				Else: blockStmt(b.transition(next)...),
+			},
+		})
+		initLabel := b.newLabel()
+		b.l.jsvalueImport()
+		b.l.addImport("fmt")
+		b.addCase(initLabel, []ast.Stmt{
+			assignStmt([]ast.Expr{goIdent(itemsName)}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "Keys"), b.l.wrapAsJSValue(b.l.lowerExpr(s.Value)))}),
+			assignStmt([]ast.Expr{goIdent(indexName)}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), intLit("0"))}),
+			assignStmt([]ast.Expr{goIdent(b.stateName)}, []ast.Expr{intLit(itoa(condLabel))}),
+			&ast.BranchStmt{Tok: token.CONTINUE},
+		})
+		b.addCase(postLabel, []ast.Stmt{
+			assignStmt([]ast.Expr{goIdent(indexName)}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "Add"), goIdent(indexName), callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), intLit("1")))}),
+			assignStmt([]ast.Expr{goIdent(b.stateName)}, []ast.Expr{intLit(itoa(condLabel))}),
+			&ast.BranchStmt{Tok: token.CONTINUE},
+		})
+		return initLabel
+	case *hir.ForOfStmt:
+		itemsName := b.l.emitName(b.l.newAsyncTempSymbol())
+		indexName := b.l.emitName(b.l.newAsyncTempSymbol())
+		postLabel := b.newLabel()
+		prepLabel := b.newLabel()
+		bodyEntry := b.compileSeq(s.Body.Stmts, postLabel, asyncLoopLabels{breakLabel: next, continueLabel: postLabel, valid: true}, protected, finalizer)
+		itemExpr := callExpr(selectorExpr(goIdent(itemsName), "Get"), callExpr(selectorExpr(goIdent("fmt"), "Sprint"), goIdent(indexName)))
+		prepBody := []ast.Stmt{}
+		if s.Pattern != nil {
+			prepBody = append(prepBody, b.l.lowerDestructuring(s.Pattern, itemExpr, false)...)
+		} else if s.Elem != nil {
+			prepBody = append(prepBody, assignStmt([]ast.Expr{goIdent(b.l.emitName(s.Elem))}, []ast.Expr{itemExpr}))
+		}
+		prepBody = append(prepBody, b.transition(bodyEntry)...)
+		b.addCase(prepLabel, prepBody)
+		condLabel := b.newLabel()
+		cond := b.l.ensureBool(callExpr(
+			selectorExpr(goIdent("jsvalue"), "Lt"),
+			goIdent(indexName),
+			callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"),
+				callExpr(goIdent("float64"), callExpr(selectorExpr(goIdent(itemsName), "Len")))),
+		))
+		b.addCase(condLabel, []ast.Stmt{
+			&ast.IfStmt{
+				Cond: cond,
+				Body: blockStmt(b.transition(prepLabel)...),
+				Else: blockStmt(b.transition(next)...),
+			},
+		})
+		initLabel := b.newLabel()
+		b.l.jsvalueImport()
+		b.l.addImport("fmt")
+		b.addCase(initLabel, []ast.Stmt{
+			assignStmt([]ast.Expr{goIdent(itemsName)}, []ast.Expr{b.l.wrapAsJSValue(callExpr(selectorExpr(b.l.lowerExpr(s.Value), "Array")))}),
+			assignStmt([]ast.Expr{goIdent(indexName)}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), intLit("0"))}),
+			assignStmt([]ast.Expr{goIdent(b.stateName)}, []ast.Expr{intLit(itoa(condLabel))}),
+			&ast.BranchStmt{Tok: token.CONTINUE},
+		})
+		b.addCase(postLabel, []ast.Stmt{
+			assignStmt([]ast.Expr{goIdent(indexName)}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "Add"), goIdent(indexName), callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), intLit("1")))}),
+			assignStmt([]ast.Expr{goIdent(b.stateName)}, []ast.Expr{intLit(itoa(condLabel))}),
+			&ast.BranchStmt{Tok: token.CONTINUE},
+		})
+		return initLabel
+	case *hir.SwitchStmt:
+		exitTarget := next
+		switchLoop := asyncLoopLabels{breakLabel: exitTarget, continueLabel: loop.continueLabel, valid: true}
+		clauseEntries := make([]int, len(s.Cases))
+		nextEntry := exitTarget
+		for i := len(s.Cases) - 1; i >= 0; i-- {
+			clauseEntries[i] = b.compileSeq(s.Cases[i].Body, nextEntry, switchLoop, protected, finalizer)
+			nextEntry = clauseEntries[i]
+		}
+		dispatchTarget := exitTarget
+		for i := len(s.Cases) - 1; i >= 0; i-- {
+			if s.Cases[i].Value == nil {
+				dispatchTarget = clauseEntries[i]
+				continue
+			}
+			label := b.newLabel()
+			cond := b.l.ensureBool(callExpr(selectorExpr(goIdent("jsvalue"), "Eq"), b.l.wrapAsJSValue(b.l.lowerExpr(s.Tag)), b.l.wrapAsJSValue(b.l.lowerExpr(s.Cases[i].Value))))
+			b.addCase(label, []ast.Stmt{
+				&ast.IfStmt{
+					Cond: cond,
+					Body: blockStmt(b.transition(clauseEntries[i])...),
+					Else: blockStmt(b.transition(dispatchTarget)...),
+				},
+			})
+			dispatchTarget = label
+		}
+		return dispatchTarget
 	case *hir.TryCatchStmt:
 		if s.Catch == nil && s.Finally == nil {
 			label := b.newLabel()
@@ -963,6 +1095,23 @@ func (l *Lowerer) normalizeAsyncStmt(stmt hir.Stmt) []hir.Stmt {
 			Body: l.normalizeAsyncBlock(s.Body),
 			Span: s.Span,
 		}}
+	case *hir.ForInStmt:
+		prefix, value := l.normalizeAsyncExpr(s.Value, false)
+		return append(prefix, &hir.ForInStmt{
+			Key:   s.Key,
+			Value: value,
+			Body:  l.normalizeAsyncBlock(s.Body),
+			Span:  s.Span,
+		})
+	case *hir.ForOfStmt:
+		prefix, value := l.normalizeAsyncExpr(s.Value, false)
+		return append(prefix, &hir.ForOfStmt{
+			Elem:    s.Elem,
+			Pattern: s.Pattern,
+			Value:   value,
+			Body:    l.normalizeAsyncBlock(s.Body),
+			Span:    s.Span,
+		})
 	case *hir.TryCatchStmt:
 		var catchClause *hir.CatchClause
 		if s.Catch != nil {
@@ -978,6 +1127,16 @@ func (l *Lowerer) normalizeAsyncStmt(stmt hir.Stmt) []hir.Stmt {
 			Finally: finallyBlock,
 			Span:    s.Span,
 		}}
+	case *hir.SwitchStmt:
+		prefix, tag := l.normalizeAsyncExpr(s.Tag, false)
+		cases := make([]*hir.CaseClause, 0, len(s.Cases))
+		for _, c := range s.Cases {
+			cases = append(cases, &hir.CaseClause{
+				Value: c.Value,
+				Body:  l.normalizeAsyncBlock(&hir.BlockStmt{Stmts: c.Body}).Stmts,
+			})
+		}
+		return append(prefix, &hir.SwitchStmt{Tag: tag, Cases: cases, Span: s.Span})
 	default:
 		return []hir.Stmt{stmt}
 	}

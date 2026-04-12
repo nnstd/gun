@@ -234,6 +234,45 @@ func (l *Lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 	// main and init stay as Go func declarations
 	if name == "main" || name == "init" {
 		body := l.lowerBlock(d.Body)
+		if d.IsAsync {
+			asyncName := l.nextSyntheticName("_" + name + "_async")
+			l.jsvalueImport()
+			asyncBody := l.lowerAsyncFuncBody(d.Params, d.Body, 0, false)
+			asyncLit := setFuncLitPos(l.wrapAsJSValueFunc(d.Params, asyncBody), d.Span)
+			asyncVal := callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), asyncLit)
+			l.decls = append(l.decls, setDeclPos(varDecl(asyncName, nil, asyncVal), d.Span))
+			body = blockStmt(
+				assignDefine(
+					[]ast.Expr{goIdent("_promise")},
+					[]ast.Expr{callExpr(selectorExpr(goIdent(asyncName), "Call"))},
+				),
+				exprStmt(callExpr(
+					selectorExpr(goIdent("_promise"), "MethodCall"),
+					stringLit("catch"),
+					callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), &ast.FuncLit{
+						Type: &ast.FuncType{
+							Params: fieldList(&ast.Field{
+								Names: []*ast.Ident{goIdent("_args")},
+								Type:  &ast.Ellipsis{Elt: jsValuePtrType()},
+							}),
+							Results: fieldList(goField("", jsValuePtrType())),
+						},
+						Body: blockStmt(
+							&ast.IfStmt{
+								Cond: &ast.BinaryExpr{
+									X:  callExpr(goIdent("len"), goIdent("_args")),
+									Op: token.GTR,
+									Y:  intLit("0"),
+								},
+								Body: blockStmt(exprStmt(callExpr(goIdent("panic"), &ast.IndexExpr{X: goIdent("_args"), Index: intLit("0")}))),
+							},
+							exprStmt(callExpr(goIdent("panic"), callExpr(selectorExpr(goIdent("jsvalue"), "NewUndefined")))),
+							returnStmt(callExpr(selectorExpr(goIdent("jsvalue"), "NewUndefined"))),
+						),
+					}),
+				)),
+			)
+		}
 		fd := setFuncDeclPos(funcDecl(name, fieldList(), nil, body), d.Span)
 		l.decls = append(l.decls, fd)
 		return

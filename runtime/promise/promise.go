@@ -49,6 +49,21 @@ func isPromise(v *jsvalue.JSValue) bool {
 	return v != nil && jsvalue.InstanceOf(v, Promise).Bool()
 }
 
+func thenMethod(v *jsvalue.JSValue) *jsvalue.JSValue {
+	if v == nil {
+		return nil
+	}
+	then := v.Get("then")
+	if then == nil || then.TypeString() != "function" {
+		return nil
+	}
+	return then
+}
+
+func isThenable(v *jsvalue.JSValue) bool {
+	return thenMethod(v) != nil
+}
+
 func dispatchHandlers(p *jsvalue.JSValue) {
 	if p == nil {
 		return
@@ -76,7 +91,10 @@ func fulfill(p *jsvalue.JSValue, value *jsvalue.JSValue) *jsvalue.JSValue {
 	if p == nil || getState(p) != statePending {
 		return p
 	}
-	if isPromise(value) && value != p {
+	if value == p {
+		return reject(p, jsvalue.NewString("Chaining cycle detected for promise"))
+	}
+	if isThenable(value) {
 		value.MethodCall("then",
 			jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 				v := jsvalue.NewUndefined()

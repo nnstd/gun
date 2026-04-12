@@ -1,7 +1,5 @@
 package hir
 
-import "fmt"
-
 // ValidateAsyncPipelinePhase1 validates the currently supported async surface
 // for pipeline-backed compilation. Phase 1 supports only async function
 // declarations (not main/init) with direct await statements outside protected
@@ -48,20 +46,11 @@ func (v *asyncPhase1Validator) add(span *SourceSpan, message string) {
 func (v *asyncPhase1Validator) walkDecl(d Decl, ctx phase1Context) {
 	switch d := d.(type) {
 	case *FuncDecl:
-		name := ""
-		if d.Symbol != nil {
-			name = d.Symbol.OriginalName
-		}
 		if d.IsAsync {
-			switch name {
-			case "main", "init":
-				v.add(d.Span, fmt.Sprintf("async %s is not supported yet", name))
-			default:
-				asyncCtx := phase1Context{inAsyncDecl: true}
-				v.walkParams(d.Params, ctx)
-				v.walkBlock(d.Body, asyncCtx)
-				return
-			}
+			asyncCtx := phase1Context{inAsyncDecl: true}
+			v.walkParams(d.Params, ctx)
+			v.walkBlock(d.Body, asyncCtx)
+			return
 		}
 		v.walkParams(d.Params, ctx)
 		v.walkBlock(d.Body, ctx)
@@ -184,17 +173,9 @@ func (v *asyncPhase1Validator) walkStmt(s Stmt, ctx phase1Context) {
 		v.walkExpr(s.Post, ctx)
 		v.walkBlock(s.Body, ctx)
 	case *ForInStmt:
-		if ctx.inAsyncDecl {
-			v.add(nil, "for-in is not implemented in async function declarations yet")
-			return
-		}
 		v.walkExpr(s.Value, ctx)
 		v.walkBlock(s.Body, ctx)
 	case *ForOfStmt:
-		if ctx.inAsyncDecl {
-			v.add(nil, "for-of is not implemented in async function declarations yet")
-			return
-		}
 		v.walkExpr(s.Value, ctx)
 		v.walkBlock(s.Body, ctx)
 	case *WhileStmt:
@@ -204,7 +185,7 @@ func (v *asyncPhase1Validator) walkStmt(s Stmt, ctx phase1Context) {
 		v.walkBlock(s.Body, ctx)
 		v.walkExpr(s.Cond, ctx)
 	case *SwitchStmt:
-		if ctx.inAsyncDecl && (exprContainsAwait(s.Tag) || caseClausesContainAwait(s.Cases)) {
+		if ctx.inAsyncDecl && switchCaseValuesContainAwait(s.Cases) {
 			v.add(s.Span, "switch is not implemented in async function declarations yet")
 			return
 		}
@@ -515,15 +496,10 @@ func stmtContainsAwait(s Stmt) bool {
 	}
 }
 
-func caseClausesContainAwait(cases []*CaseClause) bool {
+func switchCaseValuesContainAwait(cases []*CaseClause) bool {
 	for _, c := range cases {
 		if exprContainsAwait(c.Value) {
 			return true
-		}
-		for _, st := range c.Body {
-			if stmtContainsAwait(st) {
-				return true
-			}
 		}
 	}
 	return false
