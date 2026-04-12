@@ -71,9 +71,26 @@ func init() {
 	registerModule("util", "github.com/nnstd/gun/runtime/util", "util", true, nil)
 	registerModule("events", "github.com/nnstd/gun/runtime/events", "events", true, nil)
 	registerModule("stream", "github.com/nnstd/gun/runtime/stream", "stream", true, nil)
+	registerModule("stream/promises", "github.com/nnstd/gun/runtime/stream", "stream", true, map[string]string{
+		"default": "PromisesAsJSValue",
+	})
 	registerModule("buffer", "github.com/nnstd/gun/runtime/buffer", "buffer", true, nil)
 	registerModule("crypto", "github.com/nnstd/gun/runtime/crypto", "crypto", true, nil)
+	registerModule("zlib", "github.com/nnstd/gun/runtime/zlib", "zlib", true, nil)
+	registerModule("zlib/promises", "github.com/nnstd/gun/runtime/zlib", "zlib", true, map[string]string{
+		"default": "PromisesAsJSValue",
+	})
 	registerModule("child_process", "github.com/nnstd/gun/runtime/child_process", "child_process", true, nil)
+	registerModule("child_process/promises", "github.com/nnstd/gun/runtime/child_process", "child_process", true, map[string]string{
+		"default": "PromisesAsJSValue",
+	})
+	registerModule("timers/promises", "github.com/nnstd/gun/runtime/timers", "timers", true, map[string]string{
+		"default": "PromisesAsJSValue",
+	})
+	registerModule("dns", "github.com/nnstd/gun/runtime/dns", "dns", true, nil)
+	registerModule("dns/promises", "github.com/nnstd/gun/runtime/dns", "dns", true, map[string]string{
+		"default": "PromisesAsJSValue",
+	})
 	registerModule("assert", "github.com/nnstd/gun/runtime/assert", "assert", true, nil)
 	registerModule("module", "github.com/nnstd/gun/runtime/module", "module", true, nil)
 }

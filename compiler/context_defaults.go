@@ -703,6 +703,14 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 		GoPkgName:    "stream",
 		UseAsJSValue: true,
 	})
+	ctx.RegisterModule("stream/promises", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/stream",
+		GoPkgName:    "stream",
+		UseAsJSValue: true,
+		SymbolOverrides: map[string]tcontext.SymbolOverride{
+			"default": {GoSymbol: "PromisesAsJSValue"},
+		},
+	})
 	ctx.RegisterModule("buffer", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/buffer",
 		GoPkgName:    "buffer",
@@ -713,10 +721,52 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 		GoPkgName:    "crypto",
 		UseAsJSValue: true,
 	})
+	ctx.RegisterModule("zlib", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/zlib",
+		GoPkgName:    "zlib",
+		UseAsJSValue: true,
+	})
+	ctx.RegisterModule("zlib/promises", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/zlib",
+		GoPkgName:    "zlib",
+		UseAsJSValue: true,
+		SymbolOverrides: map[string]tcontext.SymbolOverride{
+			"default": {GoSymbol: "PromisesAsJSValue"},
+		},
+	})
 	ctx.RegisterModule("child_process", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/child_process",
 		GoPkgName:    "child_process",
 		UseAsJSValue: true,
+	})
+	ctx.RegisterModule("child_process/promises", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/child_process",
+		GoPkgName:    "child_process",
+		UseAsJSValue: true,
+		SymbolOverrides: map[string]tcontext.SymbolOverride{
+			"default": {GoSymbol: "PromisesAsJSValue"},
+		},
+	})
+	ctx.RegisterModule("timers/promises", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/timers",
+		GoPkgName:    "timers",
+		UseAsJSValue: true,
+		SymbolOverrides: map[string]tcontext.SymbolOverride{
+			"default": {GoSymbol: "PromisesAsJSValue"},
+		},
+	})
+	ctx.RegisterModule("dns", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/dns",
+		GoPkgName:    "dns",
+		UseAsJSValue: true,
+	})
+	ctx.RegisterModule("dns/promises", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/dns",
+		GoPkgName:    "dns",
+		UseAsJSValue: true,
+		SymbolOverrides: map[string]tcontext.SymbolOverride{
+			"default": {GoSymbol: "PromisesAsJSValue"},
+		},
 	})
 	ctx.RegisterModule("assert", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/assert",

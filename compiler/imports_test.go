@@ -143,6 +143,70 @@ const s = fs.readFile("x");`
 	assertContains(t, out, `fs.PromisesAsJSValue.MethodCall("readFile"`)
 }
 
+func TestImportTimersPromisesNamed(t *testing.T) {
+	ts := `import { setTimeout } from "node:timers/promises";
+const p = setTimeout(1);`
+	out := compile(t, ts)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/timers"`)
+	assertContains(t, out, `timers.PromisesAsJSValue.Get("setTimeout").Call(`)
+}
+
+func TestImportStreamPromisesNamed(t *testing.T) {
+	ts := `import { pipeline } from "node:stream/promises";
+const p = pipeline(a, b);`
+	out := compile(t, ts)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/stream"`)
+	assertContains(t, out, `stream.PromisesAsJSValue.Get("pipeline").Call(`)
+}
+
+func TestImportChildProcessPromisesNamed(t *testing.T) {
+	ts := `import { exec } from "node:child_process/promises";
+const p = exec("ls");`
+	out := compile(t, ts)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/child_process"`)
+	assertContains(t, out, `child_process.PromisesAsJSValue.Get("exec").Call(`)
+}
+
+func TestImportDnsPromisesNamed(t *testing.T) {
+	ts := `import { lookup } from "node:dns/promises";
+const p = lookup("localhost");`
+	out := compile(t, ts)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/dns"`)
+	assertContains(t, out, `dns.PromisesAsJSValue.Get("lookup").Call(`)
+}
+
+func TestImportCryptoPromiseVariant(t *testing.T) {
+	ts := `import crypto from "node:crypto";
+const p = crypto.scrypt("pass", "salt", 8);`
+	out := compile(t, ts)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/crypto"`)
+	assertContains(t, out, `crypto.AsJSValue.MethodCall("scrypt"`)
+}
+
+func TestImportZlibPromisesNamed(t *testing.T) {
+	ts := `import { gzip } from "node:zlib/promises";
+const p = gzip("hello");`
+	out := compile(t, ts)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/zlib"`)
+	assertContains(t, out, `zlib.PromisesAsJSValue.Get("gzip").Call(`)
+}
+
+func TestImportTimersPromisesDefault(t *testing.T) {
+	ts := `import timers from "node:timers/promises";
+const p = timers.setImmediate();`
+	out := compile(t, ts)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/timers"`)
+	assertContains(t, out, `timers.PromisesAsJSValue.MethodCall("setImmediate"`)
+}
+
+func TestImportStreamPromisesDefault(t *testing.T) {
+	ts := `import stream from "node:stream/promises";
+const p = stream.finished(a);`
+	out := compile(t, ts)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/stream"`)
+	assertContains(t, out, `stream.PromisesAsJSValue.MethodCall("finished"`)
+}
+
 func TestImportNamespaceOS(t *testing.T) {
 	ts := `import * as os from "os";
 const h = os.homedir();`

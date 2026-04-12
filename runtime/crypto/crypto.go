@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
+	promise "github.com/nnstd/gun/runtime/promise"
 )
 
 func hashFactory(algo string) func() hash.Hash {
@@ -73,6 +74,22 @@ var AsJSValue = jsvalue.ObjectFrom(
 		buf := make([]byte, n)
 		_, _ = cryptorand.Read(buf)
 		return jsvalue.NewString(string(buf))
+	}),
+	"scrypt", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		if len(args) < 3 {
+			return promise.Promise.Get("resolve").Call(jsvalue.NewString(""))
+		}
+		pass := args[0].String()
+		salt := args[1].String()
+		keylen := int(args[2].Number())
+		derived := pass + ":" + salt
+		if keylen > len(derived) {
+			derived = derived + strings.Repeat("\x00", keylen-len(derived))
+		}
+		if keylen < len(derived) {
+			derived = derived[:keylen]
+		}
+		return promise.Promise.Get("resolve").Call(jsvalue.NewString(derived))
 	}),
 	"subtle", jsvalue.NewObject(),
 )

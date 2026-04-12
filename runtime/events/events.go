@@ -1,6 +1,9 @@
 package events
 
-import jsvalue "github.com/nnstd/gun/runtime/builtin"
+import (
+	jsvalue "github.com/nnstd/gun/runtime/builtin"
+	promise "github.com/nnstd/gun/runtime/promise"
+)
 
 var EventEmitter *jsvalue.JSValue
 var AsJSValue *jsvalue.JSValue
@@ -103,5 +106,32 @@ func init() {
 
 	AsJSValue = jsvalue.ObjectFrom(
 		"EventEmitter", EventEmitter,
+		"once", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+			if len(args) < 2 || args[0] == nil {
+				return promise.Promise.Get("resolve").Call(jsvalue.NewArray())
+			}
+			emitter := args[0]
+			event := args[1]
+			return promise.Promise.Call(jsvalue.NewFunction(func(inner ...*jsvalue.JSValue) *jsvalue.JSValue {
+				resolve := inner[0]
+				reject := inner[1]
+				handler := jsvalue.NewFunction(func(callArgs ...*jsvalue.JSValue) *jsvalue.JSValue {
+					resolve.Call(jsvalue.NewArray(callArgs...))
+					return jsvalue.NewUndefined()
+				})
+				emitter.MethodCall("once", event, handler)
+				if event.String() != "error" {
+					emitter.MethodCall("once", jsvalue.NewString("error"), jsvalue.NewFunction(func(callArgs ...*jsvalue.JSValue) *jsvalue.JSValue {
+						if len(callArgs) > 0 {
+							reject.Call(callArgs[0])
+						} else {
+							reject.Call(jsvalue.NewUndefined())
+						}
+						return jsvalue.NewUndefined()
+					}))
+				}
+				return jsvalue.NewUndefined()
+			}))
+		}),
 	)
 }
