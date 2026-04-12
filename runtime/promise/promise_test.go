@@ -1,0 +1,56 @@
+package promise
+
+import (
+	"testing"
+
+	jsvalue "github.com/nnstd/gun/runtime/builtin"
+)
+
+func TestPromiseResolveThen(t *testing.T) {
+	p := Promise.Get("resolve").Call(jsvalue.NewString("ok"))
+	got := p.MethodCall("then", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		if len(args) > 0 {
+			return args[0]
+		}
+		return jsvalue.NewUndefined()
+	}))
+	if got.Get("__promise_value").String() != "ok" {
+		t.Fatalf("resolved value = %q, want ok", got.Get("__promise_value").String())
+	}
+}
+
+func TestPromiseRejectCatch(t *testing.T) {
+	p := Promise.Get("reject").Call(jsvalue.NewString("bad"))
+	got := p.MethodCall("catch", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		return jsvalue.NewString("handled")
+	}))
+	if got.Get("__promise_value").String() != "handled" {
+		t.Fatalf("catch result = %q, want handled", got.Get("__promise_value").String())
+	}
+}
+
+func TestPromiseFinally(t *testing.T) {
+	called := false
+	p := Promise.Get("resolve").Call(jsvalue.NewString("ok"))
+	got := p.MethodCall("finally", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		called = true
+		return jsvalue.NewUndefined()
+	}))
+	if !called {
+		t.Fatal("finally callback not called")
+	}
+	if got.Get("__promise_value").String() != "ok" {
+		t.Fatalf("finally result = %q, want ok", got.Get("__promise_value").String())
+	}
+}
+
+func TestPromiseAll(t *testing.T) {
+	arr := jsvalue.NewArray(
+		Promise.Get("resolve").Call(jsvalue.NewString("a")),
+		Promise.Get("resolve").Call(jsvalue.NewString("b")),
+	)
+	got := Promise.Get("all").Call(arr)
+	if got.Get("__promise_value").Len() != 2 {
+		t.Fatalf("Promise.all len = %d, want 2", got.Get("__promise_value").Len())
+	}
+}

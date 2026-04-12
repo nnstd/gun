@@ -491,7 +491,7 @@ func TestNaNGlobal(t *testing.T) {
 func TestPromiseGlobal(t *testing.T) {
 	ts := `const p = Promise.resolve(42);`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.NewObject()")
+	assertContains(t, out, `promise.Promise.Get("resolve").Call(`)
 	assertNotContains(t, out, "undefined: Promise")
 }
 

@@ -109,6 +109,24 @@ func registerGlobalObjects(ctx *tcontext.TranspilerContext) {
 		},
 	})
 
+	ctx.RegisterGlobal(&tcontext.GlobalObject{
+		Name: "Promise",
+		TransformCall: func(method string, args []ast.Expr, _ bool, imp tcontext.Imports) ast.Expr {
+			imp.AddImport("github.com/nnstd/gun/runtime/promise")
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			for i, arg := range args {
+				args[i] = jsvalueWrapLit(arg)
+			}
+			return callExpr(
+				selectorExpr(
+					callExpr(selectorExpr(selectorExpr(ident("promise"), "Promise"), "Get"), stringLit(method)),
+					"Call",
+				),
+				args...,
+			)
+		},
+	})
+
 	// Error types as global objects (for static methods like Error.captureStackTrace)
 	for _, errType := range []string{"Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError"} {
 		et := errType // capture
@@ -367,6 +385,18 @@ func registerConstructors(ctx *tcontext.TranspilerContext) {
 	})
 
 	ctx.RegisterConstructor(&tcontext.Constructor{
+		Name: "Promise",
+		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+			imp.AddImport("github.com/nnstd/gun/runtime/promise")
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			for i, arg := range args {
+				args[i] = jsvalueWrapLit(arg)
+			}
+			return callExpr(selectorExpr(selectorExpr(ident("promise"), "Promise"), "Call"), args...)
+		},
+	})
+
+	ctx.RegisterConstructor(&tcontext.Constructor{
 		Name: "IntlSegmenter",
 		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
 			imp.AddImport("github.com/nnstd/gun/runtime/builtin/intl")
@@ -501,8 +531,8 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "Promise",
 		Transform: func(imp tcontext.Imports) ast.Expr {
-			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "NewObject"))
+			imp.AddImport("github.com/nnstd/gun/runtime/promise")
+			return selectorExpr(ident("promise"), "Promise")
 		},
 	})
 
