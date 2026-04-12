@@ -396,6 +396,7 @@ func TestRoundTripPrivateClassFieldsAndMethods(t *testing.T) {
 	assertContains(t, out, `PropertyKey(jsvalue.NewSymbol("Counter.#count"))`)
 	assertContains(t, out, `PropertyKey(jsvalue.NewSymbol("Counter.#inc"))`)
 	assertContains(t, out, `PropertyKey(jsvalue.NewSymbol("Counter.#label"))`)
+	assertContains(t, out, `PropertyKey(jsvalue.NewSymbol("Counter.#brand"))`)
 	assertNotContains(t, out, `Get("#count")`)
 	assertNotContains(t, out, `Set("#count"`)
 	assertNotContains(t, out, `MethodCall("#inc"`)

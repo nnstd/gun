@@ -45,7 +45,7 @@ func Keys(obj *JSValue) *JSValue {
 	if obj == nil {
 		return NewArray()
 	}
-	keys := obj.OwnKeys()
+	keys := obj.EnumerableOwnKeys()
 	result := make([]*JSValue, len(keys))
 	for i, key := range keys {
 		result[i] = NewString(key)
@@ -59,7 +59,7 @@ func Values(obj *JSValue) *JSValue {
 	if obj == nil {
 		return NewArray()
 	}
-	keys := obj.OwnKeys()
+	keys := obj.EnumerableOwnKeys()
 	result := make([]*JSValue, 0, len(keys))
 	for _, key := range keys {
 		result = append(result, obj.Get(key))
@@ -73,7 +73,7 @@ func Entries(obj *JSValue) *JSValue {
 	if obj == nil {
 		return NewArray()
 	}
-	keys := obj.OwnKeys()
+	keys := obj.EnumerableOwnKeys()
 	result := make([]*JSValue, 0, len(keys))
 	for _, key := range keys {
 		result = append(result, NewArray(NewString(key), obj.Get(key)))

@@ -151,3 +151,17 @@ func (v *JSValue) OwnKeys() []string {
 	}
 	return keys
 }
+
+// EnumerableOwnKeys returns the names of enumerable own properties only.
+func (v *JSValue) EnumerableOwnKeys() []string {
+	if v.properties == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(v.properties))
+	for k, desc := range v.properties {
+		if desc != nil && desc.Enumerable {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}

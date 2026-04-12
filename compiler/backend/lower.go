@@ -32,28 +32,29 @@ type CrossFileExport struct {
 
 // Lowerer converts an HIR Module into a go/ast.File.
 type Lowerer struct {
-	symtab           *symbol.Table
-	ctx              *context.TranspilerContext
-	imports          map[string]string // Go import path → alias
-	decls            []ast.Decl
-	importedSyms     map[*symbol.Symbol]importResolution // how each imported symbol resolves to Go
-	moduleName       string                              // Go module name for relative import resolution
-	samePackage      bool                                // treat relative imports as same-package refs
-	varTypes         map[string]string                   // variable name → module type (e.g. "hono")
-	reservedNames    map[string]bool
-	importNameMap    map[string]string
-	exportAliasMap   map[string]string
-	eagerVarInits    map[symbol.ID]bool
-	crossFileExports map[string]bool // Go names from other files (prevents .Get() dispatch)
-	initStmts        []ast.Stmt      // statements for init() function
-	pkgName          string          // Go package name
-	currentClassName string          // set during class constructor/method lowering
-	insideFunc       int             // >0 when inside a function body
-	insideMethod     int             // >0 when inside a method body (_args[0] is this)
-	privateKeys      map[string]string
-	syntheticCounter int
-	needsBunWait     bool
-	sourcePath       string
+	symtab            *symbol.Table
+	ctx               *context.TranspilerContext
+	imports           map[string]string // Go import path → alias
+	decls             []ast.Decl
+	importedSyms      map[*symbol.Symbol]importResolution // how each imported symbol resolves to Go
+	moduleName        string                              // Go module name for relative import resolution
+	samePackage       bool                                // treat relative imports as same-package refs
+	varTypes          map[string]string                   // variable name → module type (e.g. "hono")
+	reservedNames     map[string]bool
+	importNameMap     map[string]string
+	exportAliasMap    map[string]string
+	eagerVarInits     map[symbol.ID]bool
+	crossFileExports  map[string]bool // Go names from other files (prevents .Get() dispatch)
+	initStmts         []ast.Stmt      // statements for init() function
+	pkgName           string          // Go package name
+	currentClassName  string          // set during class constructor/method lowering
+	insideFunc        int             // >0 when inside a function body
+	insideMethod      int             // >0 when inside a method body (_args[0] is this)
+	privateKeys       map[string]string
+	currentClassBrand string
+	syntheticCounter  int
+	needsBunWait      bool
+	sourcePath        string
 }
 
 // Lower converts an HIR module to a Go AST file.
@@ -289,17 +290,22 @@ func (l *Lowerer) lowerVarDecl(d *hir.VarDecl) {
 func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 	l.jsvalueImport()
 	name := l.emitName(d.Symbol)
+	brandKey := l.nextSyntheticName(fmt.Sprintf("_brand_%s", symbol.Sanitize(name)))
+	l.decls = append(l.decls, varDecl(brandKey, nil, l.brandKeyValue(name)))
 	privateKeys := l.collectPrivateKeys(name, d.Properties, d.Methods)
 	for _, decl := range l.lowerPrivateKeyDecls(name, privateKeys) {
 		l.decls = append(l.decls, decl)
 	}
 
 	prevClassName := l.currentClassName
+	prevClassBrand := l.currentClassBrand
 	prevPrivateKeys := l.privateKeys
 	l.currentClassName = name
+	l.currentClassBrand = brandKey
 	l.privateKeys = privateKeys
 	defer func() {
 		l.currentClassName = prevClassName
+		l.currentClassBrand = prevClassBrand
 		l.privateKeys = prevPrivateKeys
 	}()
 
@@ -312,7 +318,7 @@ func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 	l.decls = append(l.decls, varDecl(name, nil,
 		callExpr(selectorExpr(goIdent("jsvalue"), "NewClass"), ctorLit, parentExpr)))
 
-	l.initStmts = append(l.initStmts, l.lowerClassSetups(goIdent(name), d.Properties, d.Methods, d.StaticInits)...)
+	l.initStmts = append(l.initStmts, l.lowerClassSetups(goIdent(name), goIdent(brandKey), d.Properties, d.Methods, d.StaticInits)...)
 }
 
 func (l *Lowerer) collectPrivateKeys(className string, props []*hir.ClassProperty, methods []*hir.ClassMethod) map[string]string {
@@ -354,6 +360,22 @@ func (l *Lowerer) lowerPrivateKeyDecls(className string, keys map[string]string)
 		decls = append(decls, varDecl(goName, nil, value))
 	}
 	return decls
+}
+
+func (l *Lowerer) brandKeyValue(className string) ast.Expr {
+	l.jsvalueImport()
+	desc := fmt.Sprintf("%s.#brand", className)
+	return callExpr(
+		selectorExpr(goIdent("jsvalue"), "PropertyKey"),
+		callExpr(selectorExpr(goIdent("jsvalue"), "NewSymbol"), stringLit(desc)),
+	)
+}
+
+func (l *Lowerer) privateBrandCheck(target ast.Expr) ast.Expr {
+	if l.currentClassBrand == "" {
+		return goIdent("false")
+	}
+	return callExpr(selectorExpr(target, "HasOwnProperty"), goIdent(l.currentClassBrand))
 }
 
 func (l *Lowerer) nextSyntheticName(base string) string {
@@ -424,6 +446,9 @@ func isCallSuperStmt(stmt ast.Stmt, className string) bool {
 
 func (l *Lowerer) lowerClassInstanceInits(props []*hir.ClassProperty, methods []*hir.ClassMethod) []ast.Stmt {
 	var stmts []ast.Stmt
+	if l.currentClassBrand != "" {
+		stmts = append(stmts, l.defineHiddenProperty(goIdent("this"), goIdent(l.currentClassBrand), callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"), goIdent("true"))))
+	}
 	for _, prop := range props {
 		if prop.IsStatic {
 			continue
@@ -443,8 +468,11 @@ func (l *Lowerer) lowerClassInstanceInits(props []*hir.ClassProperty, methods []
 	return stmts
 }
 
-func (l *Lowerer) lowerClassSetups(classRef ast.Expr, props []*hir.ClassProperty, methods []*hir.ClassMethod, staticInits []hir.Expr) []ast.Stmt {
+func (l *Lowerer) lowerClassSetups(classRef ast.Expr, brandKey ast.Expr, props []*hir.ClassProperty, methods []*hir.ClassMethod, staticInits []hir.Expr) []ast.Stmt {
 	var stmts []ast.Stmt
+	if brandKey != nil {
+		stmts = append(stmts, l.defineHiddenProperty(classRef, brandKey, callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"), goIdent("true"))))
+	}
 	for _, prop := range props {
 		if !prop.IsStatic {
 			continue
@@ -509,6 +537,22 @@ func (l *Lowerer) lowerClassMethodValue(m *hir.ClassMethod) ast.Expr {
 	return callExpr(selectorExpr(
 		callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), methodLit),
 		"MarkAsMethod"))
+}
+
+func (l *Lowerer) defineHiddenProperty(target, key, value ast.Expr) ast.Stmt {
+	l.jsvalueImport()
+	desc := callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"),
+		&ast.CompositeLit{
+			Type: &ast.MapType{Key: goIdent("string"), Value: &ast.InterfaceType{Methods: &ast.FieldList{}}},
+			Elts: []ast.Expr{
+				&ast.KeyValueExpr{Key: stringLit("value"), Value: value},
+				&ast.KeyValueExpr{Key: stringLit("writable"), Value: callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"), goIdent("true"))},
+				&ast.KeyValueExpr{Key: stringLit("enumerable"), Value: callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"), goIdent("false"))},
+				&ast.KeyValueExpr{Key: stringLit("configurable"), Value: callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"), goIdent("true"))},
+			},
+		},
+	)
+	return exprStmt(callExpr(selectorExpr(goIdent("jsvalue"), "DefineProperty"), target, key, desc))
 }
 
 func (l *Lowerer) lowerClassMemberKey(name string, isPrivate bool, computed hir.Expr) ast.Expr {

@@ -8,20 +8,28 @@ const (
 	stateRejected  = "rejected"
 )
 
-const (
-	promiseStateKey    = "__promise_state"
-	promiseValueKey    = "__promise_value"
-	promiseFulfillKey  = "__promise_fulfill_handlers"
-	promiseRejectKey   = "__promise_reject_handlers"
+var Promise *jsvalue.JSValue
+var (
+	promiseStateKey   = jsvalue.PropertyKey(jsvalue.NewSymbol("Promise.state"))
+	promiseValueKey   = jsvalue.PropertyKey(jsvalue.NewSymbol("Promise.value"))
+	promiseFulfillKey = jsvalue.PropertyKey(jsvalue.NewSymbol("Promise.fulfill_handlers"))
+	promiseRejectKey  = jsvalue.PropertyKey(jsvalue.NewSymbol("Promise.reject_handlers"))
 )
 
-var Promise *jsvalue.JSValue
+func defineInternal(p *jsvalue.JSValue, key string, value *jsvalue.JSValue) {
+	p.DefineProperty(key, &jsvalue.PropertyDescriptor{
+		Value:        value,
+		Writable:     true,
+		Enumerable:   false,
+		Configurable: true,
+	})
+}
 
 func getHandlers(p *jsvalue.JSValue, key string) *jsvalue.JSValue {
 	list := p.Get(key)
 	if !list.IsArray() {
 		list = jsvalue.NewArray()
-		p.Set(key, list)
+		defineInternal(p, key, list)
 	}
 	return list
 }
@@ -60,8 +68,8 @@ func dispatchHandlers(p *jsvalue.JSValue) {
 			}
 		}
 	}
-	p.Set(promiseFulfillKey, jsvalue.NewArray())
-	p.Set(promiseRejectKey, jsvalue.NewArray())
+	defineInternal(p, promiseFulfillKey, jsvalue.NewArray())
+	defineInternal(p, promiseRejectKey, jsvalue.NewArray())
 }
 
 func fulfill(p *jsvalue.JSValue, value *jsvalue.JSValue) *jsvalue.JSValue {
@@ -89,8 +97,8 @@ func fulfill(p *jsvalue.JSValue, value *jsvalue.JSValue) *jsvalue.JSValue {
 		)
 		return p
 	}
-	p.Set(promiseStateKey, jsvalue.NewString(stateFulfilled))
-	p.Set(promiseValueKey, jsvalue.Nullish(value, jsvalue.NewUndefined()))
+	defineInternal(p, promiseStateKey, jsvalue.NewString(stateFulfilled))
+	defineInternal(p, promiseValueKey, jsvalue.Nullish(value, jsvalue.NewUndefined()))
 	dispatchHandlers(p)
 	return p
 }
@@ -99,18 +107,18 @@ func reject(p *jsvalue.JSValue, reason *jsvalue.JSValue) *jsvalue.JSValue {
 	if p == nil || getState(p) != statePending {
 		return p
 	}
-	p.Set(promiseStateKey, jsvalue.NewString(stateRejected))
-	p.Set(promiseValueKey, jsvalue.Nullish(reason, jsvalue.NewUndefined()))
+	defineInternal(p, promiseStateKey, jsvalue.NewString(stateRejected))
+	defineInternal(p, promiseValueKey, jsvalue.Nullish(reason, jsvalue.NewUndefined()))
 	dispatchHandlers(p)
 	return p
 }
 
 func init() {
 	Promise = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSValue) *jsvalue.JSValue {
-		this.Set(promiseStateKey, jsvalue.NewString(statePending))
-		this.Set(promiseValueKey, jsvalue.NewUndefined())
-		this.Set(promiseFulfillKey, jsvalue.NewArray())
-		this.Set(promiseRejectKey, jsvalue.NewArray())
+		defineInternal(this, promiseStateKey, jsvalue.NewString(statePending))
+		defineInternal(this, promiseValueKey, jsvalue.NewUndefined())
+		defineInternal(this, promiseFulfillKey, jsvalue.NewArray())
+		defineInternal(this, promiseRejectKey, jsvalue.NewArray())
 		if len(args) > 0 && args[0] != nil && args[0].TypeString() == "function" {
 			resolve := jsvalue.NewFunction(func(inner ...*jsvalue.JSValue) *jsvalue.JSValue {
 				value := jsvalue.NewUndefined()

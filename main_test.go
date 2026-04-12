@@ -349,6 +349,24 @@ new A().read({})
 			wantLine:    ":4:0",
 		},
 		{
+			name: "private_field_brand_mismatch_same_name",
+			src: `class A {
+  #x = 1
+  read(o) {
+    return o.#x
+  }
+}
+
+class B {
+  #x = 2
+}
+
+new A().read(new B())
+`,
+			wantMessage: "Cannot access invalid private field",
+			wantLine:    ":4:0",
+		},
+		{
 			name: "bun_serve_invalid_arg",
 			src: `Bun.serve(123 as any)
 `,

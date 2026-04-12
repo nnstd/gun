@@ -14,8 +14,8 @@ func TestPromiseResolveThen(t *testing.T) {
 		}
 		return jsvalue.NewUndefined()
 	}))
-	if got.Get("__promise_value").String() != "ok" {
-		t.Fatalf("resolved value = %q, want ok", got.Get("__promise_value").String())
+	if got.Get(promiseValueKey).String() != "ok" {
+		t.Fatalf("resolved value = %q, want ok", got.Get(promiseValueKey).String())
 	}
 }
 
@@ -24,8 +24,8 @@ func TestPromiseRejectCatch(t *testing.T) {
 	got := p.MethodCall("catch", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		return jsvalue.NewString("handled")
 	}))
-	if got.Get("__promise_value").String() != "handled" {
-		t.Fatalf("catch result = %q, want handled", got.Get("__promise_value").String())
+	if got.Get(promiseValueKey).String() != "handled" {
+		t.Fatalf("catch result = %q, want handled", got.Get(promiseValueKey).String())
 	}
 }
 
@@ -39,8 +39,8 @@ func TestPromiseFinally(t *testing.T) {
 	if !called {
 		t.Fatal("finally callback not called")
 	}
-	if got.Get("__promise_value").String() != "ok" {
-		t.Fatalf("finally result = %q, want ok", got.Get("__promise_value").String())
+	if got.Get(promiseValueKey).String() != "ok" {
+		t.Fatalf("finally result = %q, want ok", got.Get(promiseValueKey).String())
 	}
 }
 
@@ -50,7 +50,14 @@ func TestPromiseAll(t *testing.T) {
 		Promise.Get("resolve").Call(jsvalue.NewString("b")),
 	)
 	got := Promise.Get("all").Call(arr)
-	if got.Get("__promise_value").Len() != 2 {
-		t.Fatalf("Promise.all len = %d, want 2", got.Get("__promise_value").Len())
+	if got.Get(promiseValueKey).Len() != 2 {
+		t.Fatalf("Promise.all len = %d, want 2", got.Get(promiseValueKey).Len())
+	}
+}
+
+func TestPromiseInternalSlotsAreNotEnumerable(t *testing.T) {
+	p := Promise.Get("resolve").Call(jsvalue.NewString("ok"))
+	if got := jsvalue.Keys(p).Len(); got != 0 {
+		t.Fatalf("Object.keys(promise) len = %d, want 0", got)
 	}
 }

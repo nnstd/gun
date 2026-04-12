@@ -485,7 +485,11 @@ func (l *Lowerer) lowerBinaryExpr(e *hir.BinaryExpr) ast.Expr {
 	case hir.OpIn:
 		if priv, ok := e.Left.(*hir.PrivateIdentifierExpr); ok {
 			return callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"),
-				callExpr(selectorExpr(right, "HasOwnProperty"), l.privateKeyExpr(priv.Name)))
+				&ast.BinaryExpr{
+					X:  l.privateBrandCheck(right),
+					Op: token.LAND,
+					Y:  callExpr(selectorExpr(right, "HasOwnProperty"), l.privateKeyExpr(priv.Name)),
+				})
 		}
 		// key in obj → jsvalue.NewBool(obj.HasOwnProperty(fmt.Sprint(key)))
 		l.addImport("fmt")
@@ -957,13 +961,16 @@ func (l *Lowerer) lowerClassExpr(e *hir.ClassExpr) ast.Expr {
 	if symbolicName == "" {
 		symbolicName = fmt.Sprintf("anonymousClass%d", l.syntheticCounter+1)
 	}
+	brandKey := l.nextSyntheticName(fmt.Sprintf("_brand_%s", symbol.Sanitize(symbolicName)))
 	privateKeys := l.collectPrivateKeys(symbolicName, e.Properties, e.Methods)
 
 	prevClassName := l.currentClassName
+	prevClassBrand := l.currentClassBrand
 	prevPrivateKeys := l.privateKeys
 	l.privateKeys = privateKeys
 	defer func() {
 		l.currentClassName = prevClassName
+		l.currentClassBrand = prevClassBrand
 		l.privateKeys = prevPrivateKeys
 	}()
 
@@ -973,6 +980,7 @@ func (l *Lowerer) lowerClassExpr(e *hir.ClassExpr) ast.Expr {
 	}
 
 	stmts := make([]ast.Stmt, 0, len(privateKeys)+4)
+	stmts = append(stmts, assignDefine([]ast.Expr{goIdent(brandKey)}, []ast.Expr{l.brandKeyValue(symbolicName)}))
 	for member, goName := range privateKeys {
 		desc := fmt.Sprintf("%s.#%s", symbolicName, member)
 		value := callExpr(
@@ -988,6 +996,7 @@ func (l *Lowerer) lowerClassExpr(e *hir.ClassExpr) ast.Expr {
 		stmts = append(stmts, &ast.DeclStmt{Decl: varDecl(symbol.Sanitize(e.Name), jsValuePtrType(), nil)})
 	}
 	l.currentClassName = classVar.Name
+	l.currentClassBrand = brandKey
 	ctorLit := l.lowerClassConstructor(classVar.Name, e.Parent != nil, e.Constructor, e.Properties, e.Methods)
 	stmts = append(stmts,
 		assignStmt([]ast.Expr{classVar}, []ast.Expr{
@@ -997,7 +1006,7 @@ func (l *Lowerer) lowerClassExpr(e *hir.ClassExpr) ast.Expr {
 	if e.Name != "" {
 		stmts = append(stmts, assignStmt([]ast.Expr{goIdent(symbol.Sanitize(e.Name))}, []ast.Expr{classVar}))
 	}
-	stmts = append(stmts, l.lowerClassSetups(classVar, e.Properties, e.Methods, e.StaticInits)...)
+	stmts = append(stmts, l.lowerClassSetups(classVar, goIdent(brandKey), e.Properties, e.Methods, e.StaticInits)...)
 	stmts = append(stmts, returnStmt(classVar))
 
 	return &ast.CallExpr{
@@ -1018,6 +1027,13 @@ func (l *Lowerer) lowerPrivateGet(mem *hir.MemberExpr) ast.Expr {
 	objExpr := l.lowerExpr(mem.Object)
 	access := describeHIRExpr(mem.Object) + ".#" + mem.Property
 	marker := l.lineDirectiveMarker(mem.Span)
+	brandCheck := l.privateBrandCheck(goIdent("_obj"))
+	hasKey := callExpr(selectorExpr(goIdent("_obj"), "HasOwnProperty"), key)
+	invalidCond := &ast.BinaryExpr{
+		X:  brandCheck,
+		Op: token.LAND,
+		Y:  hasKey,
+	}
 	ifBody := []ast.Stmt{}
 	if marker != nil {
 		ifBody = append(ifBody, marker)
@@ -1029,7 +1045,7 @@ func (l *Lowerer) lowerPrivateGet(mem *hir.MemberExpr) ast.Expr {
 	}
 	body = append(body,
 		&ast.IfStmt{
-			Cond: &ast.UnaryExpr{Op: token.NOT, X: callExpr(selectorExpr(goIdent("_obj"), "HasOwnProperty"), key)},
+			Cond: &ast.UnaryExpr{Op: token.NOT, X: invalidCond},
 			Body: blockStmt(ifBody...),
 		},
 	)
@@ -1053,6 +1069,9 @@ func (l *Lowerer) lowerPrivateAssignExpr(mem *hir.MemberExpr, op hir.AssignOp, r
 	objExpr := l.lowerExpr(mem.Object)
 	access := describeHIRExpr(mem.Object) + ".#" + mem.Property + " = " + describeHIRExpr(rhsHIR)
 	marker := l.lineDirectiveMarker(mem.Span)
+	brandCheck := l.privateBrandCheck(goIdent("_obj"))
+	hasKey := callExpr(selectorExpr(goIdent("_obj"), "HasOwnProperty"), key)
+	validCond := &ast.BinaryExpr{X: brandCheck, Op: token.LAND, Y: hasKey}
 	return callExpr(&ast.FuncLit{
 		Type: &ast.FuncType{
 			Params:  fieldList(goField("_obj", jsValuePtrType())),
@@ -1075,7 +1094,7 @@ func (l *Lowerer) lowerPrivateAssignExpr(mem *hir.MemberExpr, op hir.AssignOp, r
 				body = append(body, marker)
 			}
 			body = append(body, &ast.IfStmt{
-				Cond: &ast.UnaryExpr{Op: token.NOT, X: callExpr(selectorExpr(goIdent("_obj"), "HasOwnProperty"), key)},
+				Cond: &ast.UnaryExpr{Op: token.NOT, X: validCond},
 				Body: blockStmt(ifBody...),
 			})
 			if marker != nil {
@@ -1099,6 +1118,9 @@ func (l *Lowerer) lowerPrivateMethodCall(mem *hir.MemberExpr, args []ast.Expr, h
 	access := describeHIRExpr(mem.Object) + ".#" + mem.Property
 	callArgs := append([]ast.Expr{key}, args...)
 	marker := l.lineDirectiveMarker(mem.Span)
+	brandCheck := l.privateBrandCheck(goIdent("_obj"))
+	hasKey := callExpr(selectorExpr(goIdent("_obj"), "HasOwnProperty"), key)
+	validCond := &ast.BinaryExpr{X: brandCheck, Op: token.LAND, Y: hasKey}
 	ifBody := []ast.Stmt{}
 	if marker != nil {
 		ifBody = append(ifBody, marker)
@@ -1109,7 +1131,7 @@ func (l *Lowerer) lowerPrivateMethodCall(mem *hir.MemberExpr, args []ast.Expr, h
 		body = append(body, marker)
 	}
 	body = append(body, &ast.IfStmt{
-		Cond: &ast.UnaryExpr{Op: token.NOT, X: callExpr(selectorExpr(goIdent("_obj"), "HasOwnProperty"), key)},
+		Cond: &ast.UnaryExpr{Op: token.NOT, X: validCond},
 		Body: blockStmt(ifBody...),
 	})
 	if marker != nil {
