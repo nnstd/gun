@@ -139,15 +139,8 @@ func (v *asyncPhase1Validator) walkStmt(s Stmt, ctx phase1Context) {
 				return
 			}
 			if assign, ok := s.Expr.(*AssignExpr); ok {
-				if assign.LeftPattern != nil {
-					v.add(assign.Span, "destructuring assignments are not implemented in async function declarations yet")
-					return
-				}
 				if await, ok := directAwait(assign.Right); ok {
-					if assign.Op != OpAssign {
-						v.add(assign.Span, "augmented assignments with await are not implemented in async function declarations yet")
-						return
-					}
+					v.walkPattern(assign.LeftPattern, phase1Context{})
 					v.walkExpr(assign.Left, phase1Context{})
 					v.walkExpr(await.Value, phase1Context{})
 					return
@@ -185,10 +178,6 @@ func (v *asyncPhase1Validator) walkStmt(s Stmt, ctx phase1Context) {
 		v.walkBlock(s.Body, ctx)
 		v.walkExpr(s.Cond, ctx)
 	case *SwitchStmt:
-		if ctx.inAsyncDecl && switchCaseValuesContainAwait(s.Cases) {
-			v.add(s.Span, "switch is not implemented in async function declarations yet")
-			return
-		}
 		v.walkExpr(s.Tag, ctx)
 		for _, c := range s.Cases {
 			v.walkExpr(c.Value, ctx)
@@ -217,10 +206,6 @@ func (v *asyncPhase1Validator) walkStmt(s Stmt, ctx phase1Context) {
 	case *ThrowStmt:
 		v.walkExpr(s.Value, ctx)
 	case *LabeledStmt:
-		if ctx.inAsyncDecl {
-			v.add(nil, "labeled statements are not implemented in async function declarations yet")
-			return
-		}
 		v.walkStmt(s.Stmt, ctx)
 	case *VarDecl:
 		for _, decl := range s.Declarators {
@@ -494,13 +479,4 @@ func stmtContainsAwait(s Stmt) bool {
 	default:
 		return false
 	}
-}
-
-func switchCaseValuesContainAwait(cases []*CaseClause) bool {
-	for _, c := range cases {
-		if exprContainsAwait(c.Value) {
-			return true
-		}
-	}
-	return false
 }

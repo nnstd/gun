@@ -578,6 +578,127 @@ load(2).then((result) => { console.log(result) })
 	}
 }
 
+func TestTranspileProject_AsyncDestructuringAssignmentRuns(t *testing.T) {
+	fixture := filepath.Join(t.TempDir(), "async_destructure_assign.ts")
+	if err := os.WriteFile(fixture, []byte(`async function load() {
+	let a = 0
+	let b = 0
+	;[a, b] = await Promise.resolve([1, 2])
+	return a + b
+}
+
+load().then((result) => { console.log(result) })
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildFixture(t, fixture)
+	cmd := exec.Command(bin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "3" {
+		t.Fatalf("stdout mismatch: got %q want %q\nstderr:\n%s", got, "3", stderr.String())
+	}
+}
+
+func TestTranspileProject_AsyncSwitchCaseAwaitRuns(t *testing.T) {
+	fixture := filepath.Join(t.TempDir(), "async_switch_case_await.ts")
+	if err := os.WriteFile(fixture, []byte(`async function load(value) {
+	switch (value) {
+		case await Promise.resolve(1):
+			return "one"
+		case await Promise.resolve(2):
+			return "two"
+		default:
+			return "other"
+	}
+}
+
+load(2).then((result) => { console.log(result) })
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildFixture(t, fixture)
+	cmd := exec.Command(bin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "two" {
+		t.Fatalf("stdout mismatch: got %q want %q\nstderr:\n%s", got, "two", stderr.String())
+	}
+}
+
+func TestTranspileProject_AsyncAugmentedAssignmentRuns(t *testing.T) {
+	fixture := filepath.Join(t.TempDir(), "async_aug_assign.ts")
+	if err := os.WriteFile(fixture, []byte(`async function load() {
+	let total = 1
+	total += await Promise.resolve(2)
+	return total
+}
+
+load().then((result) => { console.log(result) })
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildFixture(t, fixture)
+	cmd := exec.Command(bin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "3" {
+		t.Fatalf("stdout mismatch: got %q want %q\nstderr:\n%s", got, "3", stderr.String())
+	}
+}
+
+func TestTranspileProject_AsyncLabeledLoopRuns(t *testing.T) {
+	fixture := filepath.Join(t.TempDir(), "async_labeled.ts")
+	if err := os.WriteFile(fixture, []byte(`async function load() {
+	let out = ""
+	outer: for (let i = 0; await Promise.resolve(i < 3); i = await Promise.resolve(i + 1)) {
+		for (const value of [1, 2, 3]) {
+			await Promise.resolve(0)
+			if (value === 2) {
+				continue outer
+			}
+			if (value === 3) {
+				break outer
+			}
+			out = out + value
+		}
+	}
+	return out
+}
+
+load().then((result) => { console.log(result) })
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildFixture(t, fixture)
+	cmd := exec.Command(bin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "111" {
+		t.Fatalf("stdout mismatch: got %q want %q\nstderr:\n%s", got, "111", stderr.String())
+	}
+}
+
 func TestTranspileProject_AsyncMainRuns(t *testing.T) {
 	fixture := filepath.Join(t.TempDir(), "async_main.ts")
 	if err := os.WriteFile(fixture, []byte(`async function main() {

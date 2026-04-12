@@ -12,6 +12,8 @@ type asyncLoopLabels struct {
 	breakLabel    int
 	continueLabel int
 	valid         bool
+	namedBreak    map[string]int
+	namedContinue map[string]int
 }
 
 type asyncProtected struct {
@@ -321,6 +323,8 @@ func (l *Lowerer) lowerAsyncLocalDecls(body *hir.BlockStmt) []ast.Stmt {
 					walkStmt(st)
 				}
 			}
+		case *hir.LabeledStmt:
+			walkStmt(s.Stmt)
 		case *hir.TryCatchStmt:
 			if s.Catch != nil && s.Catch.Param != nil && !seen[s.Catch.Param.ID] {
 				seen[s.Catch.Param.ID] = true
@@ -383,14 +387,24 @@ func (b *asyncFuncBuilder) compileStmt(stmt hir.Stmt, next int, loop asyncLoopLa
 		if assign, ok := s.Expr.(*hir.AssignExpr); ok {
 			if await, ok := asyncDirectAwait(assign.Right); ok {
 				label := b.newLabel()
-				assignStmt := b.l.lowerStmt(&hir.ExprStmt{Expr: &hir.AssignExpr{
-					Op:   assign.Op,
-					Left: assign.Left,
+				assignExpr := &hir.AssignExpr{
+					Op:          assign.Op,
+					Left:        assign.Left,
+					LeftPattern: assign.LeftPattern,
 					Right: &hir.Identifier{
 						Name: b.awaitValueName,
 					},
-				}})
-				b.addCase(label, b.awaitCase(await.Value, next, []ast.Stmt{assignStmt}, nil, protected, finalizer))
+				}
+				assignStmt := b.l.lowerStmt(&hir.ExprStmt{Expr: assignExpr})
+				var onFulfilled []ast.Stmt
+				if assignStmt != nil {
+					if block, ok := assignStmt.(*ast.BlockStmt); ok {
+						onFulfilled = append(onFulfilled, block.List...)
+					} else {
+						onFulfilled = append(onFulfilled, assignStmt)
+					}
+				}
+				b.addCase(label, b.awaitCase(await.Value, next, onFulfilled, nil, protected, finalizer))
 				return label
 			}
 		}
@@ -618,7 +632,7 @@ func (b *asyncFuncBuilder) compileStmt(stmt hir.Stmt, next int, loop asyncLoopLa
 		return initLabel
 	case *hir.SwitchStmt:
 		exitTarget := next
-		switchLoop := asyncLoopLabels{breakLabel: exitTarget, continueLabel: loop.continueLabel, valid: true}
+		switchLoop := asyncLoopLabels{breakLabel: exitTarget, continueLabel: loop.continueLabel, valid: true, namedBreak: loop.namedBreak, namedContinue: loop.namedContinue}
 		clauseEntries := make([]int, len(s.Cases))
 		nextEntry := exitTarget
 		for i := len(s.Cases) - 1; i >= 0; i-- {
@@ -643,6 +657,238 @@ func (b *asyncFuncBuilder) compileStmt(stmt hir.Stmt, next int, loop asyncLoopLa
 			dispatchTarget = label
 		}
 		return dispatchTarget
+	case *hir.LabeledStmt:
+		if s.Stmt == nil {
+			return next
+		}
+		labeledLoop := asyncLoopLabels{
+			breakLabel:    loop.breakLabel,
+			continueLabel: loop.continueLabel,
+			valid:         loop.valid,
+			namedBreak:    cloneIntMap(loop.namedBreak),
+			namedContinue: cloneIntMap(loop.namedContinue),
+		}
+		switch inner := s.Stmt.(type) {
+		case *hir.ForStmt:
+			exitTarget := next
+			condEntryLabel := b.newLabel()
+			postLabel := condEntryLabel
+			if inner.Post != nil {
+				postLabel = b.compileExprLoopStep(inner.Post, condEntryLabel, labeledLoop, protected, finalizer)
+			}
+			bodyLoop := asyncLoopLabels{
+				breakLabel:    exitTarget,
+				continueLabel: postLabel,
+				valid:         true,
+				namedBreak:    cloneIntMap(loop.namedBreak),
+				namedContinue: cloneIntMap(loop.namedContinue),
+			}
+			if bodyLoop.namedBreak == nil {
+				bodyLoop.namedBreak = map[string]int{}
+			}
+			if bodyLoop.namedContinue == nil {
+				bodyLoop.namedContinue = map[string]int{}
+			}
+			bodyLoop.namedBreak[s.Label] = exitTarget
+			bodyLoop.namedContinue[s.Label] = postLabel
+			bodyEntry := b.compileSeq(inner.Body.Stmts, postLabel, bodyLoop, protected, finalizer)
+			branchEntry := bodyEntry
+			if inner.Cond != nil {
+				branchEntry = b.compileConditionExpr(inner.Cond, bodyEntry, exitTarget, bodyLoop, protected, finalizer)
+			}
+			b.addCase(condEntryLabel, b.transition(branchEntry))
+			if inner.Init != nil {
+				return b.compileStmt(inner.Init, condEntryLabel, labeledLoop, protected, finalizer)
+			}
+			return condEntryLabel
+		case *hir.WhileStmt:
+			exitTarget := next
+			condEntryLabel := b.newLabel()
+			bodyLoop := asyncLoopLabels{
+				breakLabel:    exitTarget,
+				continueLabel: condEntryLabel,
+				valid:         true,
+				namedBreak:    cloneIntMap(loop.namedBreak),
+				namedContinue: cloneIntMap(loop.namedContinue),
+			}
+			if bodyLoop.namedBreak == nil {
+				bodyLoop.namedBreak = map[string]int{}
+			}
+			if bodyLoop.namedContinue == nil {
+				bodyLoop.namedContinue = map[string]int{}
+			}
+			bodyLoop.namedBreak[s.Label] = exitTarget
+			bodyLoop.namedContinue[s.Label] = condEntryLabel
+			bodyEntry := b.compileSeq(inner.Body.Stmts, condEntryLabel, bodyLoop, protected, finalizer)
+			branchEntry := b.compileConditionExpr(inner.Cond, bodyEntry, exitTarget, bodyLoop, protected, finalizer)
+			b.addCase(condEntryLabel, b.transition(branchEntry))
+			return condEntryLabel
+		case *hir.DoWhileStmt:
+			exitTarget := next
+			condEntryLabel := b.newLabel()
+			bodyLoop := asyncLoopLabels{
+				breakLabel:    exitTarget,
+				continueLabel: condEntryLabel,
+				valid:         true,
+				namedBreak:    cloneIntMap(loop.namedBreak),
+				namedContinue: cloneIntMap(loop.namedContinue),
+			}
+			if bodyLoop.namedBreak == nil {
+				bodyLoop.namedBreak = map[string]int{}
+			}
+			if bodyLoop.namedContinue == nil {
+				bodyLoop.namedContinue = map[string]int{}
+			}
+			bodyLoop.namedBreak[s.Label] = exitTarget
+			bodyLoop.namedContinue[s.Label] = condEntryLabel
+			bodyEntry := b.compileSeq(inner.Body.Stmts, condEntryLabel, bodyLoop, protected, finalizer)
+			branchEntry := b.compileConditionExpr(inner.Cond, bodyEntry, exitTarget, bodyLoop, protected, finalizer)
+			b.addCase(condEntryLabel, b.transition(branchEntry))
+			return bodyEntry
+		case *hir.ForInStmt:
+			itemsName := b.l.emitName(b.l.newAsyncTempSymbol())
+			indexName := b.l.emitName(b.l.newAsyncTempSymbol())
+			postLabel := b.newLabel()
+			prepLabel := b.newLabel()
+			bodyLoop := asyncLoopLabels{
+				breakLabel:    next,
+				continueLabel: postLabel,
+				valid:         true,
+				namedBreak:    cloneIntMap(loop.namedBreak),
+				namedContinue: cloneIntMap(loop.namedContinue),
+			}
+			if bodyLoop.namedBreak == nil {
+				bodyLoop.namedBreak = map[string]int{}
+			}
+			if bodyLoop.namedContinue == nil {
+				bodyLoop.namedContinue = map[string]int{}
+			}
+			bodyLoop.namedBreak[s.Label] = next
+			bodyLoop.namedContinue[s.Label] = postLabel
+			bodyEntry := b.compileSeq(inner.Body.Stmts, postLabel, bodyLoop, protected, finalizer)
+			itemExpr := callExpr(selectorExpr(goIdent(itemsName), "Get"), callExpr(selectorExpr(goIdent("fmt"), "Sprint"), goIdent(indexName)))
+			prepBody := []ast.Stmt{}
+			if inner.Key != nil {
+				prepBody = append(prepBody, assignStmt([]ast.Expr{goIdent(b.l.emitName(inner.Key))}, []ast.Expr{itemExpr}))
+			}
+			prepBody = append(prepBody, b.transition(bodyEntry)...)
+			b.addCase(prepLabel, prepBody)
+			condLabel := b.newLabel()
+			cond := b.l.ensureBool(callExpr(
+				selectorExpr(goIdent("jsvalue"), "Lt"),
+				goIdent(indexName),
+				callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"),
+					callExpr(goIdent("float64"), callExpr(selectorExpr(goIdent(itemsName), "Len")))),
+			))
+			b.addCase(condLabel, []ast.Stmt{
+				&ast.IfStmt{Cond: cond, Body: blockStmt(b.transition(prepLabel)...), Else: blockStmt(b.transition(next)...)},
+			})
+			initLabel := b.newLabel()
+			b.l.jsvalueImport()
+			b.l.addImport("fmt")
+			b.addCase(initLabel, []ast.Stmt{
+				assignStmt([]ast.Expr{goIdent(itemsName)}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "Keys"), b.l.wrapAsJSValue(b.l.lowerExpr(inner.Value)))}),
+				assignStmt([]ast.Expr{goIdent(indexName)}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), intLit("0"))}),
+				assignStmt([]ast.Expr{goIdent(b.stateName)}, []ast.Expr{intLit(itoa(condLabel))}),
+				&ast.BranchStmt{Tok: token.CONTINUE},
+			})
+			b.addCase(postLabel, []ast.Stmt{
+				assignStmt([]ast.Expr{goIdent(indexName)}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "Add"), goIdent(indexName), callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), intLit("1")))}),
+				assignStmt([]ast.Expr{goIdent(b.stateName)}, []ast.Expr{intLit(itoa(condLabel))}),
+				&ast.BranchStmt{Tok: token.CONTINUE},
+			})
+			return initLabel
+		case *hir.ForOfStmt:
+			itemsName := b.l.emitName(b.l.newAsyncTempSymbol())
+			indexName := b.l.emitName(b.l.newAsyncTempSymbol())
+			postLabel := b.newLabel()
+			prepLabel := b.newLabel()
+			bodyLoop := asyncLoopLabels{
+				breakLabel:    next,
+				continueLabel: postLabel,
+				valid:         true,
+				namedBreak:    cloneIntMap(loop.namedBreak),
+				namedContinue: cloneIntMap(loop.namedContinue),
+			}
+			if bodyLoop.namedBreak == nil {
+				bodyLoop.namedBreak = map[string]int{}
+			}
+			if bodyLoop.namedContinue == nil {
+				bodyLoop.namedContinue = map[string]int{}
+			}
+			bodyLoop.namedBreak[s.Label] = next
+			bodyLoop.namedContinue[s.Label] = postLabel
+			bodyEntry := b.compileSeq(inner.Body.Stmts, postLabel, bodyLoop, protected, finalizer)
+			itemExpr := callExpr(selectorExpr(goIdent(itemsName), "Get"), callExpr(selectorExpr(goIdent("fmt"), "Sprint"), goIdent(indexName)))
+			prepBody := []ast.Stmt{}
+			if inner.Pattern != nil {
+				prepBody = append(prepBody, b.l.lowerDestructuring(inner.Pattern, itemExpr, false)...)
+			} else if inner.Elem != nil {
+				prepBody = append(prepBody, assignStmt([]ast.Expr{goIdent(b.l.emitName(inner.Elem))}, []ast.Expr{itemExpr}))
+			}
+			prepBody = append(prepBody, b.transition(bodyEntry)...)
+			b.addCase(prepLabel, prepBody)
+			condLabel := b.newLabel()
+			cond := b.l.ensureBool(callExpr(
+				selectorExpr(goIdent("jsvalue"), "Lt"),
+				goIdent(indexName),
+				callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"),
+					callExpr(goIdent("float64"), callExpr(selectorExpr(goIdent(itemsName), "Len")))),
+			))
+			b.addCase(condLabel, []ast.Stmt{
+				&ast.IfStmt{Cond: cond, Body: blockStmt(b.transition(prepLabel)...), Else: blockStmt(b.transition(next)...)},
+			})
+			initLabel := b.newLabel()
+			b.l.jsvalueImport()
+			b.l.addImport("fmt")
+			b.addCase(initLabel, []ast.Stmt{
+				assignStmt([]ast.Expr{goIdent(itemsName)}, []ast.Expr{b.l.wrapAsJSValue(callExpr(selectorExpr(b.l.lowerExpr(inner.Value), "Array")))}),
+				assignStmt([]ast.Expr{goIdent(indexName)}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), intLit("0"))}),
+				assignStmt([]ast.Expr{goIdent(b.stateName)}, []ast.Expr{intLit(itoa(condLabel))}),
+				&ast.BranchStmt{Tok: token.CONTINUE},
+			})
+			b.addCase(postLabel, []ast.Stmt{
+				assignStmt([]ast.Expr{goIdent(indexName)}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "Add"), goIdent(indexName), callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), intLit("1")))}),
+				assignStmt([]ast.Expr{goIdent(b.stateName)}, []ast.Expr{intLit(itoa(condLabel))}),
+				&ast.BranchStmt{Tok: token.CONTINUE},
+			})
+			return initLabel
+		case *hir.SwitchStmt:
+			exitTarget := next
+			switchLoop := asyncLoopLabels{
+				breakLabel:    exitTarget,
+				continueLabel: loop.continueLabel,
+				valid:         true,
+				namedBreak:    cloneIntMap(loop.namedBreak),
+				namedContinue: cloneIntMap(loop.namedContinue),
+			}
+			if switchLoop.namedBreak == nil {
+				switchLoop.namedBreak = map[string]int{}
+			}
+			switchLoop.namedBreak[s.Label] = exitTarget
+			clauseEntries := make([]int, len(inner.Cases))
+			nextEntry := exitTarget
+			for i := len(inner.Cases) - 1; i >= 0; i-- {
+				clauseEntries[i] = b.compileSeq(inner.Cases[i].Body, nextEntry, switchLoop, protected, finalizer)
+				nextEntry = clauseEntries[i]
+			}
+			dispatchTarget := exitTarget
+			for i := len(inner.Cases) - 1; i >= 0; i-- {
+				if inner.Cases[i].Value == nil {
+					dispatchTarget = clauseEntries[i]
+					continue
+				}
+				label := b.newLabel()
+				cond := b.l.ensureBool(callExpr(selectorExpr(goIdent("jsvalue"), "Eq"), b.l.wrapAsJSValue(b.l.lowerExpr(inner.Tag)), b.l.wrapAsJSValue(b.l.lowerExpr(inner.Cases[i].Value))))
+				b.addCase(label, []ast.Stmt{
+					&ast.IfStmt{Cond: cond, Body: blockStmt(b.transition(clauseEntries[i])...), Else: blockStmt(b.transition(dispatchTarget)...)},
+				})
+				dispatchTarget = label
+			}
+			return dispatchTarget
+		default:
+			return b.compileStmt(inner, next, labeledLoop, protected, finalizer)
+		}
 	case *hir.TryCatchStmt:
 		if s.Catch == nil && s.Finally == nil {
 			label := b.newLabel()
@@ -685,7 +931,11 @@ func (b *asyncFuncBuilder) compileStmt(stmt hir.Stmt, next int, loop asyncLoopLa
 	case *hir.BreakStmt:
 		label := b.newLabel()
 		target := next
-		if loop.valid {
+		if s.Label != "" && loop.namedBreak != nil {
+			if named, ok := loop.namedBreak[s.Label]; ok {
+				target = named
+			}
+		} else if loop.valid {
 			target = loop.breakLabel
 		}
 		if finalizer.valid {
@@ -697,7 +947,11 @@ func (b *asyncFuncBuilder) compileStmt(stmt hir.Stmt, next int, loop asyncLoopLa
 	case *hir.ContinueStmt:
 		label := b.newLabel()
 		target := next
-		if loop.valid {
+		if s.Label != "" && loop.namedContinue != nil {
+			if named, ok := loop.namedContinue[s.Label]; ok {
+				target = named
+			}
+		} else if loop.valid {
 			target = loop.continueLabel
 		}
 		if finalizer.valid {
@@ -984,6 +1238,17 @@ func (b *asyncFuncBuilder) finalizerDispatch() []ast.Stmt {
 	}
 }
 
+func cloneIntMap(src map[string]int) map[string]int {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]int, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
 func (b *asyncFuncBuilder) compileConditionExpr(expr hir.Expr, trueTarget, falseTarget int, loop asyncLoopLabels, protected asyncProtected, finalizer asyncFinalizer) int {
 	prefix, normalized := b.l.normalizeAsyncExpr(expr, false)
 	label := b.newLabel()
@@ -1131,8 +1396,10 @@ func (l *Lowerer) normalizeAsyncStmt(stmt hir.Stmt) []hir.Stmt {
 		prefix, tag := l.normalizeAsyncExpr(s.Tag, false)
 		cases := make([]*hir.CaseClause, 0, len(s.Cases))
 		for _, c := range s.Cases {
+			casePrefix, caseValue := l.normalizeAsyncExpr(c.Value, false)
+			prefix = append(prefix, casePrefix...)
 			cases = append(cases, &hir.CaseClause{
-				Value: c.Value,
+				Value: caseValue,
 				Body:  l.normalizeAsyncBlock(&hir.BlockStmt{Stmts: c.Body}).Stmts,
 			})
 		}
