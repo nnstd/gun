@@ -121,3 +121,15 @@ func TestRenameSync(t *testing.T) {
 		t.Errorf("got %q, want %q", data, "move me")
 	}
 }
+
+func TestAsJSValueAliases(t *testing.T) {
+	if AsJSValue.Get("readFile").TypeString() != "function" {
+		t.Fatal("expected readFile alias on fs.AsJSValue")
+	}
+	if AsJSValue.Get("writeFile").TypeString() != "function" {
+		t.Fatal("expected writeFile alias on fs.AsJSValue")
+	}
+	if AsJSValue.Get("promises").TypeString() != "object" {
+		t.Fatal("expected promises object on fs.AsJSValue")
+	}
+}

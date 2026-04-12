@@ -242,9 +242,14 @@ func (t *Transformer) nodeReturnsJSValue(node *sitter.Node) bool {
 		if typed, ok := t.pkgVarTyped[sanitized]; ok && !typed {
 			return true
 		}
-		// Imported transpiled symbols (named imports, not namespace) are JSValue
-		if imp, ok := t.importedNames[name]; ok && imp.isTranspiled && imp.goSymbol != "" {
-			return true
+		// Imported transpiled symbols and JSValue-first builtin module bindings are JSValue.
+		if imp, ok := t.importedNames[name]; ok {
+			if imp.useAsJSValue {
+				return true
+			}
+			if imp.isTranspiled && imp.goSymbol != "" {
+				return true
+			}
 		}
 		// Global functions that return JSValue
 		switch name {
@@ -1008,6 +1013,16 @@ func (t *Transformer) transformReexport(origName, goName, modulePath string) {
 	if !isKnown {
 		mod = t.resolveModulePath(modulePath)
 	}
+	if mod.useAsJSValue {
+		if mod.goName != "" && mod.goName != filepath.Base(mod.goPath) {
+			t.addAliasedImport(mod.goPath, mod.goName)
+		} else {
+			t.addImport(mod.goPath)
+		}
+		moduleObj := selectorExpr(ident(mod.goName), "AsJSValue")
+		t.decls = append(t.decls, varDecl(goName, nil, callExpr(selectorExpr(moduleObj, "Get"), stringLit(origName))))
+		return
+	}
 
 	// Same-package: no import needed, reference symbol directly
 	if mod.goPath == "" {
@@ -1039,4 +1054,3 @@ func (t *Transformer) getOrCreateMain() *ast.FuncDecl {
 	t.decls = append(t.decls, fn)
 	return fn
 }
-

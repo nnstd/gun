@@ -19,6 +19,8 @@ type importResolution struct {
 	goPkgName    string
 	goSymbol     string
 	isTranspiled bool
+	useAsJSValue bool
+	jsExportName string
 }
 
 // CrossFileExport describes a symbol exported from another file in the same package.
@@ -778,9 +780,11 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 
 	// Look up symbol overrides for known modules
 	var overrides map[string]context.SymbolOverride
+	useAsJSValue := false
 	if l.ctx != nil {
 		if mod := l.ctx.LookupModule(d.ModulePath); mod != nil {
 			overrides = mod.SymbolOverrides
+			useAsJSValue = mod.UseAsJSValue
 		}
 	}
 
@@ -793,8 +797,15 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 				goSymbol:     mapped,
 				isTranspiled: true,
 			}
+		} else if isKnown && useAsJSValue {
+			l.importedSyms[d.Default.Symbol] = importResolution{
+				goImportPath: goImportPath,
+				goPkgName:    goPkgName,
+				isTranspiled: false,
+				useAsJSValue: true,
+			}
 		} else if isKnown && isGunRuntimePkg(goImportPath) {
-			// Default import from Gun runtime module → pkg.AsJSValue
+			// Legacy fallback: Default import from Gun runtime module → pkg.AsJSValue
 			l.importedSyms[d.Default.Symbol] = importResolution{
 				goImportPath: goImportPath,
 				goPkgName:    goPkgName,
@@ -843,6 +854,16 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 			}
 			continue
 		}
+		if useAsJSValue {
+			l.importedSyms[n.Symbol] = importResolution{
+				goImportPath: goImportPath,
+				goPkgName:    goPkgName,
+				isTranspiled: false,
+				useAsJSValue: true,
+				jsExportName: n.OriginalName,
+			}
+			continue
+		}
 		// Same-package imports: check if the symbol is exported from the other file
 		// (and thus capitalized), or just an internal reference (stays lowercase).
 		if goImportPath == "" {
@@ -868,6 +889,15 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 
 	// Process namespace import
 	if d.Namespace != nil && d.Namespace.Symbol != nil {
+		if isKnown && useAsJSValue {
+			l.importedSyms[d.Namespace.Symbol] = importResolution{
+				goImportPath: goImportPath,
+				goPkgName:    goPkgName,
+				isTranspiled: false,
+				useAsJSValue: true,
+			}
+			return
+		}
 		if isKnown {
 			// import * as fs from "fs" → fs.AsJSValue
 			l.importedSyms[d.Namespace.Symbol] = importResolution{

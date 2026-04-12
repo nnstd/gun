@@ -721,11 +721,11 @@ func (t *Transformer) transformCallExpr(node *sitter.Node) ast.Expr {
 		}
 	}
 
-	// When calling a function imported from a transpiled (non-runtime) module,
-	// use .Call() since all transpiled exports are *jsvalue.JSValue (NewFunction).
+	// Imported JSValue exports (transpiled modules and JSValue-first builtin modules)
+	// are invoked via .Call().
 	if fnNode.Kind() == "identifier" {
 		name := fnNode.Utf8Text(t.source)
-		if imp, ok := t.importedNames[name]; ok && imp.isTranspiled && imp.goSymbol != "" {
+		if imp, ok := t.importedNames[name]; ok && ((imp.isTranspiled && imp.goSymbol != "") || (imp.useAsJSValue && imp.jsExportName != "")) {
 			fun := t.transformExpr(fnNode)
 			if argsNodeHasSpread(argsNode) {
 				return t.generateCallWithSpread(fun, argsNode, func(e ast.Expr) ast.Expr { return t.wrapAsJSValue(e) })
@@ -1081,7 +1081,16 @@ func (t *Transformer) transformMemberExpr(node *sitter.Node) ast.Expr {
 			innerObj.Utf8Text(t.source) == "process" &&
 			innerProp.Utf8Text(t.source) == "env" {
 			t.addImport("github.com/nnstd/gun/runtime/process")
-			return callExpr(selectorExpr(selectorExpr(ident("process"), "Env"), "Get"), stringLit(prop))
+			return callExpr(
+				selectorExpr(
+					callExpr(
+						selectorExpr(callExpr(selectorExpr(ident("process"), "AsJSValue")), "Get"),
+						stringLit("env"),
+					),
+					"Get",
+				),
+				stringLit(prop),
+			)
 		}
 	}
 

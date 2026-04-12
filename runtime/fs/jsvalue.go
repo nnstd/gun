@@ -14,12 +14,14 @@ var AsJSValue = func() *jsvalue.JSValue {
 		}
 		return jsvalue.NewUndefined()
 	}))
+	obj.Set("readFile", obj.Get("readFileSync"))
 	obj.Set("writeFileSync", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		if len(args) >= 2 {
 			return WriteFileSync(args[0], args[1])
 		}
 		return jsvalue.NewUndefined()
 	}))
+	obj.Set("writeFile", obj.Get("writeFileSync"))
 	obj.Set("existsSync", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		if len(args) >= 1 {
 			return ExistsSync(args[0])
@@ -68,5 +70,6 @@ var AsJSValue = func() *jsvalue.JSValue {
 		}
 		return jsvalue.NewUndefined()
 	}))
+	obj.Set("promises", obj)
 	return obj
 }()

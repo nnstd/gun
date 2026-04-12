@@ -432,7 +432,7 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		Name: "Math",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin/math", "math")
-			return ident("math")
+			return selectorExpr(ident("math"), "AsJSValue")
 		},
 	})
 
@@ -440,7 +440,7 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		Name: "JSON",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin/json", "json")
-			return ident("json")
+			return selectorExpr(ident("json"), "AsJSValue")
 		},
 	})
 
@@ -620,19 +620,17 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterModule("fs", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/fs",
 		GoPkgName:    "fs",
-		SymbolOverrides: map[string]tcontext.SymbolOverride{
-			"promises":  {GoSymbol: ""},
-			"readFile":  {GoSymbol: "ReadFileSync"},
-			"writeFile": {GoSymbol: "WriteFileSync"},
-		},
+		UseAsJSValue: true,
 	})
 	ctx.RegisterModule("path", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/path",
 		GoPkgName:    "nodepath",
+		UseAsJSValue: true,
 	})
 	ctx.RegisterModule("os", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/os",
 		GoPkgName:    "nodeos",
+		UseAsJSValue: true,
 	})
 	ctx.RegisterModule("http", &tcontext.ModuleMapping{
 		GoImportPath: "net/http",
@@ -645,6 +643,7 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterModule("url", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/url",
 		GoPkgName:    "url",
+		UseAsJSValue: true,
 	})
 	ctx.RegisterModule("util", &tcontext.ModuleMapping{
 		GoImportPath: "fmt",
@@ -682,13 +681,12 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterModule("assert", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/assert",
 		GoPkgName:    "assert",
-		SymbolOverrides: map[string]tcontext.SymbolOverride{
-			"strict": {GoSymbol: ""},
-		},
+		UseAsJSValue: true,
 	})
 	ctx.RegisterModule("module", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/module",
 		GoPkgName:    "module",
+		UseAsJSValue: true,
 	})
 }
 

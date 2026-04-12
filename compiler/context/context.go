@@ -65,6 +65,7 @@ type IdentifierMapping struct {
 type ModuleMapping struct {
 	GoImportPath    string
 	GoPkgName       string
+	UseAsJSValue    bool
 	SymbolOverrides map[string]SymbolOverride
 }
 

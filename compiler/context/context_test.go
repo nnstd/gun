@@ -92,9 +92,7 @@ func TestRegisterAndLookupModule(t *testing.T) {
 	ctx.RegisterModule("fs", &ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/fs",
 		GoPkgName:    "fs",
-		SymbolOverrides: map[string]SymbolOverride{
-			"readFile": {GoSymbol: "ReadFileSync"},
-		},
+		UseAsJSValue: true,
 	})
 
 	mod := ctx.LookupModule("fs")
@@ -104,12 +102,8 @@ func TestRegisterAndLookupModule(t *testing.T) {
 	if mod.GoImportPath != "github.com/nnstd/gun/runtime/fs" {
 		t.Fatalf("unexpected import path: %q", mod.GoImportPath)
 	}
-	override, ok := mod.SymbolOverrides["readFile"]
-	if !ok {
-		t.Fatal("expected symbol override for 'readFile'")
-	}
-	if override.GoSymbol != "ReadFileSync" {
-		t.Fatalf("unexpected go symbol: %q", override.GoSymbol)
+	if !mod.UseAsJSValue {
+		t.Fatal("expected fs module to be marked JSValue-first")
 	}
 	if ctx.LookupModule("path") != nil {
 		t.Fatal("should not find unregistered module")

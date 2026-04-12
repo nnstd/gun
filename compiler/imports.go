@@ -15,12 +15,15 @@ type resolvedImport struct {
 	goPkgName    string // Go package identifier (e.g. "os", "filepath")
 	goSymbol     string // Go symbol name (e.g. "ReadFile"); empty for namespace imports
 	isTranspiled bool   // true when the module is transpiled from source (not a known/runtime module)
+	useAsJSValue bool   // true when access should go through pkg.AsJSValue / .Get(...)
+	jsExportName string // JS export/property name when useAsJSValue is true
 }
 
 // moduleMapping maps a TS module to a Go package.
 type moduleMapping struct {
-	goPath string // Go import path
-	goName string // Go package name used in code
+	goPath       string // Go import path
+	goName       string // Go package name used in code
+	useAsJSValue bool   // module is accessed as pkg.AsJSValue
 }
 
 // knownModules maps Node.js / TS built-in module names to Go packages.
@@ -34,8 +37,8 @@ var knownSymbols = map[string]map[string]resolvedImport{}
 // registerModule registers a known Node.js module with its Go package mapping.
 // symbolOverrides contains only non-standard translations where capitalize(tsName)
 // isn't sufficient. Use "" as the Go symbol value to create a namespace import.
-func registerModule(tsModule, goPath, goName string, symbolOverrides map[string]string) {
-	knownModules[tsModule] = moduleMapping{goPath: goPath, goName: goName}
+func registerModule(tsModule, goPath, goName string, useAsJSValue bool, symbolOverrides map[string]string) {
+	knownModules[tsModule] = moduleMapping{goPath: goPath, goName: goName, useAsJSValue: useAsJSValue}
 	if len(symbolOverrides) > 0 {
 		syms := make(map[string]resolvedImport, len(symbolOverrides))
 		for tsName, goSymbol := range symbolOverrides {
@@ -52,36 +55,30 @@ func registerModule(tsModule, goPath, goName string, symbolOverrides map[string]
 func init() {
 	// --- gun runtime modules ---
 
-	registerModule("fs", "github.com/nnstd/gun/runtime/fs", "fs", map[string]string{
-		"promises":  "",              // namespace import (fs/promises → same package)
-		"readFile":  "ReadFileSync",  // async variant → sync
-		"writeFile": "WriteFileSync", // async variant → sync
-	})
-	registerModule("path", "github.com/nnstd/gun/runtime/path", "nodepath", nil)
-	registerModule("os", "github.com/nnstd/gun/runtime/os", "nodeos", nil)
+	registerModule("fs", "github.com/nnstd/gun/runtime/fs", "fs", true, nil)
+	registerModule("path", "github.com/nnstd/gun/runtime/path", "nodepath", true, nil)
+	registerModule("os", "github.com/nnstd/gun/runtime/os", "nodeos", true, nil)
 
 	// --- Go stdlib mappings ---
 
-	registerModule("http", "net/http", "http", nil)
-	registerModule("https", "net/http", "http", nil)
-	registerModule("url", "github.com/nnstd/gun/runtime/url", "url", nil)
-	registerModule("util", "fmt", "fmt", map[string]string{
+	registerModule("http", "net/http", "http", false, nil)
+	registerModule("https", "net/http", "http", false, nil)
+	registerModule("url", "github.com/nnstd/gun/runtime/url", "url", true, nil)
+	registerModule("util", "fmt", "fmt", false, map[string]string{
 		"format":  "Sprintf",
 		"inspect": "Sprint",
 	})
-	registerModule("events", "sync", "sync", nil)
-	registerModule("stream", "io", "io", nil)
-	registerModule("buffer", "bytes", "bytes", nil)
-	registerModule("crypto", "crypto", "crypto", nil)
-	registerModule("child_process", "os/exec", "exec", map[string]string{
+	registerModule("events", "sync", "sync", false, nil)
+	registerModule("stream", "io", "io", false, nil)
+	registerModule("buffer", "bytes", "bytes", false, nil)
+	registerModule("crypto", "crypto", "crypto", false, nil)
+	registerModule("child_process", "os/exec", "exec", false, map[string]string{
 		"exec":     "Command",
 		"execSync": "Command",
 		"spawn":    "Command",
 	})
-	registerModule("assert", "github.com/nnstd/gun/runtime/assert", "assert", map[string]string{
-		"strict": "", // namespace import for assert/strict
-	})
-	registerModule("module", "github.com/nnstd/gun/runtime/module", "module", nil)
+	registerModule("assert", "github.com/nnstd/gun/runtime/assert", "assert", true, nil)
+	registerModule("module", "github.com/nnstd/gun/runtime/module", "module", true, nil)
 }
 
 func (t *Transformer) transformImport(node *sitter.Node) {
@@ -124,6 +121,7 @@ func (t *Transformer) transformImport(node *sitter.Node) {
 	if !isKnown {
 		mod = t.resolveModulePath(modulePath)
 	}
+	useAsJSValue := isKnown && mod.useAsJSValue
 
 	// Walk the import clause to extract names
 	for i := uint(0); i < clauseNode.NamedChildCount(); i++ {
@@ -145,6 +143,7 @@ func (t *Transformer) transformImport(node *sitter.Node) {
 					goImportPath: mod.goPath,
 					goPkgName:    mod.goName,
 					isTranspiled: !isKnown,
+					useAsJSValue: useAsJSValue,
 				}
 			}
 
@@ -156,6 +155,11 @@ func (t *Transformer) transformImport(node *sitter.Node) {
 				goImportPath: mod.goPath,
 				goPkgName:    mod.goName,
 				isTranspiled: !isKnown,
+				useAsJSValue: useAsJSValue,
+			}
+			if useAsJSValue {
+				t.importedNames[localName] = ri
+				continue
 			}
 			// Check for explicit default symbol mapping in knownSymbols
 			if symTable := knownSymbols[modulePath]; symTable != nil {
@@ -180,6 +184,7 @@ func (t *Transformer) transformImport(node *sitter.Node) {
 
 func (t *Transformer) processNamedImports(node *sitter.Node, modulePath string, mod moduleMapping, typeOnly bool, isTranspiled bool) {
 	symTable := knownSymbols[modulePath]
+	useAsJSValue := !isTranspiled && mod.useAsJSValue
 
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		spec := node.NamedChild(i)
@@ -197,6 +202,26 @@ func (t *Transformer) processNamedImports(node *sitter.Node, modulePath string, 
 		localName := origName
 		if aliasNode != nil {
 			localName = aliasNode.Utf8Text(t.source)
+		}
+
+		if useAsJSValue {
+			t.importedNames[localName] = resolvedImport{
+				goImportPath: mod.goPath,
+				goPkgName:    mod.goName,
+				isTranspiled: false,
+				useAsJSValue: true,
+				jsExportName: origName,
+			}
+			if typeOnly {
+				t.importedNames[capitalize(localName)] = resolvedImport{
+					goImportPath: mod.goPath,
+					goPkgName:    mod.goName,
+					isTranspiled: false,
+					useAsJSValue: true,
+					jsExportName: origName,
+				}
+			}
+			continue
 		}
 
 		// Check for a specific symbol mapping
@@ -336,6 +361,13 @@ func (t *Transformer) resolveIdentifier(name string) ast.Expr {
 			} else {
 				t.addImport(imp.goImportPath)
 			}
+		}
+		if imp.useAsJSValue {
+			moduleObj := selectorExpr(ident(imp.goPkgName), "AsJSValue")
+			if imp.jsExportName == "" {
+				return moduleObj
+			}
+			return callExpr(selectorExpr(moduleObj, "Get"), stringLit(imp.jsExportName))
 		}
 		// Namespace import (import * as X) — return the package ident
 		if imp.goSymbol == "" {

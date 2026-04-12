@@ -2,12 +2,21 @@ package compiler
 
 import "testing"
 
+func compilePipeline(t *testing.T, source string) string {
+	t.Helper()
+	out, err := CompileWithOptLevel([]byte(source), "main", "", false, 0)
+	if err != nil {
+		t.Fatalf("pipeline compile failed: %v", err)
+	}
+	return string(out)
+}
+
 func TestImportNamedFS(t *testing.T) {
 	ts := `import { readFileSync } from "fs";
 const data = readFileSync("hello.txt");`
 	out := compile(t, ts)
 	assertContains(t, out, `"github.com/nnstd/gun/runtime/fs"`)
-	assertContains(t, out, "fs.ReadFileSync")
+	assertContains(t, out, `fs.AsJSValue.Get("readFileSync").Call(`)
 }
 
 func TestImportNamespacePath(t *testing.T) {
@@ -15,7 +24,7 @@ func TestImportNamespacePath(t *testing.T) {
 const p = path.join("a", "b");`
 	out := compile(t, ts)
 	assertContains(t, out, `"github.com/nnstd/gun/runtime/path"`)
-	assertContains(t, out, "nodepath.Join")
+	assertContains(t, out, `nodepath.AsJSValue.MethodCall("join"`)
 }
 
 func TestImportDefaultModule(t *testing.T) {
@@ -31,8 +40,8 @@ const data = readFileSync("in.txt");
 writeFileSync("out.txt", data);`
 	out := compile(t, ts)
 	assertContains(t, out, `"github.com/nnstd/gun/runtime/fs"`)
-	assertContains(t, out, "fs.ReadFileSync")
-	assertContains(t, out, "fs.WriteFileSync")
+	assertContains(t, out, `fs.AsJSValue.Get("readFileSync").Call(`)
+	assertContains(t, out, `fs.AsJSValue.Get("writeFileSync").Call(`)
 }
 
 func TestImportPathFunctions(t *testing.T) {
@@ -42,9 +51,9 @@ const b = basename("/foo/bar.ts");
 const e = extname("file.go");`
 	out := compile(t, ts)
 	assertContains(t, out, `"github.com/nnstd/gun/runtime/path"`)
-	assertContains(t, out, "nodepath.Join")
-	assertContains(t, out, "nodepath.Basename")
-	assertContains(t, out, "nodepath.Extname")
+	assertContains(t, out, `nodepath.AsJSValue.Get("join").Call(`)
+	assertContains(t, out, `nodepath.AsJSValue.Get("basename").Call(`)
+	assertContains(t, out, `nodepath.AsJSValue.Get("extname").Call(`)
 }
 
 func TestImportChildProcess(t *testing.T) {
@@ -75,15 +84,23 @@ const h = homedir();
 const p = platform();`
 	out := compile(t, ts)
 	assertContains(t, out, `"github.com/nnstd/gun/runtime/os"`)
-	assertContains(t, out, "nodeos.Homedir")
-	assertContains(t, out, "nodeos.Platform")
+	assertContains(t, out, `nodeos.AsJSValue.Get("homedir").Call(`)
+	assertContains(t, out, `nodeos.AsJSValue.Get("platform").Call(`)
 }
 
 func TestImportFSExistsSync(t *testing.T) {
 	ts := `import { existsSync } from "fs";
 const ok = existsSync("/tmp/test");`
 	out := compile(t, ts)
-	assertContains(t, out, "fs.ExistsSync")
+	assertContains(t, out, `fs.AsJSValue.Get("existsSync").Call(`)
+}
+
+func TestImportFSReadFileAlias(t *testing.T) {
+	ts := `import { readFile } from "fs";
+const data = readFile("x.txt");`
+	out := compile(t, ts)
+	assertContains(t, out, `fs.AsJSValue.Get("readFile").Call(`)
+	assertNotContains(t, out, `fs.ReadFileSync`)
 }
 
 func TestImportNamespaceOS(t *testing.T) {
@@ -91,7 +108,29 @@ func TestImportNamespaceOS(t *testing.T) {
 const h = os.homedir();`
 	out := compile(t, ts)
 	assertContains(t, out, `"github.com/nnstd/gun/runtime/os"`)
-	assertContains(t, out, "nodeos.Homedir")
+	assertContains(t, out, `nodeos.AsJSValue.MethodCall("homedir"`)
+}
+
+func TestPipelineImportNamedFS(t *testing.T) {
+	ts := `import { readFileSync } from "fs";
+const data = readFileSync("hello.txt");`
+	out := compilePipeline(t, ts)
+	assertContains(t, out, `fs.AsJSValue.Get("readFileSync").Call(`)
+}
+
+func TestPipelineImportNamespacePath(t *testing.T) {
+	ts := `import * as path from "path";
+const p = path.join("a", "b");`
+	out := compilePipeline(t, ts)
+	assertContains(t, out, `nodepath.AsJSValue.MethodCall("join"`)
+}
+
+func TestImportAssertStrictNamespace(t *testing.T) {
+	ts := `import { strict } from "assert";
+strict.strictEqual(1, 1);`
+	out := compile(t, ts)
+	assertContains(t, out, `assert.AsJSValue.Get("strict")`)
+	assertContains(t, out, `MethodCall("strictEqual", jsvalue.From(1), jsvalue.From(1))`)
 }
 
 func TestSamePackageImportsNoImportGenerated(t *testing.T) {
@@ -129,8 +168,7 @@ func TestShorthandPropertyResolvesImport(t *testing.T) {
 	ts := `import { readFileSync } from "fs";
 export default { readFileSync };`
 	out := compile(t, ts)
-	// Value should be resolved to fs.ReadFileSync, not bare readFileSync
-	assertContains(t, out, "fs.ReadFileSync")
+	assertContains(t, out, `fs.AsJSValue.Get("readFileSync")`)
 }
 
 func TestTranspiledImportArgsWrappedWithJSValue(t *testing.T) {
@@ -146,7 +184,7 @@ func TestKnownModuleArgsWrapped(t *testing.T) {
 	ts := `import { readFileSync } from "fs";
 const data = readFileSync("hello.txt");`
 	out := compile(t, ts)
-	assertContains(t, out, `fs.ReadFileSync(jsvalue.NewString("hello.txt"))`)
+	assertContains(t, out, `fs.AsJSValue.Get("readFileSync").Call(jsvalue.From("hello.txt"))`)
 }
 
 func TestConsoleErrorUsesRuntimePackage(t *testing.T) {
@@ -164,5 +202,5 @@ func TestFsReadFileSyncArgsWrapped(t *testing.T) {
 	ts := `import { readFileSync } from "fs";
 const data = readFileSync("hello.txt");`
 	out := compile(t, ts)
-	assertContains(t, out, `fs.ReadFileSync(jsvalue.NewString("hello.txt"))`)
+	assertContains(t, out, `fs.AsJSValue.Get("readFileSync").Call(jsvalue.From("hello.txt"))`)
 }

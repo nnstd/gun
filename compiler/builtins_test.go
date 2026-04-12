@@ -17,28 +17,28 @@ func TestConsoleError(t *testing.T) {
 func TestMathFloor(t *testing.T) {
 	ts := `function f(x: number): number { return Math.floor(x); }`
 	out := compile(t, ts)
-	assertContains(t, out, "math.Floor(")
+	assertContains(t, out, `math.AsJSValue.Get("floor").Call(`)
 	assertContains(t, out, "runtime/builtin/math")
 }
 
 func TestMathRandom(t *testing.T) {
 	ts := `function r(): number { return Math.random(); }`
 	out := compile(t, ts)
-	assertContains(t, out, "math.Random()")
+	assertContains(t, out, `math.AsJSValue.Get("random").Call()`)
 	assertContains(t, out, "runtime/builtin/math")
 }
 
 func TestJSONStringify(t *testing.T) {
 	ts := `function ser(x: any): any { return JSON.stringify(x); }`
 	out := compile(t, ts)
-	assertContains(t, out, "json.Stringify(x)")
+	assertContains(t, out, `json.AsJSValue.Get("stringify").Call(`)
 	assertContains(t, out, `runtime/builtin/json`)
 }
 
 func TestJSONParse(t *testing.T) {
 	ts := `function deser(s: string): any { return JSON.parse(s); }`
 	out := compile(t, ts)
-	assertContains(t, out, "json.Parse(s)")
+	assertContains(t, out, `json.AsJSValue.Get("parse").Call(`)
 	assertContains(t, out, `runtime/builtin/json`)
 }
 
@@ -97,20 +97,20 @@ func TestNumberIsSafeInteger(t *testing.T) {
 func TestProcessArgv(t *testing.T) {
 	ts := `const args = process.argv;`
 	out := compile(t, ts)
-	assertContains(t, out, "process.Argv")
+	assertContains(t, out, `process.AsJSValue().Get("argv")`)
 	assertContains(t, out, `runtime/process`)
 }
 
 func TestProcessEnvAccess(t *testing.T) {
 	ts := `const home = process.env.HOME;`
 	out := compile(t, ts)
-	assertContains(t, out, `process.Env.Get("HOME")`)
+	assertContains(t, out, `process.AsJSValue().Get("env").Get("HOME")`)
 }
 
 func TestProcessExit(t *testing.T) {
 	ts := `process.exit(1);`
 	out := compile(t, ts)
-	assertContains(t, out, "process.Exit(1)")
+	assertContains(t, out, `process.AsJSValue().Get("exit").Call(`)
 }
 
 func TestObjectCreateNull(t *testing.T) {
@@ -151,8 +151,7 @@ func TestArrayConcat(t *testing.T) {
 func TestMathMinCoercesFloat64(t *testing.T) {
 	ts := `function f(a: number, b: number): number { return Math.min(a, b); }`
 	out := compile(t, ts)
-	// a, b are now *jsvalue.JSValue, coerced to .Number() for math.Min
-	assertContains(t, out, "math.Min(")
+	assertContains(t, out, `math.AsJSValue.Get("min").Call(`)
 }
 
 func TestMathMinCoercesJSValueViaNumber(t *testing.T) {

@@ -68,44 +68,22 @@ func transformArrayCall(prop string, args []ast.Expr, addImport func(string)) as
 // transformProcessCall handles process.X() calls.
 func transformProcessCall(prop string, args []ast.Expr, addImport func(string)) ast.Expr {
 	addImport("github.com/nnstd/gun/runtime/process")
-	switch prop {
-	case "exit":
-		if len(args) > 0 {
-			return callExpr(selectorExpr(ident("process"), "Exit"), args[0])
-		}
-		return callExpr(selectorExpr(ident("process"), "Exit"), intLit("0"))
-	case "cwd":
-		return callExpr(selectorExpr(ident("process"), "Cwd"))
+	for i, arg := range args {
+		args[i] = jsvalueWrapLit(arg)
 	}
-	return nil
+	return callExpr(
+		selectorExpr(
+			callExpr(selectorExpr(callExpr(selectorExpr(ident("process"), "AsJSValue")), "Get"), stringLit(prop)),
+			"Call",
+		),
+		args...,
+	)
 }
 
 // transformProcessMember handles process.X member access (not calls).
 func transformProcessMember(prop string, addImport func(string)) ast.Expr {
 	addImport("github.com/nnstd/gun/runtime/process")
-	switch prop {
-	case "env":
-		return selectorExpr(ident("process"), "Env")
-	case "argv":
-		return selectorExpr(ident("process"), "Argv")
-	case "platform":
-		return selectorExpr(ident("process"), "Platform")
-	case "stdout":
-		return selectorExpr(ident("process"), "Stdout")
-	case "stderr":
-		return selectorExpr(ident("process"), "Stderr")
-	case "versions":
-		return selectorExpr(ident("process"), "Versions")
-	case "version":
-		return selectorExpr(ident("process"), "Version")
-	case "pid":
-		return selectorExpr(ident("process"), "Pid")
-	case "cwd":
-		return selectorExpr(ident("process"), "Cwd")
-	default:
-		// Unknown process properties → process.AsJSValue().Get("prop")
-		return callExpr(selectorExpr(callExpr(selectorExpr(ident("process"), "AsJSValue")), "Get"), stringLit(prop))
-	}
+	return callExpr(selectorExpr(callExpr(selectorExpr(ident("process"), "AsJSValue")), "Get"), stringLit(prop))
 }
 
 // NOTE: The old mapIdentifier function has been replaced by context-based

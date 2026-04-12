@@ -13,5 +13,6 @@ var AsJSValue = func() *jsvalue.JSValue {
 		if len(args) >= 2 { return NotStrictEqual(args[0], args[1]) }
 		return jsvalue.NewUndefined()
 	}))
+	obj.Set("strict", obj)
 	return obj
 }()

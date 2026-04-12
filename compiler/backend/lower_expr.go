@@ -159,6 +159,13 @@ func (l *Lowerer) lowerIdentifier(e *hir.Identifier) ast.Expr {
 					l.addImport(res.goImportPath)
 				}
 			}
+			if res.useAsJSValue {
+				moduleObj := selectorExpr(goIdent(res.goPkgName), "AsJSValue")
+				if res.jsExportName == "" {
+					return moduleObj
+				}
+				return callExpr(selectorExpr(moduleObj, "Get"), stringLit(res.jsExportName))
+			}
 			// Default/namespace import from Gun runtime module → pkg.AsJSValue
 			if res.goSymbol == "AsJSValue" && !res.isTranspiled && isGunRuntimePkg(res.goImportPath) {
 				return selectorExpr(goIdent(res.goPkgName), "AsJSValue")
@@ -1289,7 +1296,7 @@ func (l *Lowerer) exprIsJSValue(e hir.Expr) bool {
 		}
 		if res, ok := l.importedSyms[e.Sym]; ok {
 			// Known modules with AsJSValue resolve to a JSValue object
-			if res.goSymbol == "AsJSValue" {
+			if res.goSymbol == "AsJSValue" || res.useAsJSValue {
 				return true
 			}
 			return res.isTranspiled
