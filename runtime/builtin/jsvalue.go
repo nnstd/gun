@@ -172,6 +172,17 @@ func (v *JSValue) String() string {
 			}
 			return strings.Join(strs, ",")
 		}
+		if stack := v.Get("stack"); stack != nil && stack.typ == TypeString && stack.strVal != "" {
+			return stack.strVal
+		}
+		if name := v.Get("name"); name != nil && name.typ == TypeString {
+			if msg := v.Get("message"); msg != nil && msg.typ == TypeString {
+				if msg.strVal == "" {
+					return name.strVal
+				}
+				return name.strVal + ": " + msg.strVal
+			}
+		}
 		return "[object Object]"
 	case TypeFunction:
 		return "function"
@@ -698,4 +709,24 @@ func TypeOf(a *JSValue) *JSValue {
 		return NewString("undefined")
 	}
 	return NewString(a.TypeString())
+}
+
+// InstanceOf implements JavaScript instanceof using prototype-chain lookup.
+func InstanceOf(left, right *JSValue) *JSValue {
+	if left == nil || right == nil {
+		return NewBool(false)
+	}
+	if left.typ == TypeUndefined || left.typ == TypeNull {
+		return NewBool(false)
+	}
+	proto := right.Get("prototype")
+	if proto == nil || proto.typ == TypeUndefined || proto.typ == TypeNull {
+		return NewBool(false)
+	}
+	for cur := left.GetPrototype(); cur != nil; cur = cur.GetPrototype() {
+		if cur == proto {
+			return NewBool(true)
+		}
+	}
+	return NewBool(false)
 }

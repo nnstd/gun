@@ -141,7 +141,7 @@ func (b *Builder) buildExpr(node *sitter.Node) Expr {
 				exprs = append(exprs, e)
 			}
 		}
-		return &SequenceExpr{Exprs: exprs}
+		return &SequenceExpr{Exprs: exprs, Span: b.span(node)}
 
 	case "await_expression":
 		if node.NamedChildCount() > 0 {
@@ -463,12 +463,14 @@ func (b *Builder) buildAssignExpr(node *sitter.Node) *AssignExpr {
 				Op:          OpAssign,
 				LeftPattern: b.buildArrayPatternLookup(leftNode),
 				Right:       b.buildExpr(rightNode),
+				Span:        b.span(node),
 			}
 		case "object_pattern":
 			return &AssignExpr{
 				Op:          OpAssign,
 				LeftPattern: b.buildObjectPatternLookup(leftNode),
 				Right:       b.buildExpr(rightNode),
+				Span:        b.span(node),
 			}
 		}
 	}
@@ -477,6 +479,7 @@ func (b *Builder) buildAssignExpr(node *sitter.Node) *AssignExpr {
 		Op:    OpAssign,
 		Left:  b.buildExpr(leftNode),
 		Right: b.buildExpr(rightNode),
+		Span:  b.span(node),
 	}
 }
 
@@ -494,6 +497,7 @@ func (b *Builder) buildAugmentedAssignExpr(node *sitter.Node) *AssignExpr {
 		Op:    op,
 		Left:  b.buildExpr(leftNode),
 		Right: b.buildExpr(rightNode),
+		Span:  b.span(node),
 	}
 }
 
@@ -564,7 +568,7 @@ func (b *Builder) buildCallExpr(node *sitter.Node) *CallExpr {
 		}
 	}
 
-	return &CallExpr{Func: fn, Args: args}
+	return &CallExpr{Func: fn, Args: args, Span: b.span(node)}
 }
 
 func (b *Builder) buildNewExpr(node *sitter.Node) *NewExpr {
@@ -586,7 +590,7 @@ func (b *Builder) buildNewExpr(node *sitter.Node) *NewExpr {
 		}
 	}
 
-	return &NewExpr{Callee: callee, Args: args}
+	return &NewExpr{Callee: callee, Args: args, Span: b.span(node)}
 }
 
 func (b *Builder) buildClassExpr(node *sitter.Node) Expr {
@@ -602,6 +606,7 @@ func (b *Builder) buildClassExpr(node *sitter.Node) Expr {
 		Methods:     parts.methods,
 		Properties:  parts.properties,
 		StaticInits: parts.staticInits,
+		Span:        b.span(node),
 	}
 }
 
@@ -633,7 +638,7 @@ func (b *Builder) buildMemberExpr(node *sitter.Node) Expr {
 		prop = strings.TrimPrefix(prop, "#")
 	}
 
-	return &MemberExpr{Object: obj, Property: prop, Private: isPrivate, Optional: isOptional}
+	return &MemberExpr{Object: obj, Property: prop, Private: isPrivate, Optional: isOptional, Span: b.span(node)}
 }
 
 func (b *Builder) buildComputedMemberExpr(node *sitter.Node) Expr {
@@ -647,6 +652,7 @@ func (b *Builder) buildComputedMemberExpr(node *sitter.Node) Expr {
 	return &ComputedMemberExpr{
 		Object:   b.buildExpr(objNode),
 		Property: b.buildExpr(indexNode),
+		Span:     b.span(node),
 	}
 }
 
@@ -685,6 +691,7 @@ func (b *Builder) buildArrowFunc(node *sitter.Node) *ArrowFunc {
 	af := &ArrowFunc{
 		Params:  params,
 		IsAsync: isAsync,
+		Span:    b.span(node),
 	}
 
 	if bodyNode != nil {
@@ -732,6 +739,7 @@ func (b *Builder) buildFuncExpr(node *sitter.Node) *FuncExpr {
 		Params:  params,
 		Body:    body,
 		IsAsync: isAsync,
+		Span:    b.span(node),
 	}
 }
 
@@ -792,5 +800,5 @@ func (b *Builder) buildMemberDestructuringSeq(node *sitter.Node) *SequenceExpr {
 			}
 		}
 	}
-	return &SequenceExpr{Exprs: exprs}
+	return &SequenceExpr{Exprs: exprs, Span: b.span(node)}
 }

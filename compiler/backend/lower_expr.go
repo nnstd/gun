@@ -19,110 +19,115 @@ func (l *Lowerer) lowerExpr(e hir.Expr) ast.Expr {
 	if e == nil {
 		return goIdent("nil")
 	}
+	span := hirExprSpan(e)
+	var out ast.Expr
 	switch e := e.(type) {
 	case *hir.Identifier:
-		return l.lowerIdentifier(e)
+		out = l.lowerIdentifier(e)
 
 	case *hir.Literal:
-		return l.lowerLiteral(e)
+		out = l.lowerLiteral(e)
 
 	case *hir.TemplateLiteral:
-		return l.lowerTemplateLiteral(e)
+		out = l.lowerTemplateLiteral(e)
 
 	case *hir.ArrayLiteral:
-		return l.lowerArrayLiteral(e)
+		out = l.lowerArrayLiteral(e)
 
 	case *hir.ObjectLiteral:
-		return l.lowerObjectLiteral(e)
+		out = l.lowerObjectLiteral(e)
 
 	case *hir.BinaryExpr:
-		return l.lowerBinaryExpr(e)
+		out = l.lowerBinaryExpr(e)
 
 	case *hir.UnaryExpr:
-		return l.lowerUnaryExpr(e)
+		out = l.lowerUnaryExpr(e)
 
 	case *hir.UpdateExpr:
-		return l.lowerUpdateExpr(e)
+		out = l.lowerUpdateExpr(e)
 
 	case *hir.AssignExpr:
-		return l.lowerAssignExpr(e)
+		out = l.lowerAssignExpr(e)
 
 	case *hir.CallExpr:
-		return l.lowerCallExpr(e)
+		out = l.lowerCallExpr(e)
 
 	case *hir.NewExpr:
-		return l.lowerNewExpr(e)
+		out = l.lowerNewExpr(e)
 
 	case *hir.ClassExpr:
-		return l.lowerClassExpr(e)
+		out = l.lowerClassExpr(e)
 
 	case *hir.MemberExpr:
-		return l.lowerMemberExpr(e)
+		out = l.lowerMemberExpr(e)
 
 	case *hir.ComputedMemberExpr:
 		obj := l.lowerExpr(e.Object)
 		idx := l.lowerExpr(e.Property)
 		l.addImport("fmt")
-		return callExpr(selectorExpr(obj, "Get"),
+		out = callExpr(selectorExpr(obj, "Get"),
 			callExpr(selectorExpr(goIdent("fmt"), "Sprint"), idx))
 
 	case *hir.TernaryExpr:
-		return l.lowerTernaryExpr(e)
+		out = l.lowerTernaryExpr(e)
 
 	case *hir.ArrowFunc:
-		return l.lowerArrowFunc(e)
+		out = l.lowerArrowFunc(e)
 
 	case *hir.FuncExpr:
-		return l.lowerFuncExpr(e)
+		out = l.lowerFuncExpr(e)
 
 	case *hir.SpreadExpr:
-		return l.lowerExpr(e.Value)
+		out = l.lowerExpr(e.Value)
 
 	case *hir.SequenceExpr:
-		return l.lowerSequenceExpr(e)
+		out = l.lowerSequenceExpr(e)
 
 	case *hir.AwaitExpr:
-		return l.lowerExpr(e.Value)
+		out = l.lowerExpr(e.Value)
 
 	case *hir.YieldExpr:
-		return l.lowerExpr(e.Value)
+		out = l.lowerExpr(e.Value)
 
 	case *hir.TypeAssertExpr:
-		return l.lowerExpr(e.Expr)
+		out = l.lowerExpr(e.Expr)
 
 	case *hir.NonNullExpr:
-		return l.lowerExpr(e.Expr)
+		out = l.lowerExpr(e.Expr)
 
 	case *hir.ParenExpr:
-		return &ast.ParenExpr{X: l.lowerExpr(e.Expr)}
+		out = &ast.ParenExpr{X: l.lowerExpr(e.Expr)}
 
 	case *hir.ThisExpr:
 		if l.insideFunc == 0 {
 			// Top-level this is undefined in ESM (SWC convention)
 			l.jsvalueImport()
-			return callExpr(selectorExpr(goIdent("jsvalue"), "NewUndefined"))
+			out = callExpr(selectorExpr(goIdent("jsvalue"), "NewUndefined"))
+			break
 		}
-		return goIdent("this")
+		out = goIdent("this")
 
 	case *hir.SuperExpr:
-		return goIdent("super")
+		out = goIdent("super")
 
 	case *hir.PrivateIdentifierExpr:
-		return l.privateKeyExpr(e.Name)
+		out = l.privateKeyExpr(e.Name)
 
 	case *hir.MetaPropertyExpr:
 		if e.Meta == "import" && e.Property == "meta" {
 			l.addImport("github.com/nnstd/gun/runtime/module")
-			return callExpr(selectorExpr(goIdent("module"), "ImportMetaAsJSValue"))
+			out = callExpr(selectorExpr(goIdent("module"), "ImportMetaAsJSValue"))
+			break
 		}
-		return goIdent("nil")
+		out = goIdent("nil")
 
 	case *hir.TaggedTemplateLiteral:
-		return l.lowerTaggedTemplate(e)
+		out = l.lowerTaggedTemplate(e)
 
 	default:
-		return goIdent("nil")
+		out = goIdent("nil")
 	}
+	return setExprPos(out, span)
 }
 
 func (l *Lowerer) lowerIdentifier(e *hir.Identifier) ast.Expr {
@@ -496,14 +501,8 @@ func (l *Lowerer) lowerBinaryExpr(e *hir.BinaryExpr) ast.Expr {
 				)
 			}
 		}
-		// Conservative fallback: only objects/functions can satisfy instanceof.
-		return callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"),
-			&ast.BinaryExpr{
-				X:  callExpr(selectorExpr(left, "TypeString")),
-				Op: token.EQL,
-				Y:  stringLit("object"),
-			},
-		)
+		return callExpr(selectorExpr(goIdent("jsvalue"), "InstanceOf"),
+			jsvalueWrapLit(left), jsvalueWrapLit(right))
 	}
 
 	// JSValue binary operations: jsvalue.Op(left, right)
@@ -560,6 +559,10 @@ func (l *Lowerer) lowerAssignExpr(e *hir.AssignExpr) ast.Expr {
 	}
 
 	right := l.lowerExpr(e.Right)
+
+	if mem, ok := e.Left.(*hir.MemberExpr); ok && mem.Private && l.exprIsJSValue(mem.Object) {
+		return l.lowerPrivateAssignExpr(mem, e.Op, e.Right, right)
+	}
 
 	// Member assignment expression: obj.prop = val / obj.prop += val / obj.#x ??= val
 	if mem, ok := e.Left.(*hir.MemberExpr); ok && l.exprIsJSValue(mem.Object) {
@@ -674,9 +677,12 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 
 		// JSValue method dispatch: obj.method(args) → obj.MethodCall("method", wrappedArgs...)
 		if l.exprIsJSValue(mem.Object) {
+			argExprs, hasSpread := l.lowerCallArgs(e.Args, true)
+			if mem.Private {
+				return l.lowerPrivateMethodCall(mem, argExprs, hasSpread)
+			}
 			l.jsvalueImport()
 			obj := l.lowerExpr(mem.Object)
-			argExprs, hasSpread := l.lowerCallArgs(e.Args, true)
 			wrappedArgs := append([]ast.Expr{l.lowerClassMemberKey(mem.Property, mem.Private, nil)}, argExprs...)
 			// For complex receivers, wrap in IIFE to evaluate once
 			if !l.isSimpleExpr(obj) {
@@ -987,6 +993,149 @@ func (l *Lowerer) lowerClassExpr(e *hir.ClassExpr) ast.Expr {
 	}
 }
 
+func (l *Lowerer) lowerPrivateGet(mem *hir.MemberExpr) ast.Expr {
+	l.jsvalueImport()
+	l.addAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "error")
+	key := l.lowerClassMemberKey(mem.Property, true, nil)
+	objExpr := l.lowerExpr(mem.Object)
+	access := describeHIRExpr(mem.Object) + ".#" + mem.Property
+	marker := l.lineDirectiveMarker(mem.Span)
+	ifBody := []ast.Stmt{}
+	if marker != nil {
+		ifBody = append(ifBody, marker)
+	}
+	ifBody = append(ifBody, exprStmt(callExpr(goIdent("panic"), callExpr(selectorExpr(goIdent("error"), "InvalidPrivateField"), stringLit(access)))))
+	body := []ast.Stmt{}
+	if marker != nil {
+		body = append(body, marker)
+	}
+	body = append(body,
+		&ast.IfStmt{
+			Cond: &ast.UnaryExpr{Op: token.NOT, X: callExpr(selectorExpr(goIdent("_obj"), "HasOwnProperty"), key)},
+			Body: blockStmt(ifBody...),
+		},
+	)
+	if marker != nil {
+		body = append(body, marker)
+	}
+	body = append(body, returnStmt(callExpr(selectorExpr(goIdent("_obj"), "Get"), key)))
+	return callExpr(&ast.FuncLit{
+		Type: &ast.FuncType{
+			Params:  fieldList(goField("_obj", jsValuePtrType())),
+			Results: fieldList(goField("", jsValuePtrType())),
+		},
+		Body: blockStmt(body...),
+	}, objExpr)
+}
+
+func (l *Lowerer) lowerPrivateAssignExpr(mem *hir.MemberExpr, op hir.AssignOp, rhsHIR hir.Expr, rhs ast.Expr) ast.Expr {
+	l.jsvalueImport()
+	l.addAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "error")
+	key := l.lowerClassMemberKey(mem.Property, true, nil)
+	objExpr := l.lowerExpr(mem.Object)
+	access := describeHIRExpr(mem.Object) + ".#" + mem.Property + " = " + describeHIRExpr(rhsHIR)
+	marker := l.lineDirectiveMarker(mem.Span)
+	return callExpr(&ast.FuncLit{
+		Type: &ast.FuncType{
+			Params:  fieldList(goField("_obj", jsValuePtrType())),
+			Results: fieldList(goField("", jsValuePtrType())),
+		},
+		Body: func() *ast.BlockStmt {
+			val := l.wrapAsJSValue(rhs)
+			if op != hir.OpAssign {
+				helperName := mapAssignOpToJSValue(op)
+				current := callExpr(selectorExpr(goIdent("_obj"), "Get"), key)
+				val = callExpr(selectorExpr(goIdent("jsvalue"), helperName), current, val)
+			}
+			ifBody := []ast.Stmt{}
+			if marker != nil {
+				ifBody = append(ifBody, marker)
+			}
+			ifBody = append(ifBody, exprStmt(callExpr(goIdent("panic"), callExpr(selectorExpr(goIdent("error"), "InvalidPrivateField"), stringLit(access)))))
+			body := []ast.Stmt{}
+			if marker != nil {
+				body = append(body, marker)
+			}
+			body = append(body, &ast.IfStmt{
+				Cond: &ast.UnaryExpr{Op: token.NOT, X: callExpr(selectorExpr(goIdent("_obj"), "HasOwnProperty"), key)},
+				Body: blockStmt(ifBody...),
+			})
+			if marker != nil {
+				body = append(body, marker)
+			}
+			body = append(body, exprStmt(callExpr(selectorExpr(goIdent("_obj"), "Set"), key, val)))
+			if marker != nil {
+				body = append(body, marker)
+			}
+			body = append(body, returnStmt(val))
+			return blockStmt(body...)
+		}(),
+	}, objExpr)
+}
+
+func (l *Lowerer) lowerPrivateMethodCall(mem *hir.MemberExpr, args []ast.Expr, hasSpread bool) ast.Expr {
+	l.jsvalueImport()
+	l.addAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "error")
+	key := l.lowerClassMemberKey(mem.Property, true, nil)
+	objExpr := l.lowerExpr(mem.Object)
+	access := describeHIRExpr(mem.Object) + ".#" + mem.Property
+	callArgs := append([]ast.Expr{key}, args...)
+	marker := l.lineDirectiveMarker(mem.Span)
+	ifBody := []ast.Stmt{}
+	if marker != nil {
+		ifBody = append(ifBody, marker)
+	}
+	ifBody = append(ifBody, exprStmt(callExpr(goIdent("panic"), callExpr(selectorExpr(goIdent("error"), "InvalidPrivateMethodOrAccessor"), stringLit(access)))))
+	body := []ast.Stmt{}
+	if marker != nil {
+		body = append(body, marker)
+	}
+	body = append(body, &ast.IfStmt{
+		Cond: &ast.UnaryExpr{Op: token.NOT, X: callExpr(selectorExpr(goIdent("_obj"), "HasOwnProperty"), key)},
+		Body: blockStmt(ifBody...),
+	})
+	if marker != nil {
+		body = append(body, marker)
+	}
+	body = append(body, returnStmt(buildCallWithSpread(selectorExpr(goIdent("_obj"), "MethodCall"), callArgs, hasSpread)))
+	return callExpr(&ast.FuncLit{
+		Type: &ast.FuncType{
+			Params:  fieldList(goField("_obj", jsValuePtrType())),
+			Results: fieldList(goField("", jsValuePtrType())),
+		},
+		Body: blockStmt(body...),
+	}, objExpr)
+}
+
+func describeHIRExpr(e hir.Expr) string {
+	switch e := e.(type) {
+	case *hir.Identifier:
+		if e.Sym != nil {
+			return e.Sym.OriginalName
+		}
+		return e.Name
+	case *hir.ThisExpr:
+		return "this"
+	case *hir.MemberExpr:
+		if e.Private {
+			return describeHIRExpr(e.Object) + ".#" + e.Property
+		}
+		return describeHIRExpr(e.Object) + "." + e.Property
+	case *hir.ComputedMemberExpr:
+		return describeHIRExpr(e.Object) + "[...]"
+	case *hir.CallExpr:
+		return describeHIRExpr(e.Func) + "(...)"
+	case *hir.NewExpr:
+		return "new " + describeHIRExpr(e.Callee)
+	case *hir.Literal:
+		return e.Value
+	case *hir.ParenExpr:
+		return "(" + describeHIRExpr(e.Expr) + ")"
+	default:
+		return "value"
+	}
+}
+
 func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 	// Optional chaining: a?.b → IIFE with null check
 	if e.Optional {
@@ -1017,6 +1166,10 @@ func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 
 	obj := l.lowerExpr(e.Object)
 	key := l.lowerClassMemberKey(e.Property, e.Private, nil)
+
+	if e.Private {
+		return l.lowerPrivateGet(e)
+	}
 
 	// .length → .Len() for JSValue, len() for typed
 	if !e.Private && e.Property == "length" {

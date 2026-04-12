@@ -212,9 +212,11 @@ func (t *Transformer) transformBinaryExpr(node *sitter.Node) ast.Expr {
 		return left
 	}
 
-	// instanceof → != nil
+	// instanceof → runtime prototype-chain check
 	if opText == "instanceof" {
-		return &ast.BinaryExpr{X: left, Op: token.NEQ, Y: ident("nil")}
+		t.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+		return callExpr(selectorExpr(ident("jsvalue"), "InstanceOf"),
+			jsvalueWrapLit(left), jsvalueWrapLit(right))
 	}
 
 	// in → obj.HasOwnProperty(key) wrapped as JSValue bool

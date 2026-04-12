@@ -84,9 +84,21 @@ func registerGlobalObjects(ctx *tcontext.TranspilerContext) {
 			switch method {
 			case "serve":
 				if len(args) > 0 {
-					return callExpr(selectorExpr(ident("bun"), "Serve"), jsvalueWrapLit(args[0]))
+					return callExpr(
+						selectorExpr(
+							callExpr(selectorExpr(selectorExpr(ident("bun"), "AsJSValue"), "Get"), stringLit("serve")),
+							"Call",
+						),
+						jsvalueWrapLit(args[0]),
+					)
 				}
-				return callExpr(selectorExpr(ident("bun"), "Serve"), callExpr(selectorExpr(ident("jsvalue"), "NewObject")))
+				return callExpr(
+					selectorExpr(
+						callExpr(selectorExpr(selectorExpr(ident("bun"), "AsJSValue"), "Get"), stringLit("serve")),
+						"Call",
+					),
+					callExpr(selectorExpr(ident("jsvalue"), "NewObject")),
+				)
 			default:
 				return nil
 			}
@@ -358,7 +370,7 @@ func registerConstructors(ctx *tcontext.TranspilerContext) {
 		},
 	})
 
-	for _, ctorName := range []string{"Headers", "Request", "Response", "URL"} {
+	for _, ctorName := range []string{"Headers", "Request", "Response", "URL", "File"} {
 		name := ctorName
 		ctx.RegisterConstructor(&tcontext.Constructor{
 			Name: name,
@@ -539,11 +551,15 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		},
 	})
 
-	for _, identName := range []string{"Headers", "Request", "Response", "URL"} {
+	for _, identName := range []string{"Headers", "Request", "Response", "URL", "File", "RegExp"} {
 		name := identName
 		ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 			Name: name,
 			Transform: func(imp tcontext.Imports) ast.Expr {
+				if name == "RegExp" {
+					imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+					return selectorExpr(ident("jsvalue"), "RegexpCtor")
+				}
 				imp.AddImport("github.com/nnstd/gun/runtime/web")
 				if name == "URL" {
 					return selectorExpr(ident("web"), "URL")
@@ -702,6 +718,7 @@ func registerKnownGlobals(ctx *tcontext.TranspilerContext) {
 	ctx.MarkKnownGlobal("Request")
 	ctx.MarkKnownGlobal("Response")
 	ctx.MarkKnownGlobal("URL")
+	ctx.MarkKnownGlobal("File")
 	ctx.MarkKnownGlobal("Symbol")
 	ctx.MarkKnownGlobal("module")
 	ctx.MarkKnownGlobal("require")

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -267,4 +268,196 @@ console.log("Listening on " + port);
 		time.Sleep(100 * time.Millisecond)
 	}
 	waitForOutput(t, &stdout, fmt.Sprintf("Listening on %d", port))
+}
+
+func TestTranspileProject_PrivateFieldErrorsMatchBunReadAndCall(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "private_field_read",
+			src: `class A { #x = 1; read(o) { return o.#x } }
+new A().read({});`,
+			want: "Cannot access invalid private field (evaluating 'o.#x')",
+		},
+		{
+			name: "private_method_call",
+			src: `class A { #m() { return 1 } call(o) { return o.#m() } }
+new A().call({});`,
+			want: "Cannot access private method or acessor (evaluating 'o.#m')",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := filepath.Join(t.TempDir(), "private.ts")
+			if err := os.WriteFile(fixture, []byte(tc.src), 0644); err != nil {
+				t.Fatal(err)
+			}
+			bin := buildFixture(t, fixture)
+
+			cmd := exec.Command(bin)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			err := cmd.Run()
+			if err == nil {
+				t.Fatalf("expected runtime failure\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+			}
+
+			out := stdout.String() + "\n" + stderr.String()
+			if !strings.Contains(out, tc.want) {
+				t.Fatalf("expected error containing %q\nstdout:\n%s\nstderr:\n%s", tc.want, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+func TestTranspileProject_RuntimeErrorsShowSourceLocationsWithoutGoPanicDump(t *testing.T) {
+	cases := []struct {
+		name        string
+		src         string
+		wantMessage string
+		wantLine    string
+	}{
+		{
+			name: "type_error_throw",
+			src: `function boom() {
+  throw new TypeError("boom")
+}
+
+boom()
+`,
+			wantMessage: "TypeError: boom",
+			wantLine:    ":2:0",
+		},
+		{
+			name: "private_field_access",
+			src: `class A {
+  #x = 1
+  read(o) {
+    return o.#x
+  }
+}
+
+new A().read({})
+`,
+			wantMessage: "Cannot access invalid private field",
+			wantLine:    ":4:0",
+		},
+		{
+			name: "bun_serve_invalid_arg",
+			src: `Bun.serve(123 as any)
+`,
+			wantMessage: "TypeError: Bun.serve expects an object",
+			wantLine:    ":1:0",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := filepath.Join(t.TempDir(), "stack.ts")
+			if err := os.WriteFile(fixture, []byte(tc.src), 0644); err != nil {
+				t.Fatal(err)
+			}
+			bin := buildFixture(t, fixture)
+
+			cmd := exec.Command(bin)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			err := cmd.Run()
+			if err == nil {
+				t.Fatalf("expected runtime failure\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+			}
+
+			out := stdout.String() + "\n" + stderr.String()
+			if !strings.Contains(out, tc.wantMessage) {
+				t.Fatalf("expected output containing %q\nstdout:\n%s\nstderr:\n%s", tc.wantMessage, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(out, fixture+tc.wantLine) {
+				t.Fatalf("expected output containing %q\nstdout:\n%s\nstderr:\n%s", fixture+tc.wantLine, stdout.String(), stderr.String())
+			}
+			if strings.Contains(out, "goroutine 1 [running]") {
+				t.Fatalf("unexpected Go panic dump in output:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestTranspileProject_BunServePortInUseShowsSourceStacktrace(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("sandbox does not permit binding local TCP listeners: %v", err)
+	}
+	defer listener.Close()
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	fixture := filepath.Join(t.TempDir(), "port_in_use.ts")
+	source := fmt.Sprintf(`Bun.serve({
+  port: %d,
+  fetch() {
+    return new Response("ok")
+  }
+})
+`, port)
+	if err := os.WriteFile(fixture, []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildFixture(t, fixture)
+	cmd := exec.Command(bin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err = cmd.Run()
+	maybeSkipSandboxBind(t, err, &stdout, &stderr)
+	if err == nil {
+		t.Fatalf("expected runtime failure\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+
+	out := stdout.String() + "\n" + stderr.String()
+	if !strings.Contains(out, "Failed to start server. Is port") {
+		t.Fatalf("expected port-in-use error\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(out, fixture+":1:0") {
+		t.Fatalf("expected JS source stack frame in output\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestTranspileProject_YargsCommandThrowShowsStacktrace(t *testing.T) {
+	bin := buildInlineFixtureWithNodeModules(t, "yargs_throw.ts", `import yargs from "yargs"
+import { hideBin } from "yargs/helpers"
+
+yargs(hideBin(process.argv))
+  .command("serve", "serve", () => {}, () => {
+    throw new Error("boom")
+  })
+  .demandCommand(1)
+  .help()
+  .parse()
+`)
+
+	cmd := exec.Command(bin, "serve")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err == nil {
+		t.Fatalf("expected runtime failure\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+
+	out := stdout.String() + "\n" + stderr.String()
+	if !strings.Contains(out, "Error: boom") {
+		t.Fatalf("expected error stack header\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(out, "yargs_throw.ts:6:0") {
+		t.Fatalf("expected source frame in thrown command output\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
 }

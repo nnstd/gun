@@ -42,6 +42,21 @@ func lowerTS(t *testing.T, source string) string {
 	return string(out)
 }
 
+func lowerTSWithPath(t *testing.T, source, sourcePath string) string {
+	t.Helper()
+	tree := parseTS(t, source)
+	defer tree.Close()
+
+	mod := hir.BuildModuleWithPath(tree.RootNode(), []byte(source), "main", sourcePath)
+	ctx := context.New()
+	file := Lower(mod, ctx, "", false)
+	out, err := GenerateWithSource(file, mod.SourcePath, mod.SourceSize)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	return string(out)
+}
+
 func assertContains(t *testing.T, got, want string) {
 	t.Helper()
 	if !strings.Contains(got, want) {
@@ -154,6 +169,16 @@ func TestLowerMainFunc(t *testing.T) {
 	// main should stay as a Go func, not be wrapped in jsvalue.NewFunction
 	assertContains(t, s, "func main()")
 	assertNotContains(t, s, "jsvalue.NewFunction")
+}
+
+func TestGenerateWithSourceEmitsLineDirectiveForFunction(t *testing.T) {
+	out := lowerTSWithPath(t, `function add(a, b) { return a + b }`, "/tmp/example.ts")
+	assertContains(t, out, "//line /tmp/example.ts:1")
+}
+
+func TestGenerateWithSourceEmitsLineDirectiveForClassMethod(t *testing.T) {
+	out := lowerTSWithPath(t, "class Box {\n  open() {\n    return 1\n  }\n}\n", "/tmp/class.ts")
+	assertContains(t, out, "//line /tmp/class.ts:3")
 }
 
 func TestLowerIfStatement(t *testing.T) {

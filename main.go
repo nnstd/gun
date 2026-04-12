@@ -225,7 +225,7 @@ func transpileFile(inputPath, outputPath, pkgName, moduleName string, verbose, s
 		moduleName = detectModuleName(inputPath)
 	}
 
-	result, err := compiler.CompileWithOptLevel(source, pkgName, moduleName, samePackageImports, optLevel)
+	result, err := compiler.CompileWithOptLevelAndPath(source, pkgName, moduleName, inputPath, samePackageImports, optLevel)
 	if err != nil {
 		return fmt.Errorf("compile %s: %w", inputPath, err)
 	}

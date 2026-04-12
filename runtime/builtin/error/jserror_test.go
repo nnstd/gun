@@ -214,3 +214,19 @@ func TestErrorThrownAndCaught(t *testing.T) {
 		t.Errorf("caught error name should be 'Error', got %q", caught.Get("name").String())
 	}
 }
+
+func TestFormatRecoveredRecognizesJSError(t *testing.T) {
+	msg, ok := FormatRecovered(TypeError.Call(jsvalue.NewString("boom")))
+	if !ok {
+		t.Fatal("expected JS error to be recognized")
+	}
+	if !strings.Contains(msg, "TypeError: boom") {
+		t.Fatalf("unexpected recovered message: %q", msg)
+	}
+}
+
+func TestFormatRecoveredRejectsNonJSError(t *testing.T) {
+	if _, ok := FormatRecovered("boom"); ok {
+		t.Fatal("expected non-JS panic to be rejected")
+	}
+}

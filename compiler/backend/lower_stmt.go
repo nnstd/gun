@@ -26,17 +26,20 @@ func (l *Lowerer) lowerBlock(b *hir.BlockStmt) *ast.BlockStmt {
 		if gs == nil {
 			continue
 		}
+		span := hirStmtSpan(s)
 		// Flatten BlockStmt results to avoid creating unnecessary Go scopes.
 		// This covers both multi-declarator VarDecl (which produces BlockStmt)
 		// and standalone HIR BlockStmts (which tree-sitter creates for
 		// statement_block nodes within function bodies).
 		if block, ok := gs.(*ast.BlockStmt); ok {
-			stmts = append(stmts, block.List...)
+			for _, child := range block.List {
+				stmts = l.appendWithLineMarker(stmts, span, child)
+			}
 			continue
 		}
-		stmts = append(stmts, gs)
+		stmts = l.appendWithLineMarker(stmts, span, gs)
 	}
-	return &ast.BlockStmt{List: stmts}
+	return setBlockPos(&ast.BlockStmt{List: stmts}, b.Span)
 }
 
 // hoistFunctions reorders HIR statements to match JS hoisting semantics for
@@ -80,6 +83,8 @@ func (l *Lowerer) lowerStmt(s hir.Stmt) ast.Stmt {
 	if s == nil {
 		return nil
 	}
+	span := hirStmtSpan(s)
+	var out ast.Stmt
 	switch s := s.(type) {
 	case *hir.ExprStmt:
 		// Check for assignment expressions that need special handling
@@ -94,84 +99,87 @@ func (l *Lowerer) lowerStmt(s hir.Stmt) ast.Stmt {
 		if expr == nil {
 			return nil
 		}
-		return exprStmt(expr)
+		out = exprStmt(expr)
 
 	case *hir.ReturnStmt:
 		if s.Value != nil {
 			val := l.lowerExpr(s.Value)
 			val = jsvalueWrapLit(val)
-			return returnStmt(val)
+			out = returnStmt(val)
+			break
 		}
 		// Bare return → return nil (all functions return *jsvalue.JSValue)
-		return returnStmt(goIdent("nil"))
+		out = returnStmt(goIdent("nil"))
 
 	case *hir.BlockStmt:
-		return l.lowerBlock(s)
+		out = l.lowerBlock(s)
 
 	case *hir.VarDecl:
 		// VarDecl may produce multiple statements (multi-declarator).
 		// Inline them to avoid creating a Go block scope.
 		stmts := l.lowerLocalVarStmts(s)
 		if len(stmts) == 1 {
-			return stmts[0]
+			out = stmts[0]
+			break
 		}
 		// Return a block, but the caller (lowerBlock) will inline it
-		return &ast.BlockStmt{List: stmts}
+		out = &ast.BlockStmt{List: stmts}
 
 	case *hir.IfStmt:
-		return l.lowerIfStmt(s)
+		out = l.lowerIfStmt(s)
 
 	case *hir.ForStmt:
-		return l.lowerForStmt(s)
+		out = l.lowerForStmt(s)
 
 	case *hir.ForInStmt:
-		return l.lowerForInStmt(s)
+		out = l.lowerForInStmt(s)
 
 	case *hir.ForOfStmt:
-		return l.lowerForOfStmt(s)
+		out = l.lowerForOfStmt(s)
 
 	case *hir.WhileStmt:
-		return l.lowerWhileStmt(s)
+		out = l.lowerWhileStmt(s)
 
 	case *hir.DoWhileStmt:
-		return l.lowerDoWhileStmt(s)
+		out = l.lowerDoWhileStmt(s)
 
 	case *hir.SwitchStmt:
-		return l.lowerSwitchStmt(s)
+		out = l.lowerSwitchStmt(s)
 
 	case *hir.TryCatchStmt:
-		return l.lowerTryCatchStmt(s)
+		out = l.lowerTryCatchStmt(s)
 
 	case *hir.ThrowStmt:
 		val := l.lowerExpr(s.Value)
-		return exprStmt(callExpr(goIdent("panic"), val))
+		out = exprStmt(callExpr(goIdent("panic"), val))
 
 	case *hir.BreakStmt:
 		bs := &ast.BranchStmt{Tok: token.BREAK}
 		if s.Label != "" {
 			bs.Label = goIdent(s.Label)
 		}
-		return bs
+		out = bs
 
 	case *hir.ContinueStmt:
 		cs := &ast.BranchStmt{Tok: token.CONTINUE}
 		if s.Label != "" {
 			cs.Label = goIdent(s.Label)
 		}
-		return cs
+		out = cs
 
 	case *hir.LabeledStmt:
-		return &ast.LabeledStmt{
+		out = &ast.LabeledStmt{
 			Label: goIdent(s.Label),
 			Stmt:  l.lowerStmt(s.Stmt),
 		}
 
 	case *hir.EmptyStmt:
-		return &ast.EmptyStmt{}
+		out = &ast.EmptyStmt{}
 
 	default:
 		return nil
 	}
+	return setStmtPos(out, span)
 }
 
 func (l *Lowerer) lowerLocalVarStmts(d *hir.VarDecl) []ast.Stmt {

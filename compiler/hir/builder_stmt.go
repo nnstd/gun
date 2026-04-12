@@ -13,7 +13,7 @@ func (b *Builder) buildBlock(node *sitter.Node) *BlockStmt {
 	if node == nil {
 		return &BlockStmt{}
 	}
-	block := &BlockStmt{}
+	block := &BlockStmt{Span: b.span(node)}
 	b.symtab.PushScope()
 	defer b.symtab.PopScope()
 
@@ -35,7 +35,7 @@ func (b *Builder) buildStmt(node *sitter.Node) Stmt {
 		if node.NamedChildCount() > 0 {
 			expr := b.buildExpr(node.NamedChild(0))
 			if expr != nil {
-				return &ExprStmt{Expr: expr}
+				return &ExprStmt{Expr: expr, Span: b.span(node)}
 			}
 		}
 		return nil
@@ -45,7 +45,7 @@ func (b *Builder) buildStmt(node *sitter.Node) Stmt {
 		if node.NamedChildCount() > 0 {
 			value = b.buildExpr(node.NamedChild(0))
 		}
-		return &ReturnStmt{Value: value}
+		return &ReturnStmt{Value: value, Span: b.span(node)}
 
 	case "if_statement":
 		return b.buildIfStmt(node)
@@ -78,7 +78,7 @@ func (b *Builder) buildStmt(node *sitter.Node) Stmt {
 		if node.NamedChildCount() > 0 {
 			value = b.buildExpr(node.NamedChild(0))
 		}
-		return &ThrowStmt{Value: value}
+		return &ThrowStmt{Value: value, Span: b.span(node)}
 
 	case "break_statement":
 		label := ""
@@ -125,6 +125,7 @@ func (b *Builder) buildStmt(node *sitter.Node) Stmt {
 					Init: &ArrowFunc{
 						Params: d.Params,
 						Body:   d.Body,
+						Span:   d.Span,
 					},
 				}},
 			}
@@ -138,7 +139,7 @@ func (b *Builder) buildStmt(node *sitter.Node) Stmt {
 		// Try to parse as expression
 		expr := b.buildExpr(node)
 		if expr != nil {
-			return &ExprStmt{Expr: expr}
+			return &ExprStmt{Expr: expr, Span: b.span(node)}
 		}
 		return nil
 	}
@@ -189,6 +190,7 @@ func (b *Builder) buildIfStmt(node *sitter.Node) *IfStmt {
 		Cond: cond,
 		Then: then,
 		Else: elseStmt,
+		Span: b.span(node),
 	}
 }
 
@@ -236,7 +238,7 @@ func (b *Builder) buildForStmt(node *sitter.Node) *ForStmt {
 		body = &BlockStmt{}
 	}
 
-	return &ForStmt{Init: init, Cond: cond, Post: post, Body: body}
+	return &ForStmt{Init: init, Cond: cond, Post: post, Body: body, Span: b.span(node)}
 }
 
 func (b *Builder) buildForInStmt(node *sitter.Node) *ForInStmt {
@@ -272,7 +274,7 @@ func (b *Builder) buildForInStmt(node *sitter.Node) *ForInStmt {
 		body = &BlockStmt{}
 	}
 
-	return &ForInStmt{Key: key, Value: value, Body: body}
+	return &ForInStmt{Key: key, Value: value, Body: body, Span: b.span(node)}
 }
 
 func (b *Builder) buildForOfStmt(node *sitter.Node) *ForOfStmt {
@@ -335,6 +337,7 @@ func (b *Builder) buildForOfStmt(node *sitter.Node) *ForOfStmt {
 		body = &BlockStmt{}
 	}
 	stmt.Body = body
+	stmt.Span = b.span(node)
 
 	return stmt
 }
@@ -363,7 +366,7 @@ func (b *Builder) buildWhileStmt(node *sitter.Node) *WhileStmt {
 		body = &BlockStmt{}
 	}
 
-	return &WhileStmt{Cond: cond, Body: body}
+	return &WhileStmt{Cond: cond, Body: body, Span: b.span(node)}
 }
 
 func (b *Builder) buildDoWhileStmt(node *sitter.Node) *DoWhileStmt {
@@ -390,7 +393,7 @@ func (b *Builder) buildDoWhileStmt(node *sitter.Node) *DoWhileStmt {
 		body = &BlockStmt{}
 	}
 
-	return &DoWhileStmt{Body: body, Cond: cond}
+	return &DoWhileStmt{Body: body, Cond: cond, Span: b.span(node)}
 }
 
 func (b *Builder) buildSwitchStmt(node *sitter.Node) *SwitchStmt {
@@ -435,7 +438,7 @@ func (b *Builder) buildSwitchStmt(node *sitter.Node) *SwitchStmt {
 		}
 	}
 
-	return &SwitchStmt{Tag: tag, Cases: cases}
+	return &SwitchStmt{Tag: tag, Cases: cases, Span: b.span(node)}
 }
 
 func (b *Builder) buildTryCatchStmt(node *sitter.Node) *TryCatchStmt {
@@ -472,6 +475,7 @@ func (b *Builder) buildTryCatchStmt(node *sitter.Node) *TryCatchStmt {
 		}
 	}
 
+	stmt.Span = b.span(node)
 	return stmt
 }
 

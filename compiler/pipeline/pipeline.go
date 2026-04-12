@@ -7,6 +7,7 @@ package pipeline
 
 import (
 	"fmt"
+	"go/ast"
 	"path/filepath"
 	"strings"
 
@@ -75,8 +76,12 @@ func NewWithContext(level OptLevel, ctx *context.TranspilerContext) *Pipeline {
 // This is the full pipeline: CST → HIR → MIR → SSA → Passes → De-SSA → Backend → Codegen.
 // moduleName is the Go module name for resolving relative imports.
 func (p *Pipeline) CompileTree(root *sitter.Node, source []byte, pkgName, moduleName string, samePackageImports bool) ([]byte, error) {
+	return p.CompileTreeWithPath(root, source, pkgName, moduleName, "", samePackageImports)
+}
+
+func (p *Pipeline) CompileTreeWithPath(root *sitter.Node, source []byte, pkgName, moduleName, sourcePath string, samePackageImports bool) ([]byte, error) {
 	// Stage 1: Build HIR
-	hirMod := hir.BuildModule(root, source, pkgName)
+	hirMod := hir.BuildModuleWithPath(root, source, pkgName, sourcePath)
 	if p.OnHIR != nil {
 		p.OnHIR(hirMod)
 	}
@@ -116,13 +121,13 @@ func (p *Pipeline) CompileTree(root *sitter.Node, source []byte, pkgName, module
 	goFile := backend.Lower(hirMod, p.Ctx, moduleName, samePackageImports)
 
 	// Stage 7: Codegen
-	return backend.Generate(goFile)
+	return backend.GenerateWithSource(goFile, hirMod.SourcePath, hirMod.SourceSize)
 }
 
 // CompileHIR compiles from an already-built HIR module.
 func (p *Pipeline) CompileHIR(hirMod *hir.Module, moduleName string, samePackageImports bool) ([]byte, error) {
 	goFile := backend.Lower(hirMod, p.Ctx, moduleName, samePackageImports)
-	return backend.Generate(goFile)
+	return backend.GenerateWithSource(goFile, hirMod.SourcePath, hirMod.SourceSize)
 }
 
 // CompilePackage compiles multiple TypeScript files that belong to the same Go package.
@@ -139,7 +144,7 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 		if err != nil {
 			continue
 		}
-		hirMod := hir.BuildModule(tree.RootNode(), source, pkgName)
+		hirMod := hir.BuildModuleWithPath(tree.RootNode(), source, pkgName, name)
 		tree.Close()
 		hirModules[name] = hirMod
 		allExports[name] = backend.ScanHIRExports(hirMod)
@@ -229,6 +234,7 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 
 	// Phase 3: Compile each file with cross-file export knowledge
 	results := make(map[string][]byte)
+	goFiles := make(map[string]*ast.File)
 	for name, hirMod := range hirModules {
 		// Collect exports from OTHER files (not this one)
 		var crossExports []backend.CrossFileExport
@@ -270,8 +276,14 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 			}
 		}
 
-		goFile := backend.LowerWithExports(hirMod, p.Ctx, moduleName, true, crossExports, reservedNames, importNameMap, exportAliases[name])
-		out, err := backend.Generate(goFile)
+		goFiles[name] = backend.LowerWithExports(hirMod, p.Ctx, moduleName, true, crossExports, reservedNames, importNameMap, exportAliases[name])
+	}
+
+	backend.BreakPackageInitCycles(goFiles)
+
+	for name, goFile := range goFiles {
+		hirMod := hirModules[name]
+		out, err := backend.GenerateWithSource(goFile, hirMod.SourcePath, hirMod.SourceSize)
 		if err != nil {
 			return nil, fmt.Errorf("compile %s: %w", name, err)
 		}

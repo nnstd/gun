@@ -886,6 +886,25 @@ func TestCallSuperSkipsOwnInit(t *testing.T) {
 	}
 }
 
+func TestInstanceOfUsesPrototypeChain(t *testing.T) {
+	parent := NewClass(func(this *JSValue, args ...*JSValue) *JSValue { return nil }, nil)
+	child := NewClass(func(this *JSValue, args ...*JSValue) *JSValue { return nil }, parent)
+	instance := child.Call()
+
+	if !InstanceOf(instance, child).Bool() {
+		t.Fatal("instance should be instanceof child")
+	}
+	if !InstanceOf(instance, parent).Bool() {
+		t.Fatal("instance should be instanceof parent")
+	}
+	if InstanceOf(parent.Call(), child).Bool() {
+		t.Fatal("parent instance should not be instanceof child")
+	}
+	if InstanceOf(NewString("x"), child).Bool() {
+		t.Fatal("primitive should not satisfy instanceof")
+	}
+}
+
 // --- MethodCall with MarkAsMethod ---
 
 func TestMethodCallPassesThis(t *testing.T) {

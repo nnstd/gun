@@ -449,6 +449,19 @@ func TestErrorMemberAccess(t *testing.T) {
 	assertContains(t, out, `error.Error.Get("stackTraceLimit")`)
 }
 
+func TestBunServeUsesJSWrapperCall(t *testing.T) {
+	ts := `Bun.serve({ port: 3000, fetch() { return new Response("ok") } })`
+	out := compile(t, ts)
+	assertContains(t, out, `bun.AsJSValue.Get("serve").Call(`)
+	assertNotContains(t, out, `bun.Serve(`)
+}
+
+func TestInstanceofUsesRuntimeHelper(t *testing.T) {
+	ts := `class A {} const foo = {} as any; const ok = foo instanceof A`
+	out := compile(t, ts)
+	assertContains(t, out, `jsvalue.InstanceOf(`)
+}
+
 func TestParseIntGlobal(t *testing.T) {
 	ts := `const n = parseInt("42", 10);`
 	out := compile(t, ts)

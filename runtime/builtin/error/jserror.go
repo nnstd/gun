@@ -2,6 +2,8 @@ package error
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -47,21 +49,83 @@ func captureStack(name, message string, skip int) string {
 	}
 
 	frames := runtime.CallersFrames(pcs)
+	var collected []runtime.Frame
+	hasSourceFrame := false
 	for {
 		frame, more := frames.Next()
-		// Skip runtime/internal frames
-		if strings.HasPrefix(frame.Function, "runtime.") {
-			if !more {
-				break
-			}
-			continue
+		collected = append(collected, frame)
+		if isSourceFrame(frame.File) {
+			hasSourceFrame = true
 		}
-		sb.WriteString(fmt.Sprintf("\n    at %s (%s:%d:0)", frame.Function, frame.File, frame.Line))
 		if !more {
 			break
 		}
 	}
+	for _, frame := range collected {
+		if shouldSkipFrame(frame, hasSourceFrame) {
+			continue
+		}
+		sb.WriteString("\n    at ")
+		sb.WriteString(formatFrame(frame))
+	}
 	return sb.String()
+}
+
+func shouldSkipFrame(frame runtime.Frame, hasSourceFrame bool) bool {
+	if strings.HasPrefix(frame.Function, "runtime.") {
+		return true
+	}
+	file := filepath.ToSlash(frame.File)
+	if strings.Contains(file, "/runtime/builtin/error/jserror.go") {
+		return true
+	}
+	if hasSourceFrame && strings.Contains(file, "/runtime/") && !isSourceFrame(file) {
+		return true
+	}
+	return false
+}
+
+func isSourceFrame(file string) bool {
+	file = filepath.ToSlash(file)
+	return strings.HasSuffix(file, ".ts") ||
+		strings.HasSuffix(file, ".js") ||
+		strings.HasSuffix(file, ".tsx") ||
+		strings.HasSuffix(file, ".jsx")
+}
+
+func formatFrame(frame runtime.Frame) string {
+	location := fmt.Sprintf("%s:%d:0", frame.File, frame.Line)
+	name := simplifyFunctionName(frame.Function)
+	if name == "" {
+		return location
+	}
+	return fmt.Sprintf("%s (%s)", name, location)
+}
+
+func simplifyFunctionName(fn string) string {
+	if fn == "" {
+		return ""
+	}
+	if idx := strings.LastIndex(fn, "/"); idx >= 0 {
+		fn = fn[idx+1:]
+	}
+	if strings.HasPrefix(fn, "main.main.func") || strings.Contains(fn, ".func") {
+		return ""
+	}
+	if idx := strings.LastIndex(fn, "."); idx >= 0 {
+		prefix := fn[:idx]
+		suffix := fn[idx+1:]
+		if strings.Contains(prefix, ".") {
+			if dot := strings.LastIndex(prefix, "."); dot >= 0 {
+				prefix = prefix[dot+1:]
+			}
+		}
+		if prefix != "" {
+			return prefix + "." + suffix
+		}
+		return suffix
+	}
+	return fn
 }
 
 // buildCallSites returns a JSValue array of CallSite-like objects.
@@ -150,6 +214,68 @@ var ReferenceError = makeErrorClass("ReferenceError", Error)
 var SyntaxError = makeErrorClass("SyntaxError", Error)
 var URIError = makeErrorClass("URIError", Error)
 var EvalError = makeErrorClass("EvalError", Error)
+
+func InvalidArgType(message string) *jsvalue.JSValue {
+	err := TypeError.Call(jsvalue.NewString(message))
+	err.Set("code", jsvalue.NewString("ERR_INVALID_ARG_TYPE"))
+	return err
+}
+
+func InvalidPrivateField(expr string) *jsvalue.JSValue {
+	return TypeError.Call(jsvalue.NewString(fmt.Sprintf("Cannot access invalid private field (evaluating '%s')", expr)))
+}
+
+func InvalidPrivateMethodOrAccessor(expr string) *jsvalue.JSValue {
+	return TypeError.Call(jsvalue.NewString(fmt.Sprintf("Cannot access private method or acessor (evaluating '%s')", expr)))
+}
+
+func RefreshStack(err *jsvalue.JSValue, skip int) *jsvalue.JSValue {
+	if err == nil {
+		return nil
+	}
+	name := "Error"
+	message := ""
+	if n := err.Get("name"); n != nil && n.Type() == jsvalue.TypeString {
+		name = n.String()
+	}
+	if m := err.Get("message"); m != nil && m.Type() == jsvalue.TypeString {
+		message = m.String()
+	}
+	err.Set("stack", jsvalue.NewString(captureStack(name, message, skip+1)))
+	return err
+}
+
+func AsJSError(v any) (*jsvalue.JSValue, bool) {
+	err, ok := v.(*jsvalue.JSValue)
+	if !ok || err == nil {
+		return nil, false
+	}
+	if stack := err.Get("stack"); stack != nil && stack.Type() == jsvalue.TypeString {
+		return err, true
+	}
+	if name := err.Get("name"); name != nil && name.Type() == jsvalue.TypeString {
+		return err, true
+	}
+	return nil, false
+}
+
+func FormatRecovered(v any) (string, bool) {
+	err, ok := AsJSError(v)
+	if !ok {
+		return "", false
+	}
+	return err.String(), true
+}
+
+func RecoverMain() {
+	if r := recover(); r != nil {
+		if msg, ok := FormatRecovered(r); ok {
+			fmt.Fprintln(os.Stderr, msg)
+			os.Exit(1)
+		}
+		panic(r)
+	}
+}
 
 func init() {
 	// Error.stackTraceLimit — accessor property backed by Go variable

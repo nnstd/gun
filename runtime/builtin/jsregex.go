@@ -6,6 +6,20 @@ import (
 	"strconv"
 )
 
+var RegexpPrototype = NewObject()
+
+var RegexpCtor = NewFunction(func(args ...*JSValue) *JSValue {
+	pattern := ""
+	if len(args) > 0 && args[0] != nil {
+		pattern = args[0].String()
+	}
+	regex := NewRegex(CompileRegex(pattern))
+	if len(args) > 1 && args[1] != nil {
+		_ = args[1] // flags currently ignored
+	}
+	return regex
+})
+
 // GoRegex is a regexp-compatible interface satisfied by both *regexp.Regexp
 // and *regexp2Wrapper. This allows CompileRegex to transparently fall back to
 // the regexp2 engine for JS regex features (lookaheads, lookbehinds) that
@@ -81,6 +95,7 @@ func NewRegex(regex interface{}) *JSValue {
 		properties: make(map[string]*PropertyDescriptor),
 		regexVal:   regex,
 	}
+	v.prototype = RegexpPrototype
 	// Add test() method: regex.test(str) → boolean
 	v.Set("test", NewFunction(func(args ...*JSValue) *JSValue {
 		if len(args) < 1 {
@@ -106,6 +121,11 @@ func NewRegex(regex interface{}) *JSValue {
 		return NewNull()
 	}))
 	return v
+}
+
+func init() {
+	RegexpCtor.Set("prototype", RegexpPrototype)
+	RegexpPrototype.Set("constructor", RegexpCtor)
 }
 
 // MatchString tests whether a JSValue regex matches a given string.

@@ -31,6 +31,13 @@ func buildHIR(t *testing.T, source string) *Module {
 	return BuildModule(tree.RootNode(), []byte(source), "main")
 }
 
+func buildHIRWithPath(t *testing.T, source, sourcePath string) *Module {
+	t.Helper()
+	tree := parseTS(t, source)
+	defer tree.Close()
+	return BuildModuleWithPath(tree.RootNode(), []byte(source), "main", sourcePath)
+}
+
 func hirString(t *testing.T, source string) string {
 	t.Helper()
 	mod := buildHIR(t, source)
@@ -124,6 +131,49 @@ func TestInterfaceDeclaration(t *testing.T) {
 func TestTypeAlias(t *testing.T) {
 	out := hirString(t, `type ID = string | number;`)
 	assertHIRContains(t, out, "TypeAlias ID#")
+}
+
+func TestFunctionDeclarationSpan(t *testing.T) {
+	mod := buildHIRWithPath(t, `function add(x, y) { return x + y }`, "/tmp/example.ts")
+	fd, ok := mod.Declarations[0].(*FuncDecl)
+	if !ok {
+		t.Fatalf("decl = %T, want *FuncDecl", mod.Declarations[0])
+	}
+	if fd.Span == nil || fd.Span.StartLine != 1 || fd.Span.EndByte <= fd.Span.StartByte {
+		t.Fatalf("unexpected function span: %#v", fd.Span)
+	}
+	if mod.SourcePath != "/tmp/example.ts" {
+		t.Fatalf("module source path = %q", mod.SourcePath)
+	}
+}
+
+func TestArrowFunctionSpan(t *testing.T) {
+	mod := buildHIRWithPath(t, `const fn = (value) => value + 1`, "/tmp/arrow.ts")
+	vd, ok := mod.Declarations[0].(*VarDecl)
+	if !ok {
+		t.Fatalf("decl = %T, want *VarDecl", mod.Declarations[0])
+	}
+	af, ok := vd.Declarators[0].Init.(*ArrowFunc)
+	if !ok {
+		t.Fatalf("init = %T, want *ArrowFunc", vd.Declarators[0].Init)
+	}
+	if af.Span == nil || af.Span.StartLine != 1 || af.Span.EndByte <= af.Span.StartByte {
+		t.Fatalf("unexpected arrow span: %#v", af.Span)
+	}
+}
+
+func TestClassMethodSpan(t *testing.T) {
+	mod := buildHIRWithPath(t, `class Box { open() { return 1 } }`, "/tmp/class.ts")
+	cd, ok := mod.Declarations[0].(*ClassDecl)
+	if !ok {
+		t.Fatalf("decl = %T, want *ClassDecl", mod.Declarations[0])
+	}
+	if len(cd.Methods) != 1 {
+		t.Fatalf("expected 1 method, got %d", len(cd.Methods))
+	}
+	if cd.Methods[0].Span == nil || cd.Methods[0].Span.StartLine != 1 || cd.Methods[0].Span.EndByte <= cd.Methods[0].Span.StartByte {
+		t.Fatalf("unexpected method span: %#v", cd.Methods[0].Span)
+	}
 }
 
 // --- Import Tests ---

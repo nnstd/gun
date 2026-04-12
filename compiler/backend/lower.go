@@ -51,6 +51,7 @@ type Lowerer struct {
 	privateKeys      map[string]string
 	syntheticCounter int
 	needsBunWait     bool
+	sourcePath       string
 }
 
 // Lower converts an HIR module to a Go AST file.
@@ -83,6 +84,7 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 		crossFileExports: cfe,
 		pkgName:          mod.Package,
 		varTypes:         make(map[string]string),
+		sourcePath:       mod.SourcePath,
 	}
 
 	// Reserve cross-file export names in the symbol table so local symbols
@@ -227,7 +229,7 @@ func (l *Lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 	// main and init stay as Go func declarations
 	if name == "main" || name == "init" {
 		body := l.lowerBlock(d.Body)
-		fd := funcDecl(name, fieldList(), nil, body)
+		fd := setFuncDeclPos(funcDecl(name, fieldList(), nil, body), d.Span)
 		l.decls = append(l.decls, fd)
 		return
 	}
@@ -239,12 +241,12 @@ func (l *Lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 	if methodLike {
 		body = l.lowerMethodBody(d.Params, d.Body)
 	}
-	fnLit := l.wrapAsJSValueFunc(d.Params, body)
+	fnLit := setFuncLitPos(l.wrapAsJSValueFunc(d.Params, body), d.Span)
 	fnVal := callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), fnLit)
 	if methodLike {
 		fnVal = callExpr(selectorExpr(fnVal, "MarkAsMethod"))
 	}
-	l.decls = append(l.decls, varDecl(name, nil, fnVal))
+	l.decls = append(l.decls, setDeclPos(varDecl(name, nil, fnVal), d.Span))
 }
 
 func (l *Lowerer) lowerVarDecl(d *hir.VarDecl) {
@@ -382,7 +384,11 @@ func (l *Lowerer) lowerClassConstructor(className string, hasParent bool, ctor *
 	}
 	ctorBody.List = append(ctorBody.List, returnStmt(goIdent("nil")))
 
-	return &ast.FuncLit{
+	var span *hir.SourceSpan
+	if ctor != nil {
+		span = ctor.Span
+	}
+	return setFuncLitPos(&ast.FuncLit{
 		Type: &ast.FuncType{
 			Params: fieldList(
 				goField("this", jsValuePtrType()),
@@ -394,7 +400,7 @@ func (l *Lowerer) lowerClassConstructor(className string, hasParent bool, ctor *
 			Results: fieldList(goField("", jsValuePtrType())),
 		},
 		Body: ctorBody,
-	}
+	}, span)
 }
 
 func isCallSuperStmt(stmt ast.Stmt, className string) bool {
@@ -497,7 +503,7 @@ func (l *Lowerer) lowerClassMethodValue(m *hir.ClassMethod) ast.Expr {
 	} else {
 		methodBody = l.lowerFuncBody(m.Params, m.Body)
 	}
-	methodLit := l.wrapAsJSValueFunc(m.Params, methodBody)
+	methodLit := setFuncLitPos(l.wrapAsJSValueFunc(m.Params, methodBody), m.Span)
 	return callExpr(selectorExpr(
 		callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), methodLit),
 		"MarkAsMethod"))
@@ -968,10 +974,10 @@ func (l *Lowerer) lowerTopLevelStmt(d *hir.TopLevelStmt) {
 	}
 	if l.pkgName == "main" {
 		mainFn := l.getOrCreateMain()
-		mainFn.Body.List = append(mainFn.Body.List, gs)
+		mainFn.Body.List = l.appendWithLineMarker(mainFn.Body.List, d.Span, gs)
 	} else {
 		// Non-main packages: top-level statements go into init()
-		l.initStmts = append(l.initStmts, gs)
+		l.initStmts = l.appendWithLineMarker(l.initStmts, d.Span, gs)
 	}
 }
 
@@ -980,13 +986,36 @@ func (l *Lowerer) getOrCreateMain() *ast.FuncDecl {
 	// Look for existing main func
 	for _, d := range l.decls {
 		if fd, ok := d.(*ast.FuncDecl); ok && fd.Name.Name == "main" {
+			l.ensureMainRecover(fd)
 			return fd
 		}
 	}
 	// Create one
 	fd := funcDecl("main", fieldList(), nil, blockStmt())
+	l.ensureMainRecover(fd)
 	l.decls = append(l.decls, fd)
 	return fd
+}
+
+func (l *Lowerer) ensureMainRecover(fd *ast.FuncDecl) {
+	if fd == nil || fd.Name == nil || fd.Name.Name != "main" || fd.Body == nil {
+		return
+	}
+	for _, stmt := range fd.Body.List {
+		deferStmt, ok := stmt.(*ast.DeferStmt)
+		if !ok || deferStmt.Call == nil {
+			continue
+		}
+		if sel, ok := deferStmt.Call.Fun.(*ast.SelectorExpr); ok {
+			if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "error" && sel.Sel.Name == "RecoverMain" {
+				return
+			}
+		}
+	}
+	l.addAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "error")
+	fd.Body.List = append([]ast.Stmt{
+		&ast.DeferStmt{Call: callExpr(selectorExpr(goIdent("error"), "RecoverMain"))},
+	}, fd.Body.List...)
 }
 
 // prescan collects metadata from HIR declarations before lowering.
@@ -1090,9 +1119,86 @@ func (l *Lowerer) markCrossFileExported(mod *hir.Module) {
 	}
 }
 
-// fixInitCycles detects self-referencing package-level variable initializers
-// and splits them into forward declarations + init() assignments.
+// fixInitCycles detects package-level variable initializer cycles
+// and splits the participating vars into forward declarations + init() assignments.
 func (l *Lowerer) fixInitCycles(decls []ast.Decl) []ast.Decl {
+	type varInfo struct {
+		name  string
+		typ   ast.Expr
+		value ast.Expr
+		decl  *ast.GenDecl
+	}
+
+	varInfos := make(map[string]varInfo)
+	for _, d := range decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || gd.Tok != token.VAR {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok || len(vs.Names) == 0 {
+				continue
+			}
+			info := varInfo{name: vs.Names[0].Name, typ: vs.Type, decl: gd}
+			if len(vs.Values) > 0 {
+				info.value = vs.Values[0]
+			}
+			varInfos[info.name] = info
+		}
+	}
+
+	deps := make(map[string]map[string]bool)
+	for name, info := range varInfos {
+		if info.value == nil {
+			continue
+		}
+		refs := exprReferencedIdents(info.value)
+		for ref := range refs {
+			if ref == name {
+				if deps[name] == nil {
+					deps[name] = make(map[string]bool)
+				}
+				deps[name][ref] = true
+				continue
+			}
+			if _, ok := varInfos[ref]; ok {
+				if deps[name] == nil {
+					deps[name] = make(map[string]bool)
+				}
+				deps[name][ref] = true
+			}
+		}
+	}
+
+	cyclic := make(map[string]bool)
+	visiting := make(map[string]bool)
+	memo := make(map[string]bool)
+	var inCycle func(string) bool
+	inCycle = func(name string) bool {
+		if v, ok := memo[name]; ok {
+			return v
+		}
+		if visiting[name] {
+			return true
+		}
+		visiting[name] = true
+		defer delete(visiting, name)
+		for dep := range deps[name] {
+			if dep == name || inCycle(dep) {
+				memo[name] = true
+				return true
+			}
+		}
+		memo[name] = false
+		return false
+	}
+	for name := range varInfos {
+		if inCycle(name) {
+			cyclic[name] = true
+		}
+	}
+
 	var result []ast.Decl
 	var initStmts []ast.Stmt
 
@@ -1102,38 +1208,33 @@ func (l *Lowerer) fixInitCycles(decls []ast.Decl) []ast.Decl {
 			result = append(result, d)
 			continue
 		}
-		hasCycle := false
+		var keptSpecs []ast.Spec
 		for _, spec := range gd.Specs {
 			vs, ok := spec.(*ast.ValueSpec)
-			if !ok || len(vs.Names) == 0 || len(vs.Values) == 0 {
+			if !ok || len(vs.Names) == 0 {
 				continue
 			}
 			name := vs.Names[0].Name
-			if exprReferencesIdent(vs.Values[0], name) {
-				hasCycle = true
-				break
+			if !cyclic[name] {
+				keptSpecs = append(keptSpecs, spec)
+				continue
+			}
+			l.jsvalueImport()
+			typ := vs.Type
+			if typ == nil {
+				typ = jsValuePtrType()
+			}
+			fwd := varDecl(vs.Names[0].Name, typ, nil)
+			result = append(result, fwd)
+			if len(vs.Values) > 0 {
+				initStmts = append(initStmts, assignStmt(
+					[]ast.Expr{goIdent(vs.Names[0].Name)},
+					[]ast.Expr{vs.Values[0]},
+				))
 			}
 		}
-		if hasCycle {
-			// Split: forward declare + init() assignment
-			l.jsvalueImport()
-			for _, spec := range gd.Specs {
-				vs := spec.(*ast.ValueSpec)
-				typ := vs.Type
-				if typ == nil {
-					typ = jsValuePtrType()
-				}
-				fwd := varDecl(vs.Names[0].Name, typ, nil)
-				result = append(result, fwd)
-				if len(vs.Values) > 0 {
-					initStmts = append(initStmts, assignStmt(
-						[]ast.Expr{goIdent(vs.Names[0].Name)},
-						[]ast.Expr{vs.Values[0]},
-					))
-				}
-			}
-		} else {
-			result = append(result, d)
+		if len(keptSpecs) > 0 {
+			result = append(result, &ast.GenDecl{Tok: token.VAR, Specs: keptSpecs})
 		}
 	}
 
@@ -1147,31 +1248,35 @@ func (l *Lowerer) fixInitCycles(decls []ast.Decl) []ast.Decl {
 
 // exprReferencesIdent checks if an AST expression references an identifier by name.
 func exprReferencesIdent(expr ast.Expr, name string) bool {
-	found := false
-	var walk func(ast.Node, ast.Node)
-	walk = func(n ast.Node, parent ast.Node) {
-		if found {
-			return
-		}
-		if id, ok := n.(*ast.Ident); ok && id.Name == name {
-			// Ignore selector field names like pkg.Default; those are property
-			// accesses, not references to the variable being initialized.
-			if sel, ok := parent.(*ast.SelectorExpr); ok && sel.Sel == id {
-				return
+	_, ok := exprReferencedIdents(expr)[name]
+	return ok
+}
+
+func exprReferencedIdents(expr ast.Expr) map[string]bool {
+	refs := make(map[string]bool)
+	var stack []ast.Node
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if n == nil {
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
 			}
-			found = true
-			return
+			return false
 		}
-		ast.Inspect(n, func(child ast.Node) bool {
-			if child == nil || child == n {
+		var parent ast.Node
+		if len(stack) > 0 {
+			parent = stack[len(stack)-1]
+		}
+		if id, ok := n.(*ast.Ident); ok {
+			if sel, ok := parent.(*ast.SelectorExpr); ok && sel.Sel == id {
+				stack = append(stack, n)
 				return true
 			}
-			walk(child, n)
-			return false
-		})
-	}
-	walk(expr, nil)
-	return found
+			refs[id.Name] = true
+		}
+		stack = append(stack, n)
+		return true
+	})
+	return refs
 }
 
 // --------------------------------------------------------------------
@@ -1287,13 +1392,16 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 		if gs == nil {
 			continue
 		}
+		span := hirStmtSpan(s)
 		if block, ok := gs.(*ast.BlockStmt); ok {
 			if true {
-				stmts = append(stmts, block.List...)
+				for _, child := range block.List {
+					stmts = l.appendWithLineMarker(stmts, span, child)
+				}
 				continue
 			}
 		}
-		stmts = append(stmts, gs)
+		stmts = l.appendWithLineMarker(stmts, span, gs)
 	}
 
 	// Ensure trailing return nil if function body doesn't end with a return
@@ -1433,13 +1541,16 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 		if gs == nil {
 			continue
 		}
+		span := hirStmtSpan(s)
 		if block, ok := gs.(*ast.BlockStmt); ok {
 			if true {
-				stmts = append(stmts, block.List...)
+				for _, child := range block.List {
+					stmts = l.appendWithLineMarker(stmts, span, child)
+				}
 				continue
 			}
 		}
-		stmts = append(stmts, gs)
+		stmts = l.appendWithLineMarker(stmts, span, gs)
 	}
 
 	// Ensure trailing return nil

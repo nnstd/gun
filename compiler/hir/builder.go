@@ -12,6 +12,7 @@ type Builder struct {
 	source  []byte
 	symtab  *symbol.Table
 	pkgName string
+	path    string
 }
 
 type classParts struct {
@@ -24,15 +25,23 @@ type classParts struct {
 
 // BuildModule creates an HIR Module from a tree-sitter CST root node.
 func BuildModule(root *sitter.Node, source []byte, pkgName string) *Module {
+	return BuildModuleWithPath(root, source, pkgName, "")
+}
+
+// BuildModuleWithPath creates an HIR Module with original source path metadata.
+func BuildModuleWithPath(root *sitter.Node, source []byte, pkgName, sourcePath string) *Module {
 	symtab := symbol.NewTable()
 	b := &Builder{
 		source:  source,
 		symtab:  symtab,
 		pkgName: pkgName,
+		path:    sourcePath,
 	}
 	mod := &Module{
 		Package:     pkgName,
 		SymbolTable: symtab,
+		SourcePath:  sourcePath,
+		SourceSize:  len(source),
 	}
 
 	// Pre-pass: register top-level function declarations for JS hoisting.
@@ -45,6 +54,22 @@ func BuildModule(root *sitter.Node, source []byte, pkgName string) *Module {
 	}
 
 	return mod
+}
+
+func (b *Builder) span(node *sitter.Node) *SourceSpan {
+	if node == nil {
+		return nil
+	}
+	start := node.StartPosition()
+	end := node.EndPosition()
+	return &SourceSpan{
+		StartByte:   int(node.StartByte()),
+		EndByte:     int(node.EndByte()),
+		StartLine:   int(start.Row) + 1,
+		StartColumn: int(start.Column) + 1,
+		EndLine:     int(end.Row) + 1,
+		EndColumn:   int(end.Column) + 1,
+	}
 }
 
 // nodeText returns the UTF-8 text of a CST node.
@@ -108,7 +133,7 @@ func (b *Builder) buildTopLevel(mod *Module, node *sitter.Node) {
 			}
 		}
 		if s := b.buildStmt(node); s != nil {
-			mod.Declarations = append(mod.Declarations, &TopLevelStmt{Stmt: s})
+			mod.Declarations = append(mod.Declarations, &TopLevelStmt{Stmt: s, Span: b.span(node)})
 		}
 	case "comment", "line_comment", "block_comment":
 		// skip
@@ -166,6 +191,7 @@ func (b *Builder) buildFuncDecl(node *sitter.Node, exported bool) *FuncDecl {
 		Body:     body,
 		Exported: exported,
 		IsAsync:  isAsync,
+		Span:     b.span(node),
 	}
 }
 
@@ -258,6 +284,7 @@ func (b *Builder) buildClassDecl(node *sitter.Node, exported bool) *ClassDecl {
 		Properties:  parts.properties,
 		StaticInits: parts.staticInits,
 		Exported:    exported,
+		Span:        b.span(node),
 	}
 	return decl
 }
@@ -342,6 +369,7 @@ func (b *Builder) buildClassBody(parts *classParts, node *sitter.Node) {
 				parts.constructor = &ClassConstructor{
 					Params: params,
 					Body:   body,
+					Span:   b.span(child),
 				}
 			} else {
 				parts.methods = append(parts.methods, &ClassMethod{
@@ -353,6 +381,7 @@ func (b *Builder) buildClassBody(parts *classParts, node *sitter.Node) {
 					IsSetter:  isSetter,
 					IsPrivate: isPrivate,
 					Computed:  computedExpr,
+					Span:      b.span(child),
 				})
 			}
 		case "public_field_definition":

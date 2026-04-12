@@ -101,6 +101,40 @@ var Response = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSV
 	return nil
 }, nil)
 
+var File = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSValue) *jsvalue.JSValue {
+	var parts *jsvalue.JSValue
+	if len(args) > 0 {
+		parts = args[0]
+	}
+	var name *jsvalue.JSValue
+	if len(args) > 1 {
+		name = args[1]
+	}
+	var options *jsvalue.JSValue
+	if len(args) > 2 {
+		options = args[2]
+	}
+
+	this.Set("name", jsvalue.NewString(""))
+	if name != nil {
+		this.Set("name", jsvalue.NewString(name.String()))
+	}
+	this.Set("lastModified", jsvalue.NewNumber(0))
+	this.Set("type", jsvalue.NewString(""))
+	this.Set("size", jsvalue.NewNumber(0))
+	this.Set("parts", jsvalue.Or(parts, jsvalue.NewArray()))
+
+	if options != nil && options.TypeString() == "object" {
+		if options.Get("lastModified").Bool() || options.Get("lastModified").TypeString() == "number" {
+			this.Set("lastModified", jsvalue.NewNumber(options.Get("lastModified").Number()))
+		}
+		if options.Get("type").Bool() || options.Get("type").TypeString() == "string" {
+			this.Set("type", jsvalue.NewString(options.Get("type").String()))
+		}
+	}
+	return nil
+}, nil)
+
 var URL = jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 	if len(args) > 0 {
 		return ParseURL(args[0])

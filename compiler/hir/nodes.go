@@ -13,12 +13,24 @@ import "github.com/nnstd/gun/compiler/symbol"
 // Module (top-level container)
 // --------------------------------------------------------------------
 
+// SourceSpan records the original source extent for an HIR node.
+type SourceSpan struct {
+	StartByte   int
+	EndByte     int
+	StartLine   int
+	StartColumn int
+	EndLine     int
+	EndColumn   int
+}
+
 // Module represents a single TypeScript file.
 type Module struct {
 	Package           string
 	Imports           []*ImportDecl
 	Declarations      []Decl
 	SymbolTable       *symbol.Table
+	SourcePath        string
+	SourceSize        int
 	SynthesizeDefault string // if set, emit var Default = <this Go name> (SWC interop)
 }
 
@@ -60,6 +72,7 @@ type FuncDecl struct {
 	Body     *BlockStmt
 	Exported bool
 	IsAsync  bool
+	Span     *SourceSpan
 }
 
 // VarDecl represents a variable declaration (const/let/var).
@@ -95,6 +108,7 @@ type ClassDecl struct {
 	Properties  []*ClassProperty
 	StaticInits []Expr // side-effect expressions from computed property names
 	Exported    bool
+	Span        *SourceSpan
 }
 
 // ClassExpr represents a class expression.
@@ -105,12 +119,14 @@ type ClassExpr struct {
 	Methods     []*ClassMethod
 	Properties  []*ClassProperty
 	StaticInits []Expr
+	Span        *SourceSpan
 }
 
 // ClassConstructor is the constructor of a class.
 type ClassConstructor struct {
 	Params []*Param
 	Body   *BlockStmt
+	Span   *SourceSpan
 }
 
 // ClassMethod is a method on a class.
@@ -123,6 +139,7 @@ type ClassMethod struct {
 	IsSetter  bool
 	IsPrivate bool
 	Computed  Expr // non-nil if the method name is computed: [expr]()
+	Span      *SourceSpan
 }
 
 // ClassProperty is a property declaration in a class body.
@@ -189,6 +206,7 @@ type ImportBinding struct {
 // In Go, these become the body of main() or init().
 type TopLevelStmt struct {
 	Stmt Stmt
+	Span *SourceSpan
 }
 
 // ExportDecl wraps a declaration that is being exported.
@@ -261,16 +279,19 @@ type ArrayPatternElem struct {
 // BlockStmt is a sequence of statements in a block.
 type BlockStmt struct {
 	Stmts []Stmt
+	Span  *SourceSpan
 }
 
 // ExprStmt is a statement that evaluates an expression for side effects.
 type ExprStmt struct {
 	Expr Expr
+	Span *SourceSpan
 }
 
 // ReturnStmt is a return statement.
 type ReturnStmt struct {
 	Value Expr // nil for bare return
+	Span  *SourceSpan
 }
 
 // IfStmt is an if/else statement.
@@ -278,6 +299,7 @@ type IfStmt struct {
 	Cond Expr
 	Then *BlockStmt
 	Else Stmt // *BlockStmt or *IfStmt (else if) or nil
+	Span *SourceSpan
 }
 
 // ForStmt is a C-style for loop.
@@ -286,6 +308,7 @@ type ForStmt struct {
 	Cond Expr // nil = infinite
 	Post Expr // nil = no post
 	Body *BlockStmt
+	Span *SourceSpan
 }
 
 // ForInStmt is a for...in loop.
@@ -293,6 +316,7 @@ type ForInStmt struct {
 	Key   *symbol.Symbol // loop variable
 	Value Expr           // object to iterate
 	Body  *BlockStmt
+	Span  *SourceSpan
 }
 
 // ForOfStmt is a for...of loop.
@@ -301,24 +325,28 @@ type ForOfStmt struct {
 	Pattern Pattern        // destructuring pattern (alternative to Elem)
 	Value   Expr           // iterable
 	Body    *BlockStmt
+	Span    *SourceSpan
 }
 
 // WhileStmt is a while loop.
 type WhileStmt struct {
 	Cond Expr
 	Body *BlockStmt
+	Span *SourceSpan
 }
 
 // DoWhileStmt is a do...while loop.
 type DoWhileStmt struct {
 	Body *BlockStmt
 	Cond Expr
+	Span *SourceSpan
 }
 
 // SwitchStmt is a switch statement.
 type SwitchStmt struct {
 	Tag   Expr
 	Cases []*CaseClause
+	Span  *SourceSpan
 }
 
 // CaseClause is a single case in a switch.
@@ -332,6 +360,7 @@ type TryCatchStmt struct {
 	Try     *BlockStmt
 	Catch   *CatchClause // nil if no catch
 	Finally *BlockStmt   // nil if no finally
+	Span    *SourceSpan
 }
 
 // CatchClause is the catch part of try/catch.
@@ -343,6 +372,7 @@ type CatchClause struct {
 // ThrowStmt is a throw statement.
 type ThrowStmt struct {
 	Value Expr
+	Span  *SourceSpan
 }
 
 // BreakStmt is a break statement.
@@ -521,6 +551,7 @@ type AssignExpr struct {
 	Left        Expr    // Identifier, MemberExpr, or SubscriptExpr
 	LeftPattern Pattern // destructuring pattern (set instead of Left)
 	Right       Expr
+	Span        *SourceSpan
 }
 
 // AssignOp is an assignment operator.
@@ -549,12 +580,14 @@ const (
 type CallExpr struct {
 	Func Expr   // function to call
 	Args []Expr // arguments
+	Span *SourceSpan
 }
 
 // NewExpr is a constructor invocation: new X(args).
 type NewExpr struct {
 	Callee Expr
 	Args   []Expr
+	Span   *SourceSpan
 }
 
 // MemberExpr is a property access: obj.prop or obj?.prop.
@@ -563,12 +596,14 @@ type MemberExpr struct {
 	Property string // property name
 	Private  bool
 	Optional bool // true for optional chaining: obj?.prop
+	Span     *SourceSpan
 }
 
 // ComputedMemberExpr is a computed property access: obj[expr].
 type ComputedMemberExpr struct {
 	Object   Expr
 	Property Expr // index or key expression
+	Span     *SourceSpan
 }
 
 // TernaryExpr is a ternary/conditional expression: cond ? then : else.
@@ -584,6 +619,7 @@ type ArrowFunc struct {
 	Body     *BlockStmt // nil if ExprBody is set
 	ExprBody Expr       // concise body: () => expr (nil if Body is set)
 	IsAsync  bool
+	Span     *SourceSpan
 }
 
 // FuncExpr is a function expression.
@@ -592,11 +628,13 @@ type FuncExpr struct {
 	Params  []*Param
 	Body    *BlockStmt
 	IsAsync bool
+	Span    *SourceSpan
 }
 
 // SequenceExpr is a comma-separated sequence of expressions.
 type SequenceExpr struct {
 	Exprs []Expr
+	Span  *SourceSpan
 }
 
 // AwaitExpr is an await expression.

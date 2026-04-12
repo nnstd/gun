@@ -31,6 +31,10 @@ func Compile(source []byte, pkgName, moduleName string, samePackageImports bool)
 // CompileWithOptLevel transpiles TypeScript source code using the multi-stage
 // pipeline at the requested optimization level.
 func CompileWithOptLevel(source []byte, pkgName, moduleName string, samePackageImports bool, optLevel int) ([]byte, error) {
+	return CompileWithOptLevelAndPath(source, pkgName, moduleName, "", samePackageImports, optLevel)
+}
+
+func CompileWithOptLevelAndPath(source []byte, pkgName, moduleName, sourcePath string, samePackageImports bool, optLevel int) ([]byte, error) {
 	tree, err := parseTypeScript(source)
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
@@ -38,7 +42,7 @@ func CompileWithOptLevel(source []byte, pkgName, moduleName string, samePackageI
 	defer tree.Close()
 
 	p := newDefaultPipeline(optLevel)
-	return p.CompileTree(tree.RootNode(), source, pkgName, moduleName, samePackageImports)
+	return p.CompileTreeWithPath(tree.RootNode(), source, pkgName, moduleName, sourcePath, samePackageImports)
 }
 
 // CompileWithExports transpiles TypeScript source with knowledge of cross-file exports.
