@@ -161,6 +161,9 @@ func (l *Lowerer) lowerIdentifier(e *hir.Identifier) ast.Expr {
 			}
 			if res.useAsJSValue {
 				moduleObj := selectorExpr(goIdent(res.goPkgName), "AsJSValue")
+				if res.moduleValue != "" {
+					moduleObj = selectorExpr(goIdent(res.goPkgName), res.moduleValue)
+				}
 				if res.jsExportName == "" {
 					return moduleObj
 				}

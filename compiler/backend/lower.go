@@ -20,6 +20,7 @@ type importResolution struct {
 	goSymbol     string
 	isTranspiled bool
 	useAsJSValue bool
+	moduleValue  string
 	jsExportName string
 }
 
@@ -842,12 +843,22 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 				isTranspiled: true,
 			}
 		} else if isKnown && useAsJSValue {
-			l.importedSyms[d.Default.Symbol] = importResolution{
+			res := importResolution{
 				goImportPath: goImportPath,
 				goPkgName:    goPkgName,
 				isTranspiled: false,
 				useAsJSValue: true,
 			}
+			if overrides != nil {
+				if ov, ok := overrides["default"]; ok && ov.GoSymbol != "" {
+					res.goSymbol = ov.GoSymbol
+					res.moduleValue = ov.GoSymbol
+				}
+			}
+			if res.goSymbol == "PromisesAsJSValue" {
+				res.jsExportName = ""
+			}
+			l.importedSyms[d.Default.Symbol] = res
 		} else if isKnown && isGunRuntimePkg(goImportPath) {
 			// Legacy fallback: Default import from Gun runtime module → pkg.AsJSValue
 			l.importedSyms[d.Default.Symbol] = importResolution{
@@ -899,11 +910,18 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 			continue
 		}
 		if useAsJSValue {
+			moduleValue := ""
+			if overrides != nil {
+				if ov, ok := overrides["default"]; ok && ov.GoSymbol != "" {
+					moduleValue = ov.GoSymbol
+				}
+			}
 			l.importedSyms[n.Symbol] = importResolution{
 				goImportPath: goImportPath,
 				goPkgName:    goPkgName,
 				isTranspiled: false,
 				useAsJSValue: true,
+				moduleValue:  moduleValue,
 				jsExportName: n.OriginalName,
 			}
 			continue

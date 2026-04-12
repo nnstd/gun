@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/nnstd/gun/runtime/builtin"
+	promise "github.com/nnstd/gun/runtime/promise"
 )
 
 func js(s string) *jsvalue.JSValue { return jsvalue.NewString(s) }
@@ -131,5 +132,12 @@ func TestAsJSValueAliases(t *testing.T) {
 	}
 	if AsJSValue.Get("promises").TypeString() != "object" {
 		t.Fatal("expected promises object on fs.AsJSValue")
+	}
+}
+
+func TestPromisesAsJSValueReturnsPromises(t *testing.T) {
+	p := PromisesAsJSValue.Get("readFile").Call(js("/definitely/missing"))
+	if !jsvalue.InstanceOf(p, promise.Promise).Bool() {
+		t.Fatal("expected fs.promises.readFile to return a Promise")
 	}
 }

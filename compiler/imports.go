@@ -16,6 +16,7 @@ type resolvedImport struct {
 	goSymbol     string // Go symbol name (e.g. "ReadFile"); empty for namespace imports
 	isTranspiled bool   // true when the module is transpiled from source (not a known/runtime module)
 	useAsJSValue bool   // true when access should go through pkg.AsJSValue / .Get(...)
+	moduleValue  string // optional alternate JSValue module object (e.g. PromisesAsJSValue)
 	jsExportName string // JS export/property name when useAsJSValue is true
 }
 
@@ -56,6 +57,9 @@ func init() {
 	// --- gun runtime modules ---
 
 	registerModule("fs", "github.com/nnstd/gun/runtime/fs", "fs", true, nil)
+	registerModule("fs/promises", "github.com/nnstd/gun/runtime/fs", "fs", true, map[string]string{
+		"default": "PromisesAsJSValue",
+	})
 	registerModule("path", "github.com/nnstd/gun/runtime/path", "nodepath", true, nil)
 	registerModule("os", "github.com/nnstd/gun/runtime/os", "nodeos", true, nil)
 
@@ -143,6 +147,7 @@ func (t *Transformer) transformImport(node *sitter.Node) {
 		case "identifier":
 			// import X from "mod" → default import
 			localName := child.Utf8Text(t.source)
+			symTable := knownSymbols[modulePath]
 
 			ri := resolvedImport{
 				goImportPath: mod.goPath,
@@ -150,7 +155,16 @@ func (t *Transformer) transformImport(node *sitter.Node) {
 				isTranspiled: !isKnown,
 				useAsJSValue: useAsJSValue,
 			}
+			if useAsJSValue && symTable != nil {
+				if sym, ok := symTable["default"]; ok && sym.goSymbol != "" {
+					ri.goSymbol = sym.goSymbol
+					ri.moduleValue = sym.goSymbol
+				}
+			}
 			if useAsJSValue {
+				if ri.goSymbol == "PromisesAsJSValue" {
+					ri.jsExportName = ""
+				}
 				t.importedNames[localName] = ri
 				continue
 			}
@@ -198,11 +212,18 @@ func (t *Transformer) processNamedImports(node *sitter.Node, modulePath string, 
 		}
 
 		if useAsJSValue {
+			moduleValue := ""
+			if symTable != nil {
+				if sym, ok := symTable["default"]; ok && sym.goSymbol != "" {
+					moduleValue = sym.goSymbol
+				}
+			}
 			t.importedNames[localName] = resolvedImport{
 				goImportPath: mod.goPath,
 				goPkgName:    mod.goName,
 				isTranspiled: false,
 				useAsJSValue: true,
+				moduleValue:  moduleValue,
 				jsExportName: origName,
 			}
 			if typeOnly {
@@ -211,6 +232,7 @@ func (t *Transformer) processNamedImports(node *sitter.Node, modulePath string, 
 					goPkgName:    mod.goName,
 					isTranspiled: false,
 					useAsJSValue: true,
+					moduleValue:  moduleValue,
 					jsExportName: origName,
 				}
 			}
@@ -357,6 +379,9 @@ func (t *Transformer) resolveIdentifier(name string) ast.Expr {
 		}
 		if imp.useAsJSValue {
 			moduleObj := selectorExpr(ident(imp.goPkgName), "AsJSValue")
+			if imp.moduleValue != "" {
+				moduleObj = selectorExpr(ident(imp.goPkgName), imp.moduleValue)
+			}
 			if imp.jsExportName == "" {
 				return moduleObj
 			}

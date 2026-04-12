@@ -657,6 +657,14 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 		GoPkgName:    "fs",
 		UseAsJSValue: true,
 	})
+	ctx.RegisterModule("fs/promises", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/fs",
+		GoPkgName:    "fs",
+		UseAsJSValue: true,
+		SymbolOverrides: map[string]tcontext.SymbolOverride{
+			"default": {GoSymbol: "PromisesAsJSValue"},
+		},
+	})
 	ctx.RegisterModule("path", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/path",
 		GoPkgName:    "nodepath",

@@ -70,6 +70,6 @@ var AsJSValue = func() *jsvalue.JSValue {
 		}
 		return jsvalue.NewUndefined()
 	}))
-	obj.Set("promises", obj)
+	obj.Set("promises", PromisesAsJSValue)
 	return obj
 }()

@@ -127,6 +127,22 @@ const data = readFile("x.txt");`
 	assertNotContains(t, out, `fs.ReadFileSync`)
 }
 
+func TestImportFsPromisesNamed(t *testing.T) {
+	ts := `import { stat } from "node:fs/promises";
+const s = stat("x");`
+	out := compile(t, ts)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/fs"`)
+	assertContains(t, out, `fs.PromisesAsJSValue.Get("stat").Call(`)
+}
+
+func TestImportFsPromisesDefault(t *testing.T) {
+	ts := `import fs from "fs/promises";
+const s = fs.readFile("x");`
+	out := compile(t, ts)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/fs"`)
+	assertContains(t, out, `fs.PromisesAsJSValue.MethodCall("readFile"`)
+}
+
 func TestImportNamespaceOS(t *testing.T) {
 	ts := `import * as os from "os";
 const h = os.homedir();`
