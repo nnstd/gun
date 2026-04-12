@@ -20,49 +20,31 @@ func isErrorType(name string) bool {
 
 // transformNumberCall handles Number.X() calls.
 func transformNumberCall(prop string, args []ast.Expr) ast.Expr {
-	switch prop {
-	case "isNaN":
-		// Number.isNaN(x) → math.IsNaN(float64(x)) — but simplified
-		if len(args) > 0 {
-			return ident("false")
-		}
-		return ident("false")
-	case "isFinite":
-		if len(args) > 0 {
-			return ident("true")
-		}
-		return ident("true")
-	case "isInteger", "isSafeInteger":
-		// For integer code points, this is always true in practice
-		if len(args) > 0 {
-			return ident("true")
-		}
-		return ident("true")
-	case "parseInt":
-		if len(args) > 0 {
-			return args[0]
-		}
-		return intLit("0")
-	case "parseFloat":
-		if len(args) > 0 {
-			return args[0]
-		}
-		return floatLit("0.0")
+	for i, arg := range args {
+		args[i] = jsvalueWrapLit(arg)
 	}
-	return nil
+	return callExpr(
+		selectorExpr(
+			callExpr(selectorExpr(selectorExpr(ident("jsvalue"), "Number"), "Get"), stringLit(prop)),
+			"Call",
+		),
+		args...,
+	)
 }
 
 // transformArrayCall handles Array.X() calls.
 func transformArrayCall(prop string, args []ast.Expr, addImport func(string)) ast.Expr {
-	switch prop {
-	case "isArray":
-		// Array.isArray(x) → jsvalue.IsArrayValue(x)
-		if len(args) > 0 {
-			addImport("github.com/nnstd/gun/runtime/builtin")
-			return callExpr(selectorExpr(ident("jsvalue"), "IsArrayValue"), args[0])
-		}
+	addImport("github.com/nnstd/gun/runtime/builtin")
+	for i, arg := range args {
+		args[i] = jsvalueWrapLit(arg)
 	}
-	return nil
+	return callExpr(
+		selectorExpr(
+			callExpr(selectorExpr(selectorExpr(ident("jsvalue"), "Array"), "Get"), stringLit(prop)),
+			"Call",
+		),
+		args...,
+	)
 }
 
 // transformProcessCall handles process.X() calls.

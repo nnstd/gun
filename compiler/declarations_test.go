@@ -569,7 +569,7 @@ func TestMathCallResultIsJSValue(t *testing.T) {
 	if (m > 0) { return m; }
 }`
 	out := compile(t, ts)
-	assertContains(t, out, "math.Min(")
+	assertContains(t, out, `math.AsJSValue.Get("min").Call(`)
 	assertContains(t, out, "jsvalue.Gt(")
 }
 
@@ -1008,10 +1008,10 @@ func TestArgumentsInRegularFunction(t *testing.T) {
 }
 
 func TestArrayPrototypeAccess(t *testing.T) {
-	// Array as standalone value resolves to jsvalue.ArrayPrototype
+	// Array as standalone value resolves to jsvalue.Array
 	ts := `function f() { return Array.isArray([]); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.IsArrayValue(")
+	assertContains(t, out, `jsvalue.Array.Get("isArray").Call(`)
 }
 
 func TestInitCycleSplitsToInit(t *testing.T) {
@@ -1132,8 +1132,8 @@ function f(items) {
 }`
 	out := compile(t, ts)
 	// Loop variable should stay lowercase in the body
-	assertContains(t, out, "console.Log(command)")
-	assertNotContains(t, out, "console.Log(Command)")
+	assertContains(t, out, "console.Log(jsvalue.From(command))")
+	assertNotContains(t, out, "console.Log(jsvalue.From(Command))")
 }
 
 func TestNegationOnLength(t *testing.T) {

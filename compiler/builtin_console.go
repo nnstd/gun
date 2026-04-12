@@ -9,6 +9,7 @@ import (
 func transformConsoleCall(prop string, args []ast.Expr, hasSpread bool, imp tcontext.Imports) ast.Expr {
 	imp.AddImport("github.com/nnstd/gun/runtime/builtin/console")
 	if !hasSpread {
+		imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		for i, arg := range args {
 			args[i] = jsvalueWrapLit(arg)
 		}

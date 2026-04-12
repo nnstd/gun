@@ -64,19 +64,12 @@ func init() {
 	registerModule("http", "net/http", "http", false, nil)
 	registerModule("https", "net/http", "http", false, nil)
 	registerModule("url", "github.com/nnstd/gun/runtime/url", "url", true, nil)
-	registerModule("util", "fmt", "fmt", false, map[string]string{
-		"format":  "Sprintf",
-		"inspect": "Sprint",
-	})
-	registerModule("events", "sync", "sync", false, nil)
-	registerModule("stream", "io", "io", false, nil)
-	registerModule("buffer", "bytes", "bytes", false, nil)
-	registerModule("crypto", "crypto", "crypto", false, nil)
-	registerModule("child_process", "os/exec", "exec", false, map[string]string{
-		"exec":     "Command",
-		"execSync": "Command",
-		"spawn":    "Command",
-	})
+	registerModule("util", "github.com/nnstd/gun/runtime/util", "util", true, nil)
+	registerModule("events", "github.com/nnstd/gun/runtime/events", "events", true, nil)
+	registerModule("stream", "github.com/nnstd/gun/runtime/stream", "stream", true, nil)
+	registerModule("buffer", "github.com/nnstd/gun/runtime/buffer", "buffer", true, nil)
+	registerModule("crypto", "github.com/nnstd/gun/runtime/crypto", "crypto", true, nil)
+	registerModule("child_process", "github.com/nnstd/gun/runtime/child_process", "child_process", true, nil)
 	registerModule("assert", "github.com/nnstd/gun/runtime/assert", "assert", true, nil)
 	registerModule("module", "github.com/nnstd/gun/runtime/module", "module", true, nil)
 }

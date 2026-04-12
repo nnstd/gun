@@ -296,11 +296,10 @@ func TestJSValuePlusStringCoercion(t *testing.T) {
 }
 
 func TestArrayIsArray(t *testing.T) {
-	// Array.isArray(x) should compile to jsvalue.IsArrayValue(x) returning *JSValue.
+	// Array.isArray(x) should compile through the JSValue-backed Array global.
 	ts := `function f(x) { if (Array.isArray(x)) { return x; } }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.IsArrayValue(x)")
-	assertNotContains(t, out, "Array.")
+	assertContains(t, out, `jsvalue.Array.Get("isArray").Call(`)
 }
 
 func TestArrayLiteralIndexUsesNativeSubscript(t *testing.T) {

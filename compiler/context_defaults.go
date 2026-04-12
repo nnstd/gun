@@ -150,10 +150,11 @@ func registerGlobalFunctions(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
 		Name: "Number",
 		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
-			if len(args) > 0 {
-				return callExpr(selectorExpr(args[0], "Number"))
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			for i, arg := range args {
+				args[i] = jsvalueWrapLit(arg)
 			}
-			return basicLit(token.FLOAT, "0")
+			return callExpr(selectorExpr(selectorExpr(ident("jsvalue"), "Number"), "Call"), args...)
 		},
 	})
 
@@ -161,7 +162,10 @@ func registerGlobalFunctions(ctx *tcontext.TranspilerContext) {
 		Name: "Array",
 		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "NewArray"))
+			for i, arg := range args {
+				args[i] = jsvalueWrapLit(arg)
+			}
+			return callExpr(selectorExpr(selectorExpr(ident("jsvalue"), "Array"), "Call"), args...)
 		},
 	})
 
@@ -459,7 +463,7 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		Name: "Object",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return ident("jsvalue")
+			return selectorExpr(ident("jsvalue"), "Object")
 		},
 	})
 
@@ -475,7 +479,7 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		Name: "Array",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return selectorExpr(ident("jsvalue"), "ArrayPrototype")
+			return selectorExpr(ident("jsvalue"), "Array")
 		},
 	})
 
@@ -505,7 +509,8 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "Number",
 		Transform: func(imp tcontext.Imports) ast.Expr {
-			return ident("float64")
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return selectorExpr(ident("jsvalue"), "Number")
 		},
 	})
 
@@ -646,37 +651,34 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 		UseAsJSValue: true,
 	})
 	ctx.RegisterModule("util", &tcontext.ModuleMapping{
-		GoImportPath: "fmt",
-		GoPkgName:    "fmt",
-		SymbolOverrides: map[string]tcontext.SymbolOverride{
-			"format":  {GoSymbol: "Sprintf"},
-			"inspect": {GoSymbol: "Sprint"},
-		},
+		GoImportPath: "github.com/nnstd/gun/runtime/util",
+		GoPkgName:    "util",
+		UseAsJSValue: true,
 	})
 	ctx.RegisterModule("events", &tcontext.ModuleMapping{
-		GoImportPath: "sync",
-		GoPkgName:    "sync",
+		GoImportPath: "github.com/nnstd/gun/runtime/events",
+		GoPkgName:    "events",
+		UseAsJSValue: true,
 	})
 	ctx.RegisterModule("stream", &tcontext.ModuleMapping{
-		GoImportPath: "io",
-		GoPkgName:    "io",
+		GoImportPath: "github.com/nnstd/gun/runtime/stream",
+		GoPkgName:    "stream",
+		UseAsJSValue: true,
 	})
 	ctx.RegisterModule("buffer", &tcontext.ModuleMapping{
-		GoImportPath: "bytes",
-		GoPkgName:    "bytes",
+		GoImportPath: "github.com/nnstd/gun/runtime/buffer",
+		GoPkgName:    "buffer",
+		UseAsJSValue: true,
 	})
 	ctx.RegisterModule("crypto", &tcontext.ModuleMapping{
-		GoImportPath: "crypto",
+		GoImportPath: "github.com/nnstd/gun/runtime/crypto",
 		GoPkgName:    "crypto",
+		UseAsJSValue: true,
 	})
 	ctx.RegisterModule("child_process", &tcontext.ModuleMapping{
-		GoImportPath: "os/exec",
-		GoPkgName:    "exec",
-		SymbolOverrides: map[string]tcontext.SymbolOverride{
-			"exec":     {GoSymbol: "Command"},
-			"execSync": {GoSymbol: "Command"},
-			"spawn":    {GoSymbol: "Command"},
-		},
+		GoImportPath: "github.com/nnstd/gun/runtime/child_process",
+		GoPkgName:    "child_process",
+		UseAsJSValue: true,
 	})
 	ctx.RegisterModule("assert", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/assert",

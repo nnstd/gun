@@ -60,8 +60,32 @@ func TestImportChildProcess(t *testing.T) {
 	ts := `import { execSync } from "child_process";
 execSync("ls");`
 	out := compile(t, ts)
-	assertContains(t, out, `"os/exec"`)
-	assertContains(t, out, "exec.Command")
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/child_process"`)
+	assertContains(t, out, `child_process.AsJSValue.Get("execSync").Call(`)
+}
+
+func TestImportCryptoModule(t *testing.T) {
+	ts := `import crypto from "crypto";
+const h = crypto.createHash("sha256");`
+	out := compile(t, ts)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/crypto"`)
+	assertContains(t, out, `crypto.AsJSValue.MethodCall("createHash"`)
+}
+
+func TestImportUtilModule(t *testing.T) {
+	ts := `import { format } from "util";
+const s = format("hello %s", "world");`
+	out := compile(t, ts)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/util"`)
+	assertContains(t, out, `util.AsJSValue.Get("format").Call(`)
+}
+
+func TestImportEventsModule(t *testing.T) {
+	ts := `import { EventEmitter } from "events";
+const e = new EventEmitter();`
+	out := compile(t, ts)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/events"`)
+	assertContains(t, out, `events.AsJSValue.Get("EventEmitter")`)
 }
 
 func TestImportRelative(t *testing.T) {
@@ -133,6 +157,23 @@ strict.strictEqual(1, 1);`
 	assertContains(t, out, `MethodCall("strictEqual", jsvalue.From(1), jsvalue.From(1))`)
 }
 
+func TestImportBufferModule(t *testing.T) {
+	ts := `import { Buffer } from "buffer";
+const buf = Buffer.from("hi");`
+	out := compile(t, ts)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/buffer"`)
+	assertContains(t, out, `buffer.AsJSValue.Get("Buffer")`)
+	assertContains(t, out, `MethodCall("from", jsvalue.From("hi"))`)
+}
+
+func TestImportStreamModule(t *testing.T) {
+	ts := `import * as stream from "stream";
+const out = stream.pipeline(a, b);`
+	out := compile(t, ts)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/stream"`)
+	assertContains(t, out, `stream.AsJSValue.MethodCall("pipeline"`)
+}
+
 func TestSamePackageImportsNoImportGenerated(t *testing.T) {
 	ts := `import { helper } from "./utils";
 import foo from "./foo";
@@ -191,7 +232,7 @@ func TestConsoleErrorUsesRuntimePackage(t *testing.T) {
 	ts := `console.error("fail");`
 	out := compile(t, ts)
 	assertContains(t, out, `runtime/builtin/console`)
-	assertContains(t, out, `console.Error("fail")`)
+	assertContains(t, out, `console.Error(jsvalue.NewString("fail"))`)
 	assertNotContains(t, out, "os.Stderr")
 }
 

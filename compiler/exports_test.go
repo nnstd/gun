@@ -46,7 +46,7 @@ export { foo as bar }`
 func TestExportReexportFromModule(t *testing.T) {
 	ts := `export { readFileSync } from "fs"`
 	out := compile(t, ts)
-	assertContains(t, out, "var ReadFileSync = fs.ReadFileSync")
+	assertContains(t, out, `var ReadFileSync = fs.AsJSValue.Get("readFileSync")`)
 	assertContains(t, out, `"github.com/nnstd/gun/runtime/fs"`)
 }
 

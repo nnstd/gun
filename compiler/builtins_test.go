@@ -4,13 +4,13 @@ import "testing"
 
 func TestConsoleLog(t *testing.T) {
 	out := compile(t, `console.log("hello");`)
-	assertContains(t, out, `console.Log("hello")`)
+	assertContains(t, out, `console.Log(jsvalue.NewString("hello"))`)
 	assertContains(t, out, `runtime/builtin/console`)
 }
 
 func TestConsoleError(t *testing.T) {
 	out := compile(t, `console.error("fail");`)
-	assertContains(t, out, `console.Error("fail")`)
+	assertContains(t, out, `console.Error(jsvalue.NewString("fail"))`)
 	assertContains(t, out, `runtime/builtin/console`)
 }
 
@@ -90,8 +90,7 @@ func TestNewTypeError(t *testing.T) {
 func TestNumberIsSafeInteger(t *testing.T) {
 	ts := `const ok = Number.isSafeInteger(42);`
 	out := compile(t, ts)
-	assertContains(t, out, "true")
-	assertNotContains(t, out, "Number")
+	assertContains(t, out, `jsvalue.Number.Get("isSafeInteger").Call(`)
 }
 
 func TestProcessArgv(t *testing.T) {
@@ -116,21 +115,19 @@ func TestProcessExit(t *testing.T) {
 func TestObjectCreateNull(t *testing.T) {
 	ts := `const obj = Object.create(null);`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.Create(jsvalue.NewNull())")
-	assertNotContains(t, out, "Object.Create")
+	assertContains(t, out, `jsvalue.Object.Get("create").Call(`)
 }
 
 func TestObjectKeysTransform(t *testing.T) {
 	ts := `function f(obj: any): any { return Object.keys(obj); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.Keys(obj)")
-	assertNotContains(t, out, "Object")
+	assertContains(t, out, `jsvalue.Object.Get("keys").Call(`)
 }
 
 func TestObjectEntriesPassthrough(t *testing.T) {
 	ts := `function f(obj: any): any { return Object.entries(obj); }`
 	out := compile(t, ts)
-	assertNotContains(t, out, "Object")
+	assertContains(t, out, `jsvalue.Object.Get("entries").Call(`)
 }
 
 func TestRegexTest(t *testing.T) {
@@ -248,8 +245,7 @@ func TestJoinOnMapResult(t *testing.T) {
 func TestNumberGlobalCall(t *testing.T) {
 	ts := `function f(x) { return Number(x); }`
 	out := compile(t, ts)
-	assertContains(t, out, "x.Number()")
-	assertNotContains(t, out, "float64(x)")
+	assertContains(t, out, `jsvalue.Number.Call(`)
 }
 
 // --- All-JSValue regression tests ---
@@ -296,7 +292,7 @@ func TestJoinWrapsJSValueSeparator(t *testing.T) {
 func TestIsArrayReturnsJSValue(t *testing.T) {
 	ts := `function f(x) { return Array.isArray(x); }`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.IsArrayValue(x)")
+	assertContains(t, out, `jsvalue.Array.Get("isArray").Call(`)
 }
 
 func TestMatchOnJSValueUsesRegexpCompile(t *testing.T) {
@@ -332,8 +328,7 @@ func TestRegExpPatternUnwrapsJSValue(t *testing.T) {
 func TestProcessVersionMember(t *testing.T) {
 	ts := `const v = process.version;`
 	out := compile(t, ts)
-	assertContains(t, out, "process.Version")
-	assertNotContains(t, out, "NewBool(true).Version")
+	assertContains(t, out, `process.AsJSValue().Get("version")`)
 }
 
 func TestProcessAsStandaloneUsesAsJSValue(t *testing.T) {
@@ -503,19 +498,19 @@ func TestPromiseGlobal(t *testing.T) {
 func TestObjectKeysUsesJsvalue(t *testing.T) {
 	ts := `const keys = Object.keys({});`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.Keys(")
+	assertContains(t, out, `jsvalue.Object.Get("keys").Call(`)
 }
 
 func TestObjectValuesUsesJsvalue(t *testing.T) {
 	ts := `const vals = Object.values({});`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.Values(")
+	assertContains(t, out, `jsvalue.Object.Get("values").Call(`)
 }
 
 func TestObjectEntriesUsesJsvalue(t *testing.T) {
 	ts := `const entries = Object.entries({});`
 	out := compile(t, ts)
-	assertContains(t, out, "jsvalue.Entries(")
+	assertContains(t, out, `jsvalue.Object.Get("entries").Call(`)
 }
 
 func TestToStringOnJSValueReturnsJSValue(t *testing.T) {
