@@ -9,8 +9,7 @@ package context
 
 import "go/ast"
 
-// Imports is the interface for adding Go imports during transformation.
-// The Transformer implements this interface.
+// Imports is the interface for adding Go imports during lowering.
 type Imports interface {
 	AddImport(path string)
 	AddAliasedImport(path, alias string)

@@ -23,17 +23,11 @@ go run . run file.ts                  # transpile, build, and execute
 
 ## Architecture
 
-The project has two compilation paths. The **default path** goes through the new pipeline (HIR → MIR → SSA → Backend). The original `Transformer` remains in the tree as a legacy implementation/reference path. Both share the same symbol table and TranspilerContext foundations.
+Gun now has a single compilation flow. Public compiler entrypoints route into the
+pipeline in `compiler/pipeline/`, which orchestrates parsing, HIR/MIR/SSA work,
+and backend lowering.
 
-### Production Path
-
-Three phases orchestrated by `compiler.Compile()` in `compiler/compiler.go`:
-
-1. **Parse** (`compiler/parser.go`) — tree-sitter parses TypeScript into a CST
-2. **Transform** (`compiler/transformer.go`) — walks the CST and builds `go/ast.File` using `TranspilerContext` for builtin dispatch
-3. **Emit** (`compiler/emitter.go`) — `go/format.Node()` pretty-prints the Go AST
-
-### New Multi-Stage Pipeline
+### Compiler Pipeline
 
 Full pipeline orchestrated by `compiler/pipeline/`:
 
@@ -84,7 +78,7 @@ Replaces string-based identifier tracking with unique symbol IDs. Every identifi
 - `symbol.go` — `Symbol` (ID, OriginalName, Kind, Exported, IsJSValue, etc.), `Sanitize()`, `Capitalize()`
 - `table.go` — `Table` with `PushScope`/`PopScope`/`Define`/`Lookup`/`EmitName`/`ReserveName`
 
-**Where to make changes:** Add new symbol kinds here. If a new identifier tracking concept is needed, add fields to `Symbol` — don't add new maps to the Transformer.
+**Where to make changes:** Add new symbol kinds here. If a new identifier tracking concept is needed, add fields to `Symbol`.
 
 ### `compiler/context/` — TranspilerContext (builtin registry)
 
@@ -170,21 +164,6 @@ Converts HIR to `go/ast` and formats as Go source.
 - `operators.go` — HIR operator → jsvalue helper name mapping
 
 **Where to make changes:** Go-specific code generation goes here. JSValue wrapping, Go AST construction, import assembly. If adding a new Go output pattern (e.g. goroutine generation for async), add it here.
-
-### Production Transformer (`compiler/` root)
-
-The existing production transpiler. Uses `TranspilerContext` for builtin dispatch but still does direct CST → Go AST transformation.
-
-- `transformer.go` — main `Transformer` struct, `transform()`, scope management, `AddImport`/`AddAliasedImport` (implements `context.Imports`)
-- `declarations.go`, `statements.go`, `expressions.go`, `classes.go` — CST → Go AST transformation by concern
-- `imports.go` — module resolution, `resolveIdentifier()` delegates to `TranspilerContext`
-- `builtins.go` — `isErrorType()` helper; old dispatch functions removed (now in context_defaults.go)
-- `builtin_*.go` — per-API transform implementations (console, math, json, collections, regexp) — called by context registrations
-- `helpers.go` — Go AST builder helpers shared by transformer and context registrations
-- `operators.go` — operator mapping (legacy, also in backend/operators.go)
-- `modules.go` — `ModuleCallTransformer` registry for module-specific dispatch (Hono, etc.)
-
-**Where to make changes:** Bug fixes to the production transpiler go in these files. New TS syntax support that must work immediately goes here. For new features that can wait, implement in the new pipeline (hir → backend) instead.
 
 ### Runtime
 
@@ -289,33 +268,7 @@ When calling jsvalue functions or runtime package functions, literal arguments a
 - **Cross-file package vars:** `Enum.VALUE` → `Enum.Get("VALUE")`
 - **Typed struct locals:** `parser.parse(x)` → `parser.Parse(x)` (capitalized)
 
-### Key Tracking Maps in Transformer
-
-These maps remain in the production Transformer and will gradually migrate to the symbol table:
-
-- `jsvalueLocals` — local variables holding `*jsvalue.JSValue`
-- `jsvalueSliceLocals` — typed locals holding `[]*jsvalue.JSValue` (rest params, array literals)
-- `pkgVarTyped` — package-level variables: `true` = typed struct, `false` = JSValue
-- `localScopes` — scope stack tracking whether variables are typed or JSValue
-- `funcParamCounts` — hoisted function parameter counts for nil-padding
-- `ctx` — `*context.TranspilerContext` for builtin dispatch (replaces old switch/case)
-
 ## Test conventions
-
-### Production compiler tests
-
-All production compiler tests live in `compiler/*_test.go`:
-
-```go
-func TestFeatureName(t *testing.T) {
-    ts := `TypeScript source here`
-    out := compile(t, ts)                    // compiles as package "main"
-    assertContains(t, out, "expected Go")
-    assertNotContains(t, out, "unwanted")
-}
-```
-
-Use `compileWithModule(t, ts, "myapp")` when testing relative import resolution. Helpers are in `compiler/helpers_test.go`.
 
 ### New pipeline tests
 

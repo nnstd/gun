@@ -10,8 +10,8 @@ import (
 // RegisterDefaultBuiltins populates a TranspilerContext with all known JavaScript
 // global objects, functions, constructors, identifiers, and modules.
 //
-// This replaces the previously hardcoded switch/case dispatchers scattered across
-// builtins.go, imports.go, and expressions.go with a unified registration.
+// This centralizes builtin dispatch instead of scattering it across multiple
+// lowering entrypoints.
 func RegisterDefaultBuiltins(ctx *tcontext.TranspilerContext) {
 	registerGlobalObjects(ctx)
 	registerGlobalFunctions(ctx)

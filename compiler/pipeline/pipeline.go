@@ -44,6 +44,13 @@ type Pipeline struct {
 	OnSSA func(*ssa.Module) // called after SSA construction
 }
 
+type compileOptions struct {
+	crossFileExports []backend.CrossFileExport
+	reservedNames    []string
+	importNameMap    map[string]string
+	exportAliasMap   map[string]string
+}
+
 // New creates a pipeline with the given optimization level and default passes.
 // The context is empty — call NewWithContext to use pre-registered builtins.
 func New(level OptLevel) *Pipeline {
@@ -85,54 +92,58 @@ func (p *Pipeline) CompileTreeWithPath(root *sitter.Node, source []byte, pkgName
 	if p.OnHIR != nil {
 		p.OnHIR(hirMod)
 	}
+	return p.compileHIRModule(hirMod, moduleName, samePackageImports, compileOptions{})
+}
+
+// CompileHIR compiles from an already-built HIR module.
+func (p *Pipeline) CompileHIR(hirMod *hir.Module, moduleName string, samePackageImports bool) ([]byte, error) {
+	return p.compileHIRModule(hirMod, moduleName, samePackageImports, compileOptions{})
+}
+
+// CompileHIRWithExports compiles an already-built HIR module while preserving
+// cross-file export knowledge for same-package compatibility entrypoints.
+func (p *Pipeline) CompileHIRWithExports(hirMod *hir.Module, moduleName string, samePackageImports bool, crossFileExports []backend.CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string) ([]byte, error) {
+	return p.compileHIRModule(hirMod, moduleName, samePackageImports, compileOptions{
+		crossFileExports: crossFileExports,
+		reservedNames:    reservedNames,
+		importNameMap:    importNameMap,
+		exportAliasMap:   exportAliasMap,
+	})
+}
+
+func (p *Pipeline) compileHIRModule(hirMod *hir.Module, moduleName string, samePackageImports bool, opts compileOptions) ([]byte, error) {
 	if err := hir.AsyncPipelinePhase1Error(hirMod); err != nil {
 		return nil, err
 	}
 
-	// Stage 2: Lower to MIR
 	mirMod := mir.Lower(hirMod)
 	if p.OnMIR != nil {
 		p.OnMIR(mirMod)
 	}
 
-	// Stage 3: Build SSA (skip at O0)
 	if p.OptLevel > O0 && len(p.Passes) > 0 {
 		ssaMod := ssa.Build(mirMod)
 		if p.OnSSA != nil {
 			p.OnSSA(ssaMod)
 		}
-
-		// Stage 4: Run optimization passes
 		for _, pass := range p.Passes {
 			if err := pass.Run(ssaMod); err != nil {
 				return nil, fmt.Errorf("pass %s: %w", pass.Name(), err)
 			}
 		}
-
-		// Stage 5: De-SSA back to MIR
-		mirMod = ssa.DeSSA(ssaMod)
+		_ = ssa.DeSSA(ssaMod)
 	}
 
-	// SWC interop: if module has named exports but no default, synthesize one
 	if hirMod.SynthesizeDefault == "" && !samePackageImports {
 		synthesizeDefaultIfNeeded(hirMod)
 	}
 
-	// Stage 6: Backend lowering (HIR → Go AST)
-	// Note: currently the backend lowers from HIR directly.
-	// Once MIR→Go lowering is implemented, this will use mirMod instead.
-	goFile := backend.Lower(hirMod, p.Ctx, moduleName, samePackageImports)
-
-	// Stage 7: Codegen
-	return backend.GenerateWithSource(goFile, hirMod.SourcePath, hirMod.SourceSize)
-}
-
-// CompileHIR compiles from an already-built HIR module.
-func (p *Pipeline) CompileHIR(hirMod *hir.Module, moduleName string, samePackageImports bool) ([]byte, error) {
-	if err := hir.AsyncPipelinePhase1Error(hirMod); err != nil {
-		return nil, err
+	var goFile *ast.File
+	if len(opts.crossFileExports) == 0 && len(opts.reservedNames) == 0 && len(opts.importNameMap) == 0 && len(opts.exportAliasMap) == 0 {
+		goFile = backend.Lower(hirMod, p.Ctx, moduleName, samePackageImports)
+	} else {
+		goFile = backend.LowerWithExports(hirMod, p.Ctx, moduleName, samePackageImports, opts.crossFileExports, opts.reservedNames, opts.importNameMap, opts.exportAliasMap)
 	}
-	goFile := backend.Lower(hirMod, p.Ctx, moduleName, samePackageImports)
 	return backend.GenerateWithSource(goFile, hirMod.SourcePath, hirMod.SourceSize)
 }
 
