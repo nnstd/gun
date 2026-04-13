@@ -175,6 +175,9 @@ func (l *Lowerer) lowerIdentifier(e *hir.Identifier) ast.Expr {
 			}
 			// Namespace import (no goSymbol)
 			if res.goSymbol == "" {
+				if mapped, ok := l.importNameMap[res.modulePath+"\x00*"]; ok {
+					return goIdent(mapped)
+				}
 				if res.goPkgName == "" {
 					return goIdent(e.Sym.OriginalName)
 				}
@@ -196,6 +199,46 @@ func (l *Lowerer) lowerIdentifier(e *hir.Identifier) ast.Expr {
 		return goIdent(l.emitName(e.Sym))
 	}
 	// Unresolved — check context for known identifiers
+	if res, ok := l.importedNames[e.Name]; ok {
+		if res.goImportPath != "" {
+			if res.goPkgName != "" && res.goPkgName != path.Base(res.goImportPath) {
+				l.addAliasedImport(res.goImportPath, res.goPkgName)
+			} else if res.goImportPath != "" {
+				l.addImport(res.goImportPath)
+			}
+		}
+		if res.useAsJSValue {
+			moduleObj := selectorExpr(goIdent(res.goPkgName), "AsJSValue")
+			if res.moduleValue != "" {
+				moduleObj = selectorExpr(goIdent(res.goPkgName), res.moduleValue)
+			}
+			if res.jsExportName == "" {
+				return moduleObj
+			}
+			return callExpr(selectorExpr(moduleObj, "Get"), stringLit(res.jsExportName))
+		}
+		if res.goSymbol == "AsJSValue" && !res.isTranspiled && isGunRuntimePkg(res.goImportPath) {
+			return selectorExpr(goIdent(res.goPkgName), "AsJSValue")
+		}
+		if res.goSymbol == "" {
+			if res.goPkgName == "" {
+				return goIdent(e.Name)
+			}
+			return goIdent(res.goPkgName)
+		}
+		if res.goPkgName == "" {
+			return goIdent(res.goSymbol)
+		}
+		if !res.isTranspiled && res.goPkgName != "" && isGunRuntimePkg(res.goImportPath) {
+			return callExpr(selectorExpr(
+				selectorExpr(goIdent(res.goPkgName), "AsJSValue"),
+				"Get"), stringLit(lowercaseFirst(res.goSymbol)))
+		}
+		return selectorExpr(goIdent(res.goPkgName), res.goSymbol)
+	}
+	if name, ok := l.topLevelNames[e.Name]; ok {
+		return goIdent(name)
+	}
 	if l.ctx != nil {
 		if expr := l.ctx.TransformIdentifier(e.Name, l); expr != nil {
 			return expr
@@ -1227,7 +1270,10 @@ func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 	// Same-package namespace import: templates.foo → Foo (capitalized package var)
 	if id, ok := e.Object.(*hir.Identifier); ok && id.Sym != nil {
 		if res, ok := l.importedSyms[id.Sym]; ok && res.goImportPath == "" && res.goSymbol == "" {
-			return goIdent(symbol.Capitalize(e.Property))
+			if mapped, ok := l.importNameMap[res.modulePath+"\x00"+e.Property]; ok {
+				return goIdent(mapped)
+			}
+			return goIdent(symbol.Capitalize(symbol.Sanitize(e.Property)))
 		}
 	}
 

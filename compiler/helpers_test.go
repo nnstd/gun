@@ -228,15 +228,27 @@ func TestCompilePackageMatchesPipelineO0(t *testing.T) {
 	}
 	entrySrc := string(got["entry.ts"])
 	utilSrc := string(got["util.ts"])
-	assertContains(t, entrySrc, "return Helper.Call()")
+	assertContains(t, entrySrc, "return Util_helper.Call()")
 	assertContains(t, entrySrc, "defer error.RecoverMain()")
-	assertContains(t, utilSrc, "var Util_helper = Helper")
+	assertContains(t, utilSrc, "var Util_helper = jsvalue.NewFunction(")
 	assertContains(t, utilSrc, "defer error.RecoverMain()")
 }
 
 func TestCompileWithExportsPreservesSourcePathDiagnostics(t *testing.T) {
 	_, err := CompileWithExports([]byte(`function load(value = await fetch()) { return value; }`), "main", "", "entry.ts", false, nil)
 	assertErrorContains(t, err, "entry.ts")
+}
+
+func TestCompilePackageSanitizesDollarExportsOnNamespaceImport(t *testing.T) {
+	out, err := CompilePackageWithOptLevel(map[string][]byte{
+		"entry.ts": []byte(`import * as core from "./util"; export function main() { return core.$foo; }`),
+		"util.ts":  []byte(`export const $foo = 1;`),
+	}, "main", "", "entry.ts", 0)
+	if err != nil {
+		t.Fatalf("expected package compile success, got %v", err)
+	}
+	got := string(out["entry.ts"])
+	assertContains(t, got, `return Util_namespace.Get("$foo")`)
 }
 
 func TestCompilePackageWithOptLevelSupportsAsyncFunctionDeclarationPhase1(t *testing.T) {

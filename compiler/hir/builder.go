@@ -44,9 +44,8 @@ func BuildModuleWithPath(root *sitter.Node, source []byte, pkgName, sourcePath s
 		SourceSize:  len(source),
 	}
 
-	// Pre-pass: register top-level function declarations for JS hoisting.
-	// Functions declared later in the file must be visible to earlier code.
-	b.hoistTopLevelFunctions(root)
+	// Pre-pass: register top-level declarations for JS/module hoisting.
+	b.hoistTopLevelDecls(root)
 
 	for i := uint(0); i < root.NamedChildCount(); i++ {
 		child := root.NamedChild(i)
@@ -248,7 +247,10 @@ func (b *Builder) buildDeclarator(node *sitter.Node, exported bool) *Declarator 
 	switch nameNode.Kind() {
 	case "identifier":
 		name := b.nodeText(nameNode)
-		sym := b.symtab.Define(name, symbol.KindVariable)
+		sym := b.symtab.LookupLocal(name)
+		if sym == nil {
+			sym = b.symtab.Define(name, symbol.KindVariable)
+		}
 		sym.Exported = exported
 		return &Declarator{Symbol: sym, Init: init}
 	case "object_pattern":
@@ -260,7 +262,10 @@ func (b *Builder) buildDeclarator(node *sitter.Node, exported bool) *Declarator 
 	default:
 		// Fallback: treat as identifier
 		name := b.nodeText(nameNode)
-		sym := b.symtab.Define(name, symbol.KindVariable)
+		sym := b.symtab.LookupLocal(name)
+		if sym == nil {
+			sym = b.symtab.Define(name, symbol.KindVariable)
+		}
 		sym.Exported = exported
 		return &Declarator{Symbol: sym, Init: init}
 	}
@@ -272,7 +277,10 @@ func (b *Builder) buildClassDecl(node *sitter.Node, exported bool) *ClassDecl {
 		return nil
 	}
 	name := b.nodeText(nameNode)
-	sym := b.symtab.Define(name, symbol.KindClass)
+	sym := b.symtab.LookupLocal(name)
+	if sym == nil {
+		sym = b.symtab.Define(name, symbol.KindClass)
+	}
 	sym.Exported = exported
 	parts := b.buildClassParts(node)
 
@@ -425,7 +433,10 @@ func (b *Builder) buildEnumDecl(node *sitter.Node, exported bool) *EnumDecl {
 		return nil
 	}
 	name := b.nodeText(nameNode)
-	sym := b.symtab.Define(name, symbol.KindEnum)
+	sym := b.symtab.LookupLocal(name)
+	if sym == nil {
+		sym = b.symtab.Define(name, symbol.KindEnum)
+	}
 	sym.Exported = exported
 
 	var bodyNode *sitter.Node
@@ -479,7 +490,10 @@ func (b *Builder) buildInterfaceDecl(node *sitter.Node, exported bool) *Interfac
 		return nil
 	}
 	name := b.nodeText(nameNode)
-	sym := b.symtab.Define(name, symbol.KindType)
+	sym := b.symtab.LookupLocal(name)
+	if sym == nil {
+		sym = b.symtab.Define(name, symbol.KindType)
+	}
 	sym.Exported = exported
 
 	var bodyNode *sitter.Node
@@ -540,7 +554,10 @@ func (b *Builder) buildTypeAliasDecl(node *sitter.Node, exported bool) *TypeAlia
 		return nil
 	}
 	name := b.nodeText(nameNode)
-	sym := b.symtab.Define(name, symbol.KindType)
+	sym := b.symtab.LookupLocal(name)
+	if sym == nil {
+		sym = b.symtab.Define(name, symbol.KindType)
+	}
 	sym.Exported = exported
 
 	typeStr := ""
@@ -596,7 +613,10 @@ func (b *Builder) buildImportDecl(node *sitter.Node) *ImportDecl {
 		case "identifier":
 			// Default import
 			localName := b.nodeText(child)
-			sym := b.symtab.Define(localName, symbol.KindImport)
+			sym := b.symtab.LookupLocal(localName)
+			if sym == nil {
+				sym = b.symtab.Define(localName, symbol.KindImport)
+			}
 			decl.Default = &ImportBinding{
 				LocalName:    localName,
 				OriginalName: "default",
@@ -618,7 +638,10 @@ func (b *Builder) buildImportDecl(node *sitter.Node) *ImportDecl {
 				if aliasNode != nil {
 					localName = b.nodeText(aliasNode)
 				}
-				sym := b.symtab.Define(localName, symbol.KindImport)
+				sym := b.symtab.LookupLocal(localName)
+				if sym == nil {
+					sym = b.symtab.Define(localName, symbol.KindImport)
+				}
 				decl.Named = append(decl.Named, &ImportBinding{
 					LocalName:    localName,
 					OriginalName: origName,
@@ -633,7 +656,10 @@ func (b *Builder) buildImportDecl(node *sitter.Node) *ImportDecl {
 				}
 			}
 			if alias != "" {
-				sym := b.symtab.Define(alias, symbol.KindImport)
+				sym := b.symtab.LookupLocal(alias)
+				if sym == nil {
+					sym = b.symtab.Define(alias, symbol.KindImport)
+				}
 				decl.Namespace = &ImportBinding{
 					LocalName:    alias,
 					OriginalName: "*",
@@ -660,6 +686,16 @@ func (b *Builder) buildExport(mod *Module, node *sitter.Node) {
 	for i := uint(0); i < node.ChildCount(); i++ {
 		if node.Child(i).Kind() == "*" {
 			if node.ChildByFieldName("source") != nil {
+				hasNamespaceAlias := false
+				for j := uint(0); j < node.NamedChildCount(); j++ {
+					if node.NamedChild(j).Kind() == "namespace_export" {
+						hasNamespaceAlias = true
+						break
+					}
+				}
+				if hasNamespaceAlias {
+					continue
+				}
 				sourceNode := node.ChildByFieldName("source")
 				mod.Declarations = append(mod.Declarations, &ExportDecl{
 					FromModule: strings.Trim(b.nodeText(sourceNode), "'\""),
@@ -677,8 +713,25 @@ func (b *Builder) buildExport(mod *Module, node *sitter.Node) {
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		switch child.Kind() {
+		case "namespace_export":
+			sourceNode := node.ChildByFieldName("source")
+			if sourceNode == nil || child.NamedChildCount() == 0 {
+				continue
+			}
+			aliasNode := child.NamedChild(0)
+			ed := &ExportDecl{
+				FromModule: strings.Trim(b.nodeText(sourceNode), "'\""),
+				Names: []ExportName{{
+					LocalName:    "*",
+					ExportedName: b.nodeText(aliasNode),
+				}},
+			}
+			mod.Declarations = append(mod.Declarations, ed)
 		case "export_clause":
 			ed := &ExportDecl{}
+			if sourceNode := node.ChildByFieldName("source"); sourceNode != nil {
+				ed.FromModule = strings.Trim(b.nodeText(sourceNode), "'\"")
+			}
 			for j := uint(0); j < child.NamedChildCount(); j++ {
 				spec := child.NamedChild(j)
 				if spec.Kind() != "export_specifier" {
@@ -1076,23 +1129,106 @@ func (b *Builder) buildArrayPatternLookup(node *sitter.Node) *ArrayPattern {
 	return pat
 }
 
-// hoistTopLevelFunctions pre-registers all top-level function declarations
-// in the symbol table. JS hoists function declarations so they're visible
-// throughout their scope regardless of source order.
-func (b *Builder) hoistTopLevelFunctions(root *sitter.Node) {
+// hoistTopLevelDecls pre-registers top-level declarations so later declarations
+// remain visible to earlier function bodies and module code.
+func (b *Builder) hoistTopLevelDecls(root *sitter.Node) {
 	for i := uint(0); i < root.NamedChildCount(); i++ {
 		child := root.NamedChild(i)
 		switch child.Kind() {
 		case "function_declaration":
 			if nameNode := child.ChildByFieldName("name"); nameNode != nil {
-				b.symtab.Define(b.nodeText(nameNode), symbol.KindFunction)
+				name := b.nodeText(nameNode)
+				if b.symtab.LookupLocal(name) == nil {
+					b.symtab.Define(name, symbol.KindFunction)
+				}
+			}
+		case "lexical_declaration", "variable_declaration":
+			for j := uint(0); j < child.NamedChildCount(); j++ {
+				inner := child.NamedChild(j)
+				if inner == nil {
+					continue
+				}
+				if nameNode := inner.ChildByFieldName("name"); nameNode != nil && nameNode.Kind() == "identifier" {
+					name := b.nodeText(nameNode)
+					if b.symtab.LookupLocal(name) == nil {
+						b.symtab.Define(name, symbol.KindVariable)
+					}
+				}
+			}
+		case "class_declaration":
+			if nameNode := child.ChildByFieldName("name"); nameNode != nil {
+				name := b.nodeText(nameNode)
+				if b.symtab.LookupLocal(name) == nil {
+					b.symtab.Define(name, symbol.KindClass)
+				}
+			}
+		case "enum_declaration":
+			if nameNode := child.ChildByFieldName("name"); nameNode != nil {
+				name := b.nodeText(nameNode)
+				if b.symtab.LookupLocal(name) == nil {
+					b.symtab.Define(name, symbol.KindEnum)
+				}
+			}
+		case "interface_declaration", "type_alias_declaration":
+			if nameNode := child.ChildByFieldName("name"); nameNode != nil {
+				name := b.nodeText(nameNode)
+				if b.symtab.LookupLocal(name) == nil {
+					b.symtab.Define(name, symbol.KindType)
+				}
 			}
 		case "export_statement":
 			for j := uint(0); j < child.NamedChildCount(); j++ {
 				inner := child.NamedChild(j)
-				if inner.Kind() == "function_declaration" {
+				switch inner.Kind() {
+				case "function_declaration":
 					if nameNode := inner.ChildByFieldName("name"); nameNode != nil {
-						sym := b.symtab.Define(b.nodeText(nameNode), symbol.KindFunction)
+						name := b.nodeText(nameNode)
+						sym := b.symtab.LookupLocal(name)
+						if sym == nil {
+							sym = b.symtab.Define(name, symbol.KindFunction)
+						}
+						sym.Exported = true
+					}
+				case "lexical_declaration", "variable_declaration":
+					for k := uint(0); k < inner.NamedChildCount(); k++ {
+						decl := inner.NamedChild(k)
+						if decl == nil {
+							continue
+						}
+						if nameNode := decl.ChildByFieldName("name"); nameNode != nil && nameNode.Kind() == "identifier" {
+							name := b.nodeText(nameNode)
+							sym := b.symtab.LookupLocal(name)
+							if sym == nil {
+								sym = b.symtab.Define(name, symbol.KindVariable)
+							}
+							sym.Exported = true
+						}
+					}
+				case "class_declaration":
+					if nameNode := inner.ChildByFieldName("name"); nameNode != nil {
+						name := b.nodeText(nameNode)
+						sym := b.symtab.LookupLocal(name)
+						if sym == nil {
+							sym = b.symtab.Define(name, symbol.KindClass)
+						}
+						sym.Exported = true
+					}
+				case "enum_declaration":
+					if nameNode := inner.ChildByFieldName("name"); nameNode != nil {
+						name := b.nodeText(nameNode)
+						sym := b.symtab.LookupLocal(name)
+						if sym == nil {
+							sym = b.symtab.Define(name, symbol.KindEnum)
+						}
+						sym.Exported = true
+					}
+				case "interface_declaration", "type_alias_declaration":
+					if nameNode := inner.ChildByFieldName("name"); nameNode != nil {
+						name := b.nodeText(nameNode)
+						sym := b.symtab.LookupLocal(name)
+						if sym == nil {
+							sym = b.symtab.Define(name, symbol.KindType)
+						}
 						sym.Exported = true
 					}
 				}

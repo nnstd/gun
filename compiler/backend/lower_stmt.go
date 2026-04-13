@@ -197,10 +197,21 @@ func (l *Lowerer) lowerLocalVarStmts(d *hir.VarDecl) []ast.Stmt {
 		if decl.Init != nil {
 			value := l.lowerExpr(decl.Init)
 			value = jsvalueWrapLit(value)
-			stmts = append(stmts, assignDefine(
-				[]ast.Expr{goIdent(name)},
-				[]ast.Expr{value},
-			))
+			if hirExprReferencesName(decl.Init, decl.Symbol.OriginalName) {
+				l.jsvalueImport()
+				stmts = append(stmts, &ast.DeclStmt{
+					Decl: varDecl(name, jsValuePtrType(), nil),
+				})
+				stmts = append(stmts, assignStmt(
+					[]ast.Expr{goIdent(name)},
+					[]ast.Expr{value},
+				))
+			} else {
+				stmts = append(stmts, assignDefine(
+					[]ast.Expr{goIdent(name)},
+					[]ast.Expr{value},
+				))
+			}
 		} else {
 			// Uninitialized local: var name *jsvalue.JSValue
 			l.jsvalueImport()

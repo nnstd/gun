@@ -22,6 +22,7 @@ type importResolution struct {
 	useAsJSValue bool
 	moduleValue  string
 	jsExportName string
+	modulePath   string
 }
 
 // CrossFileExport describes a symbol exported from another file in the same package.
@@ -38,12 +39,17 @@ type Lowerer struct {
 	imports           map[string]string // Go import path → alias
 	decls             []ast.Decl
 	importedSyms      map[*symbol.Symbol]importResolution // how each imported symbol resolves to Go
+	importedNames     map[string]importResolution         // fallback for unresolved imported identifiers
 	moduleName        string                              // Go module name for relative import resolution
 	samePackage       bool                                // treat relative imports as same-package refs
 	varTypes          map[string]string                   // variable name → module type (e.g. "hono")
 	reservedNames     map[string]bool
 	importNameMap     map[string]string
 	exportAliasMap    map[string]string
+	localAliasMap     map[symbol.ID]string
+	namespaceAlias    string
+	namespaceEntries  map[string]string
+	topLevelNames     map[string]string
 	eagerVarInits     map[symbol.ID]bool
 	crossFileExports  map[string]bool // Go names from other files (prevents .Get() dispatch)
 	initStmts         []ast.Stmt      // statements for init() function
@@ -61,12 +67,12 @@ type Lowerer struct {
 
 // Lower converts an HIR module to a Go AST file.
 func Lower(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool) *ast.File {
-	return LowerWithExports(mod, ctx, moduleName, samePackageImports, nil, nil, nil, nil)
+	return LowerWithExports(mod, ctx, moduleName, samePackageImports, nil, nil, nil, nil, nil, "", nil)
 }
 
 // LowerWithExports converts an HIR module to a Go AST file with knowledge of
 // symbols exported from other files in the same package.
-func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string) *ast.File {
+func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string, localAliasMap map[symbol.ID]string, namespaceAlias string, namespaceEntries map[string]string) *ast.File {
 	cfe := make(map[string]bool)
 	for _, exp := range crossFileExports {
 		cfe[exp.GoName] = true
@@ -80,11 +86,16 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 		ctx:              ctx,
 		imports:          make(map[string]string),
 		importedSyms:     make(map[*symbol.Symbol]importResolution),
+		importedNames:    make(map[string]importResolution),
 		moduleName:       moduleName,
 		samePackage:      samePackageImports,
 		reservedNames:    reserved,
 		importNameMap:    importNameMap,
 		exportAliasMap:   exportAliasMap,
+		localAliasMap:    localAliasMap,
+		namespaceAlias:   namespaceAlias,
+		namespaceEntries: namespaceEntries,
+		topLevelNames:    make(map[string]string),
 		eagerVarInits:    make(map[symbol.ID]bool),
 		crossFileExports: cfe,
 		pkgName:          mod.Package,
@@ -115,6 +126,18 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 	// SWC interop: synthesize var Default = PrimaryExport when requested
 	if mod.SynthesizeDefault != "" {
 		l.decls = append(l.decls, varDecl("Default", nil, goIdent(mod.SynthesizeDefault)))
+	}
+
+	if l.namespaceAlias != "" && len(l.namespaceEntries) > 0 {
+		l.jsvalueImport()
+		props := make([]ast.Expr, 0, len(l.namespaceEntries))
+		for exportName, alias := range l.namespaceEntries {
+			props = append(props, &ast.KeyValueExpr{Key: stringLit(exportName), Value: goIdent(alias)})
+		}
+		l.decls = append(l.decls, varDecl(l.namespaceAlias, nil, callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), &ast.CompositeLit{
+			Type: &ast.MapType{Key: goIdent("string"), Value: &ast.InterfaceType{Methods: &ast.FieldList{}}},
+			Elts: props,
+		})))
 	}
 
 	// Fix init cycles: split self-referencing vars into forward decl + init()
@@ -198,7 +221,17 @@ func (l *Lowerer) emitName(sym *symbol.Symbol) string {
 	if sym == nil {
 		return "_"
 	}
+	if alias, ok := l.localAliasMap[sym.ID]; ok {
+		return alias
+	}
 	return l.symtab.EmitName(sym)
+}
+
+func (l *Lowerer) registerTopLevelName(sym *symbol.Symbol) {
+	if sym == nil {
+		return
+	}
+	l.topLevelNames[sym.OriginalName] = l.emitName(sym)
 }
 
 // --------------------------------------------------------------------
@@ -777,9 +810,24 @@ func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 		}
 		var rhs ast.Expr = goIdent(symbol.Sanitize(n.LocalName))
 		var sym *symbol.Symbol
+		mappedFromModule := false
+		if d.FromModule != "" {
+			if mapped, ok := l.importNameMap[d.FromModule+"\x00"+n.LocalName]; ok {
+				rhs = goIdent(mapped)
+				mappedFromModule = true
+			} else if mapped, ok := l.importNameMap[d.FromModule+"\x00*"]; ok && n.LocalName == "*" {
+				rhs = goIdent(mapped)
+				mappedFromModule = true
+			} else if mapped, ok := l.importNameMap[d.FromModule+"\x00*"]; ok {
+				rhs = callExpr(selectorExpr(goIdent(mapped), "Get"), stringLit(n.LocalName))
+				mappedFromModule = true
+			}
+		}
 		if lookedUp := l.symtab.Lookup(n.LocalName); lookedUp != nil {
 			sym = lookedUp
 			rhs = l.lowerIdentifier(&hir.Identifier{Sym: sym, Name: n.LocalName})
+		} else if n.LocalName != "*" && !mappedFromModule {
+			rhs = l.lowerIdentifier(&hir.Identifier{Name: n.LocalName})
 		}
 		if id, ok := rhs.(*ast.Ident); ok && id.Name == goName {
 			continue
@@ -887,12 +935,15 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 	// Process default import
 	if d.Default != nil && d.Default.Symbol != nil {
 		if mapped, ok := l.importNameMap[d.ModulePath+"\x00default"]; ok {
-			l.importedSyms[d.Default.Symbol] = importResolution{
+			res := importResolution{
 				goImportPath: "",
 				goPkgName:    "",
 				goSymbol:     mapped,
 				isTranspiled: true,
+				modulePath:   d.ModulePath,
 			}
+			l.importedSyms[d.Default.Symbol] = res
+			l.importedNames[d.Default.LocalName] = res
 		} else if isKnown && useAsJSValue {
 			res := importResolution{
 				goImportPath: goImportPath,
@@ -910,22 +961,29 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 				res.jsExportName = ""
 			}
 			l.importedSyms[d.Default.Symbol] = res
+			l.importedNames[d.Default.LocalName] = res
 		} else if isKnown && isGunRuntimePkg(goImportPath) {
 			// Legacy fallback: Default import from Gun runtime module → pkg.AsJSValue
-			l.importedSyms[d.Default.Symbol] = importResolution{
+			res := importResolution{
 				goImportPath: goImportPath,
 				goPkgName:    goPkgName,
 				goSymbol:     "AsJSValue",
 				isTranspiled: false,
+				modulePath:   d.ModulePath,
 			}
+			l.importedSyms[d.Default.Symbol] = res
+			l.importedNames[d.Default.LocalName] = res
 		} else if isKnown {
 			// Default import from Go stdlib module → namespace (bare pkg ident)
-			l.importedSyms[d.Default.Symbol] = importResolution{
+			res := importResolution{
 				goImportPath: goImportPath,
 				goPkgName:    goPkgName,
 				goSymbol:     "",
 				isTranspiled: false,
+				modulePath:   d.ModulePath,
 			}
+			l.importedSyms[d.Default.Symbol] = res
+			l.importedNames[d.Default.LocalName] = res
 		} else {
 			goSym := "Default"
 			if l.samePackage && isRelativeImport(d.ModulePath) {
@@ -936,12 +994,15 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 					goSym = ov.GoSymbol
 				}
 			}
-			l.importedSyms[d.Default.Symbol] = importResolution{
+			res := importResolution{
 				goImportPath: goImportPath,
 				goPkgName:    goPkgName,
 				goSymbol:     goSym,
 				isTranspiled: true,
+				modulePath:   d.ModulePath,
 			}
+			l.importedSyms[d.Default.Symbol] = res
+			l.importedNames[d.Default.LocalName] = res
 		}
 	}
 
@@ -950,14 +1011,17 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 		if n.Symbol == nil {
 			continue
 		}
-		goSym := symbol.Capitalize(n.OriginalName)
+		goSym := symbol.Capitalize(symbol.Sanitize(n.OriginalName))
 		if mapped, ok := l.importNameMap[d.ModulePath+"\x00"+n.OriginalName]; ok {
-			l.importedSyms[n.Symbol] = importResolution{
+			res := importResolution{
 				goImportPath: "",
 				goPkgName:    "",
 				goSymbol:     mapped,
 				isTranspiled: true,
+				modulePath:   d.ModulePath,
 			}
+			l.importedSyms[n.Symbol] = res
+			l.importedNames[n.LocalName] = res
 			continue
 		}
 		if useAsJSValue {
@@ -967,24 +1031,27 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 					moduleValue = ov.GoSymbol
 				}
 			}
-			l.importedSyms[n.Symbol] = importResolution{
+			res := importResolution{
 				goImportPath: goImportPath,
 				goPkgName:    goPkgName,
 				isTranspiled: false,
 				useAsJSValue: true,
 				moduleValue:  moduleValue,
 				jsExportName: n.OriginalName,
+				modulePath:   d.ModulePath,
 			}
+			l.importedSyms[n.Symbol] = res
+			l.importedNames[n.LocalName] = res
 			continue
 		}
 		// Same-package imports: check if the symbol is exported from the other file
 		// (and thus capitalized), or just an internal reference (stays lowercase).
 		if goImportPath == "" {
-			capName := symbol.Capitalize(n.OriginalName)
+			capName := symbol.Capitalize(symbol.Sanitize(n.OriginalName))
 			if l.crossFileExports[capName] {
 				goSym = capName // exported from other file → use capitalized
 			} else {
-				goSym = n.OriginalName // not exported → use original name
+				goSym = symbol.Sanitize(n.OriginalName) // not exported → use sanitized local name
 			}
 		}
 		if overrides != nil {
@@ -992,40 +1059,64 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 				goSym = ov.GoSymbol
 			}
 		}
-		l.importedSyms[n.Symbol] = importResolution{
+		res := importResolution{
 			goImportPath: goImportPath,
 			goPkgName:    goPkgName,
 			goSymbol:     goSym,
 			isTranspiled: !isKnown,
+			modulePath:   d.ModulePath,
 		}
+		l.importedSyms[n.Symbol] = res
+		l.importedNames[n.LocalName] = res
 	}
 
 	// Process namespace import
 	if d.Namespace != nil && d.Namespace.Symbol != nil {
+		if mapped, ok := l.importNameMap[d.ModulePath+"\x00*"]; ok {
+			res := importResolution{
+				goImportPath: "",
+				goPkgName:    "",
+				goSymbol:     mapped,
+				isTranspiled: true,
+				modulePath:   d.ModulePath,
+			}
+			l.importedSyms[d.Namespace.Symbol] = res
+			l.importedNames[d.Namespace.LocalName] = res
+			return
+		}
 		if isKnown && useAsJSValue {
-			l.importedSyms[d.Namespace.Symbol] = importResolution{
+			res := importResolution{
 				goImportPath: goImportPath,
 				goPkgName:    goPkgName,
 				isTranspiled: false,
 				useAsJSValue: true,
+				modulePath:   d.ModulePath,
 			}
+			l.importedSyms[d.Namespace.Symbol] = res
+			l.importedNames[d.Namespace.LocalName] = res
 			return
 		}
 		if isKnown {
 			// import * as fs from "fs" → fs.AsJSValue
-			l.importedSyms[d.Namespace.Symbol] = importResolution{
+			res := importResolution{
 				goImportPath: goImportPath,
 				goPkgName:    goPkgName,
 				goSymbol:     "AsJSValue",
 				isTranspiled: false,
+				modulePath:   d.ModulePath,
 			}
+			l.importedSyms[d.Namespace.Symbol] = res
+			l.importedNames[d.Namespace.LocalName] = res
 		} else {
-			l.importedSyms[d.Namespace.Symbol] = importResolution{
+			res := importResolution{
 				goImportPath: goImportPath,
 				goPkgName:    goPkgName,
 				goSymbol:     "", // empty = namespace
 				isTranspiled: true,
+				modulePath:   d.ModulePath,
 			}
+			l.importedSyms[d.Namespace.Symbol] = res
+			l.importedNames[d.Namespace.LocalName] = res
 		}
 	}
 }
@@ -1175,23 +1266,37 @@ func (l *Lowerer) prescan(mod *hir.Module) {
 		switch d := d.(type) {
 		case *hir.VarDecl:
 			for _, decl := range d.Declarators {
+				l.registerTopLevelName(decl.Symbol)
+			}
+			for _, decl := range d.Declarators {
 				if decl.Symbol != nil && decl.Init != nil && !hirExprReferencesName(decl.Init, decl.Symbol.OriginalName) {
 					l.eagerVarInits[decl.Symbol.ID] = true
 				}
 			}
 		case *hir.FuncDecl:
+			l.registerTopLevelName(d.Symbol)
 			if d.Symbol != nil && d.Symbol.FuncInfo != nil {
 				// Already captured by HIR builder
 			}
+		case *hir.ClassDecl:
+			l.registerTopLevelName(d.Symbol)
+		case *hir.EnumDecl:
+			l.registerTopLevelName(d.Symbol)
+		case *hir.InterfaceDecl:
+			l.registerTopLevelName(d.Symbol)
+		case *hir.TypeAliasDecl:
+			l.registerTopLevelName(d.Symbol)
 		case *hir.ExportDecl:
 			if d.Decl != nil {
 				if fd, ok := d.Decl.(*hir.FuncDecl); ok && fd.Symbol != nil {
 					fd.Symbol.Exported = true
+					l.registerTopLevelName(fd.Symbol)
 				}
 				if vd, ok := d.Decl.(*hir.VarDecl); ok {
 					for _, decl := range vd.Declarators {
 						if decl.Symbol != nil {
 							decl.Symbol.Exported = true
+							l.registerTopLevelName(decl.Symbol)
 							if decl.Init != nil && !hirExprReferencesName(decl.Init, decl.Symbol.OriginalName) {
 								l.eagerVarInits[decl.Symbol.ID] = true
 							}
@@ -1200,6 +1305,7 @@ func (l *Lowerer) prescan(mod *hir.Module) {
 				}
 				if cd, ok := d.Decl.(*hir.ClassDecl); ok && cd.Symbol != nil {
 					cd.Symbol.Exported = true
+					l.registerTopLevelName(cd.Symbol)
 				}
 			}
 		}
@@ -1235,7 +1341,7 @@ func (l *Lowerer) markCrossFileExported(mod *hir.Module) {
 		switch d := d.(type) {
 		case *hir.FuncDecl:
 			if d.Symbol != nil {
-				capName := symbol.Capitalize(d.Symbol.OriginalName)
+				capName := symbol.Capitalize(symbol.Sanitize(d.Symbol.OriginalName))
 				// Only mark as exported if the capitalized name is in cross-file exports
 				// AND no other local symbol already claims that capitalized name
 				if l.crossFileExports[capName] && !localNames[capName] {
@@ -1245,7 +1351,7 @@ func (l *Lowerer) markCrossFileExported(mod *hir.Module) {
 		case *hir.VarDecl:
 			for _, decl := range d.Declarators {
 				if decl.Symbol != nil {
-					capName := symbol.Capitalize(decl.Symbol.OriginalName)
+					capName := symbol.Capitalize(symbol.Sanitize(decl.Symbol.OriginalName))
 					if l.crossFileExports[capName] && !localNames[capName] {
 						decl.Symbol.Exported = true
 					}
@@ -1253,7 +1359,7 @@ func (l *Lowerer) markCrossFileExported(mod *hir.Module) {
 			}
 		case *hir.ClassDecl:
 			if d.Symbol != nil {
-				capName := symbol.Capitalize(d.Symbol.OriginalName)
+				capName := symbol.Capitalize(symbol.Sanitize(d.Symbol.OriginalName))
 				if l.crossFileExports[capName] && !localNames[capName] {
 					d.Symbol.Exported = true
 				}

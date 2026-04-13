@@ -57,7 +57,7 @@ func CompileWithExports(source []byte, pkgName, moduleName, currentFile string, 
 	hirMod := hir.BuildModuleWithPath(tree.RootNode(), source, pkgName, currentFile)
 	crossFileExports, reservedNames := compileWithExportsMetadata(exports, currentFile)
 	p := newDefaultPipeline(0)
-	return p.CompileHIRWithExports(hirMod, moduleName, samePackageImports, crossFileExports, reservedNames, nil, nil)
+	return p.CompileHIRWithExports(hirMod, moduleName, samePackageImports, crossFileExports, reservedNames, nil, nil, nil, "", nil)
 }
 
 // CompileNewPipeline transpiles TypeScript source using the pipeline at the

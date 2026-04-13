@@ -214,6 +214,17 @@ func registerGlobalFunctions(ctx *tcontext.TranspilerContext) {
 	})
 
 	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
+		Name: "BigInt",
+		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			for i, arg := range args {
+				args[i] = jsvalueWrapLit(arg)
+			}
+			return callExpr(selectorExpr(ident("jsvalue"), "BigInt"), args...)
+		},
+	})
+
+	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
 		Name: "parseInt",
 		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")

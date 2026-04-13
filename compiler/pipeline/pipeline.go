@@ -49,6 +49,9 @@ type compileOptions struct {
 	reservedNames    []string
 	importNameMap    map[string]string
 	exportAliasMap   map[string]string
+	localAliasMap    map[symbol.ID]string
+	namespaceAlias   string
+	namespaceEntries map[string]string
 }
 
 // New creates a pipeline with the given optimization level and default passes.
@@ -102,12 +105,15 @@ func (p *Pipeline) CompileHIR(hirMod *hir.Module, moduleName string, samePackage
 
 // CompileHIRWithExports compiles an already-built HIR module while preserving
 // cross-file export knowledge for same-package compatibility entrypoints.
-func (p *Pipeline) CompileHIRWithExports(hirMod *hir.Module, moduleName string, samePackageImports bool, crossFileExports []backend.CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string) ([]byte, error) {
+func (p *Pipeline) CompileHIRWithExports(hirMod *hir.Module, moduleName string, samePackageImports bool, crossFileExports []backend.CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string, localAliasMap map[symbol.ID]string, namespaceAlias string, namespaceEntries map[string]string) ([]byte, error) {
 	return p.compileHIRModule(hirMod, moduleName, samePackageImports, compileOptions{
 		crossFileExports: crossFileExports,
 		reservedNames:    reservedNames,
 		importNameMap:    importNameMap,
 		exportAliasMap:   exportAliasMap,
+		localAliasMap:    localAliasMap,
+		namespaceAlias:   namespaceAlias,
+		namespaceEntries: namespaceEntries,
 	})
 }
 
@@ -139,10 +145,10 @@ func (p *Pipeline) compileHIRModule(hirMod *hir.Module, moduleName string, sameP
 	}
 
 	var goFile *ast.File
-	if len(opts.crossFileExports) == 0 && len(opts.reservedNames) == 0 && len(opts.importNameMap) == 0 && len(opts.exportAliasMap) == 0 {
+	if len(opts.crossFileExports) == 0 && len(opts.reservedNames) == 0 && len(opts.importNameMap) == 0 && len(opts.exportAliasMap) == 0 && len(opts.localAliasMap) == 0 && opts.namespaceAlias == "" && len(opts.namespaceEntries) == 0 {
 		goFile = backend.Lower(hirMod, p.Ctx, moduleName, samePackageImports)
 	} else {
-		goFile = backend.LowerWithExports(hirMod, p.Ctx, moduleName, samePackageImports, opts.crossFileExports, opts.reservedNames, opts.importNameMap, opts.exportAliasMap)
+		goFile = backend.LowerWithExports(hirMod, p.Ctx, moduleName, samePackageImports, opts.crossFileExports, opts.reservedNames, opts.importNameMap, opts.exportAliasMap, opts.localAliasMap, opts.namespaceAlias, opts.namespaceEntries)
 	}
 	return backend.GenerateWithSource(goFile, hirMod.SourcePath, hirMod.SourceSize)
 }
@@ -155,6 +161,8 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 	allExports := make(map[string][]backend.CrossFileExport)
 	allNames := make(map[string][]string)
 	exportAliases := make(map[string]map[string]string)
+	localAliases := make(map[string]map[symbol.ID]string)
+	namespaceAliases := make(map[string]string)
 
 	for name, source := range files {
 		tree, err := parseTypeScript(source)
@@ -170,6 +178,8 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 		allExports[name] = backend.ScanHIRExports(hirMod)
 		allNames[name] = backend.ScanHIRTopLevelNames(hirMod)
 	}
+
+	expandWildcardReexports(hirModules, allExports, files)
 
 	// Phase 1b: Synthesize Default export for modules with named exports
 	// but no explicit default (SWC interop). Only add to the entry file.
@@ -250,6 +260,16 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 			aliases[originalName] = makeUniqueAlias(alias, globalUsedAliases)
 		}
 		exportAliases[fileName] = aliases
+		namespaceAliases[fileName] = makeUniqueAlias(fileSpecificExportName(fileName, "namespace"), globalUsedAliases)
+	}
+
+	for _, name := range allNames[entryFile] {
+		if globalUsedAliases[name] == 0 {
+			globalUsedAliases[name] = 1
+		}
+	}
+	for fileName, hirMod := range hirModules {
+		localAliases[fileName] = collectTopLevelAliases(hirMod, fileName, entryFile, exportAliases[fileName], globalUsedAliases)
 	}
 
 	// Phase 3: Compile each file with cross-file export knowledge
@@ -271,6 +291,9 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 				continue
 			}
 			reservedNames = append(reservedNames, names...)
+			for _, alias := range localAliases[otherFile] {
+				reservedNames = append(reservedNames, alias)
+			}
 			for _, alias := range exportAliases[otherFile] {
 				reservedNames = append(reservedNames, alias)
 			}
@@ -289,14 +312,44 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 					importNameMap[imp.ModulePath+"\x00default"] = alias
 				}
 			}
+			if imp.Namespace != nil {
+				if nsAlias := namespaceAliases[target]; nsAlias != "" {
+					importNameMap[imp.ModulePath+"\x00*"] = nsAlias
+				}
+				for originalName, alias := range targetAliases {
+					importNameMap[imp.ModulePath+"\x00"+originalName] = alias
+				}
+			}
 			for _, n := range imp.Named {
 				if alias := targetAliases[n.OriginalName]; alias != "" {
 					importNameMap[imp.ModulePath+"\x00"+n.OriginalName] = alias
 				}
 			}
 		}
+		for _, decl := range hirMod.Declarations {
+			ex, ok := decl.(*hir.ExportDecl)
+			if !ok || ex.FromModule == "" || !strings.HasPrefix(ex.FromModule, ".") {
+				continue
+			}
+			target := resolvePackageImportFile(name, ex.FromModule, files)
+			if target == "" {
+				continue
+			}
+			targetAliases := exportAliases[target]
+			if nsAlias := namespaceAliases[target]; nsAlias != "" {
+				importNameMap[ex.FromModule+"\x00*"] = nsAlias
+			}
+			for _, n := range ex.Names {
+				if n.LocalName == "*" {
+					continue
+				}
+				if alias := targetAliases[n.LocalName]; alias != "" {
+					importNameMap[ex.FromModule+"\x00"+n.LocalName] = alias
+				}
+			}
+		}
 
-		goFiles[name] = backend.LowerWithExports(hirMod, p.Ctx, moduleName, true, crossExports, reservedNames, importNameMap, exportAliases[name])
+		goFiles[name] = backend.LowerWithExports(hirMod, p.Ctx, moduleName, true, crossExports, reservedNames, importNameMap, exportAliases[name], localAliases[name], namespaceAliases[name], exportAliases[name])
 	}
 
 	backend.BreakPackageInitCycles(goFiles)
@@ -366,6 +419,111 @@ func makeUniqueAlias(alias string, used map[string]int) string {
 	return fmt.Sprintf("%s_%d", alias, used[alias])
 }
 
+func expandWildcardReexports(mods map[string]*hir.Module, allExports map[string][]backend.CrossFileExport, files map[string][]byte) {
+	changed := true
+	for changed {
+		changed = false
+		for fileName, mod := range mods {
+			existing := allExports[fileName]
+			seen := make(map[string]bool, len(existing))
+			for _, exp := range existing {
+				seen[exp.OriginalName+"=>"+exp.GoName] = true
+			}
+			for _, decl := range mod.Declarations {
+				ex, ok := decl.(*hir.ExportDecl)
+				if !ok || ex.FromModule == "" || len(ex.Names) != 0 || !strings.HasPrefix(ex.FromModule, ".") {
+					continue
+				}
+				target := resolvePackageImportFile(fileName, ex.FromModule, files)
+				if target == "" {
+					continue
+				}
+				for _, targetExp := range allExports[target] {
+					if targetExp.OriginalName == "default" {
+						continue
+					}
+					foundName := false
+					for _, n := range ex.Names {
+						if n.LocalName == targetExp.OriginalName && n.ExportedName == targetExp.OriginalName {
+							foundName = true
+							break
+						}
+					}
+					if !foundName {
+						ex.Names = append(ex.Names, hir.ExportName{
+							LocalName:    targetExp.OriginalName,
+							ExportedName: targetExp.OriginalName,
+						})
+					}
+					key := targetExp.OriginalName + "=>" + targetExp.GoName
+					if seen[key] {
+						continue
+					}
+					existing = append(existing, targetExp)
+					seen[key] = true
+					changed = true
+				}
+			}
+			allExports[fileName] = existing
+		}
+	}
+}
+
+func collectTopLevelAliases(mod *hir.Module, fileName, entryFile string, exportAliases map[string]string, used map[string]int) map[symbol.ID]string {
+	aliases := make(map[symbol.ID]string)
+	if fileName == entryFile {
+		return aliases
+	}
+
+	assign := func(sym *symbol.Symbol, exported bool, exportName string) {
+		if sym == nil {
+			return
+		}
+		if _, exists := aliases[sym.ID]; exists {
+			return
+		}
+		if exported {
+			if alias := exportAliases[exportName]; alias != "" {
+				aliases[sym.ID] = alias
+				return
+			}
+		}
+		aliases[sym.ID] = makeUniqueAlias(fileSpecificExportName(fileName, sym.OriginalName), used)
+	}
+
+	var walkDecl func(hir.Decl, bool)
+	walkDecl = func(d hir.Decl, forceExported bool) {
+		switch d := d.(type) {
+		case *hir.FuncDecl:
+			assign(d.Symbol, forceExported || d.Exported, d.Symbol.OriginalName)
+		case *hir.VarDecl:
+			exported := forceExported || d.Exported
+			for _, decl := range d.Declarators {
+				if decl.Symbol != nil {
+					assign(decl.Symbol, exported, decl.Symbol.OriginalName)
+				}
+			}
+		case *hir.ClassDecl:
+			assign(d.Symbol, forceExported || d.Exported, d.Symbol.OriginalName)
+		case *hir.EnumDecl:
+			assign(d.Symbol, forceExported || d.Exported, d.Symbol.OriginalName)
+		case *hir.InterfaceDecl:
+			assign(d.Symbol, forceExported || d.Exported, d.Symbol.OriginalName)
+		case *hir.TypeAliasDecl:
+			assign(d.Symbol, forceExported || d.Exported, d.Symbol.OriginalName)
+		case *hir.ExportDecl:
+			if d.Decl != nil {
+				walkDecl(d.Decl, true)
+			}
+		}
+	}
+
+	for _, d := range mod.Declarations {
+		walkDecl(d, false)
+	}
+	return aliases
+}
+
 func resolvePackageImportFile(currentFile, importPath string, files map[string][]byte) string {
 	fromDir := filepath.Dir(currentFile)
 	base := filepath.Join(fromDir, importPath)
@@ -377,6 +535,13 @@ func resolvePackageImportFile(currentFile, importPath string, files map[string][
 		filepath.Join(base, "index.js"),
 	}
 	for _, candidate := range candidates {
+		if _, ok := files[candidate]; ok {
+			return candidate
+		}
+		clean := filepath.Clean(candidate)
+		if _, ok := files[clean]; ok {
+			return clean
+		}
 		abs, _ := filepath.Abs(candidate)
 		if _, ok := files[abs]; ok {
 			return abs

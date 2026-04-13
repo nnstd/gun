@@ -22,6 +22,30 @@ func NewBigInt(i int64) *JSValue {
 	return &JSValue{typ: TypeBigInt, bigIntVal: i, prototype: BigIntPrototype}
 }
 
+// BigInt implements the JavaScript BigInt() coercion for basic number/string/bigint inputs.
+func BigInt(args ...*JSValue) *JSValue {
+	if len(args) == 0 || args[0] == nil {
+		return NewBigInt(0)
+	}
+	v := args[0]
+	switch v.typ {
+	case TypeBigInt:
+		return v
+	case TypeNumber:
+		return NewBigInt(int64(v.Number()))
+	case TypeString:
+		if i, err := strconv.ParseInt(strings.TrimSpace(v.String()), 10, 64); err == nil {
+			return NewBigInt(i)
+		}
+		return NewBigInt(0)
+	default:
+		if i, err := strconv.ParseInt(strings.TrimSpace(v.String()), 10, 64); err == nil {
+			return NewBigInt(i)
+		}
+		return NewBigInt(int64(v.Number()))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Arithmetic operations
 // ---------------------------------------------------------------------------
@@ -351,11 +375,19 @@ func ParseFloat(s *JSValue) *JSValue {
 
 func initNumberPrototype() {
 	defMethod(NumberPrototype, "toString", func(args ...*JSValue) *JSValue {
-		if len(args) < 1 || args[0] == nil { return NewString("0") }
+		if len(args) < 1 || args[0] == nil {
+			return NewString("0")
+		}
 		n := args[0].numVal
-		if math.IsNaN(n) { return NewString("NaN") }
-		if math.IsInf(n, 1) { return NewString("Infinity") }
-		if math.IsInf(n, -1) { return NewString("-Infinity") }
+		if math.IsNaN(n) {
+			return NewString("NaN")
+		}
+		if math.IsInf(n, 1) {
+			return NewString("Infinity")
+		}
+		if math.IsInf(n, -1) {
+			return NewString("-Infinity")
+		}
 		radix := 10
 		if len(args) > 1 && args[1] != nil {
 			radix = int(args[1].numVal)
@@ -364,20 +396,30 @@ func initNumberPrototype() {
 			return NewString(args[0].String())
 		}
 		neg := n < 0
-		if neg { n = -n }
+		if neg {
+			n = -n
+		}
 		intPart := int64(n)
 		s := strconv.FormatInt(intPart, radix)
-		if neg { s = "-" + s }
+		if neg {
+			s = "-" + s
+		}
 		return NewString(s)
 	})
 	defMethod(NumberPrototype, "valueOf", func(args ...*JSValue) *JSValue {
-		if len(args) < 1 || args[0] == nil { return NewNumber(0) }
+		if len(args) < 1 || args[0] == nil {
+			return NewNumber(0)
+		}
 		return NewNumber(args[0].numVal)
 	})
 	defMethod(NumberPrototype, "toFixed", func(args ...*JSValue) *JSValue {
-		if len(args) < 1 || args[0] == nil { return NewString("0") }
+		if len(args) < 1 || args[0] == nil {
+			return NewString("0")
+		}
 		n := args[0].numVal
-		if math.IsNaN(n) { return NewString("NaN") }
+		if math.IsNaN(n) {
+			return NewString("NaN")
+		}
 		digits := 0
 		if len(args) > 1 && args[1] != nil {
 			digits = int(args[1].numVal)
@@ -385,10 +427,16 @@ func initNumberPrototype() {
 		return NewString(strconv.FormatFloat(n, 'f', digits, 64))
 	})
 	defMethod(NumberPrototype, "toPrecision", func(args ...*JSValue) *JSValue {
-		if len(args) < 1 || args[0] == nil { return NewString("0") }
+		if len(args) < 1 || args[0] == nil {
+			return NewString("0")
+		}
 		n := args[0].numVal
-		if math.IsNaN(n) { return NewString("NaN") }
-		if math.IsInf(n, 0) { return NewString(args[0].String()) }
+		if math.IsNaN(n) {
+			return NewString("NaN")
+		}
+		if math.IsInf(n, 0) {
+			return NewString(args[0].String())
+		}
 		if len(args) < 2 || args[1] == nil {
 			return NewString(args[0].String())
 		}
@@ -396,10 +444,16 @@ func initNumberPrototype() {
 		return NewString(strconv.FormatFloat(n, 'g', prec, 64))
 	})
 	defMethod(NumberPrototype, "toExponential", func(args ...*JSValue) *JSValue {
-		if len(args) < 1 || args[0] == nil { return NewString("0") }
+		if len(args) < 1 || args[0] == nil {
+			return NewString("0")
+		}
 		n := args[0].numVal
-		if math.IsNaN(n) { return NewString("NaN") }
-		if math.IsInf(n, 0) { return NewString(args[0].String()) }
+		if math.IsNaN(n) {
+			return NewString("NaN")
+		}
+		if math.IsInf(n, 0) {
+			return NewString(args[0].String())
+		}
 		digits := -1
 		if len(args) > 1 && args[1] != nil {
 			digits = int(args[1].numVal)
@@ -410,7 +464,9 @@ func initNumberPrototype() {
 		return NewString(strconv.FormatFloat(n, 'e', digits, 64))
 	})
 	defMethod(NumberPrototype, "toLocaleString", func(args ...*JSValue) *JSValue {
-		if len(args) < 1 || args[0] == nil { return NewString("0") }
+		if len(args) < 1 || args[0] == nil {
+			return NewString("0")
+		}
 		return NewString(args[0].String())
 	})
 }

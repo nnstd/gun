@@ -16,7 +16,7 @@ func ScanHIRExports(mod *hir.Module) []CrossFileExport {
 			if d.Symbol != nil && d.Exported {
 				exports = append(exports, CrossFileExport{
 					OriginalName: d.Symbol.OriginalName,
-					GoName:       symbol.Capitalize(d.Symbol.OriginalName),
+					GoName:       symbol.Capitalize(symbol.Sanitize(d.Symbol.OriginalName)),
 					IsJSValue:    true,
 				})
 			}
@@ -26,7 +26,7 @@ func ScanHIRExports(mod *hir.Module) []CrossFileExport {
 					if decl.Symbol != nil {
 						exports = append(exports, CrossFileExport{
 							OriginalName: decl.Symbol.OriginalName,
-							GoName:       symbol.Capitalize(decl.Symbol.OriginalName),
+							GoName:       symbol.Capitalize(symbol.Sanitize(decl.Symbol.OriginalName)),
 							IsJSValue:    true,
 						})
 					}
@@ -36,7 +36,7 @@ func ScanHIRExports(mod *hir.Module) []CrossFileExport {
 			if d.Symbol != nil && d.Exported {
 				exports = append(exports, CrossFileExport{
 					OriginalName: d.Symbol.OriginalName,
-					GoName:       symbol.Capitalize(d.Symbol.OriginalName),
+					GoName:       symbol.Capitalize(symbol.Sanitize(d.Symbol.OriginalName)),
 					IsJSValue:    true,
 				})
 			}
@@ -44,7 +44,7 @@ func ScanHIRExports(mod *hir.Module) []CrossFileExport {
 			if d.Symbol != nil && d.Exported {
 				exports = append(exports, CrossFileExport{
 					OriginalName: d.Symbol.OriginalName,
-					GoName:       symbol.Capitalize(d.Symbol.OriginalName),
+					GoName:       symbol.Capitalize(symbol.Sanitize(d.Symbol.OriginalName)),
 					IsJSValue:    true,
 				})
 			}
@@ -56,7 +56,7 @@ func ScanHIRExports(mod *hir.Module) []CrossFileExport {
 			for _, n := range d.Names {
 				exports = append(exports, CrossFileExport{
 					OriginalName: n.ExportedName,
-					GoName:       symbol.Capitalize(n.ExportedName),
+					GoName:       symbol.Capitalize(symbol.Sanitize(n.ExportedName)),
 					IsJSValue:    true,
 				})
 			}
@@ -136,7 +136,7 @@ func scanExportedDecl(d *hir.ExportDecl) []CrossFileExport {
 		if inner.Symbol != nil {
 			exports = append(exports, CrossFileExport{
 				OriginalName: inner.Symbol.OriginalName,
-				GoName:       symbol.Capitalize(inner.Symbol.OriginalName),
+				GoName:       symbol.Capitalize(symbol.Sanitize(inner.Symbol.OriginalName)),
 				IsJSValue:    true,
 			})
 		}
@@ -145,7 +145,7 @@ func scanExportedDecl(d *hir.ExportDecl) []CrossFileExport {
 			if decl.Symbol != nil {
 				exports = append(exports, CrossFileExport{
 					OriginalName: decl.Symbol.OriginalName,
-					GoName:       symbol.Capitalize(decl.Symbol.OriginalName),
+					GoName:       symbol.Capitalize(symbol.Sanitize(decl.Symbol.OriginalName)),
 					IsJSValue:    true,
 				})
 			}
@@ -154,7 +154,7 @@ func scanExportedDecl(d *hir.ExportDecl) []CrossFileExport {
 		if inner.Symbol != nil {
 			exports = append(exports, CrossFileExport{
 				OriginalName: inner.Symbol.OriginalName,
-				GoName:       symbol.Capitalize(inner.Symbol.OriginalName),
+				GoName:       symbol.Capitalize(symbol.Sanitize(inner.Symbol.OriginalName)),
 				IsJSValue:    true,
 			})
 		}
@@ -162,7 +162,7 @@ func scanExportedDecl(d *hir.ExportDecl) []CrossFileExport {
 		if inner.Symbol != nil {
 			exports = append(exports, CrossFileExport{
 				OriginalName: inner.Symbol.OriginalName,
-				GoName:       symbol.Capitalize(inner.Symbol.OriginalName),
+				GoName:       symbol.Capitalize(symbol.Sanitize(inner.Symbol.OriginalName)),
 				IsJSValue:    true,
 			})
 		}
