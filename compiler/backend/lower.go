@@ -849,34 +849,25 @@ func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 		if id, ok := rhs.(*ast.Ident); ok && id.Name == goName {
 			continue
 		}
-		if sym != nil && sym.Kind == symbol.KindVariable && !l.eagerVarInits[sym.ID] {
-			l.jsvalueImport()
-			l.decls = append(l.decls, varDecl(goName, jsValuePtrType(), nil))
-			l.initStmts = append(l.initStmts, assignStmt([]ast.Expr{goIdent(goName)}, []ast.Expr{rhs}))
-			l.emittedExportNames[goName] = true
-			continue
-		}
-		// Re-export aliases from other modules: defer to init() because
-		// the referenced var may itself be set in init().
-		if mappedFromModule {
-			l.jsvalueImport()
-			l.decls = append(l.decls, varDecl(goName, jsValuePtrType(), nil))
-			l.initStmts = append(l.initStmts, assignStmt([]ast.Expr{goIdent(goName)}, []ast.Expr{rhs}))
-			l.emittedExportNames[goName] = true
-			continue
-		}
-		// Imported symbols (e.g. `import * as z; export { z }`) that resolve
-		// to cross-file variables must also be deferred, since the target
-		// variable may only be set in another file's init().
-		if sym != nil && sym.Kind == symbol.KindImport {
-			if _, isImported := l.importedSyms[sym]; isImported {
-				l.jsvalueImport()
-				l.decls = append(l.decls, varDecl(goName, jsValuePtrType(), nil))
-				l.initStmts = append(l.initStmts, assignStmt([]ast.Expr{goIdent(goName)}, []ast.Expr{rhs}))
-				l.emittedExportNames[goName] = true
+			if sym != nil && sym.Kind == symbol.KindVariable && !l.eagerVarInits[sym.ID] {
+				l.deferVarToInit(goName, rhs)
 				continue
 			}
-		}
+			// Re-export aliases from other modules: defer to init() because
+			// the referenced var may itself be set in init().
+			if mappedFromModule {
+				l.deferVarToInit(goName, rhs)
+				continue
+			}
+			// Imported symbols (e.g. `import * as z; export { z }`) that resolve
+			// to cross-file variables must also be deferred, since the target
+			// variable may only be set in another file's init().
+			if sym != nil && sym.Kind == symbol.KindImport {
+				if _, isImported := l.importedSyms[sym]; isImported {
+					l.deferVarToInit(goName, rhs)
+					continue
+				}
+			}
 		l.decls = append(l.decls, varDecl(goName, nil, rhs))
 		l.emittedExportNames[goName] = true
 	}
@@ -894,12 +885,24 @@ func (l *Lowerer) maybeEmitExportAlias(sym *symbol.Symbol, localGoName string) {
 		return
 	}
 	if sym.Kind == symbol.KindVariable && !l.eagerVarInits[sym.ID] {
-		l.jsvalueImport()
-		l.decls = append(l.decls, varDecl(goName, jsValuePtrType(), nil))
-		l.initStmts = append(l.initStmts, assignStmt([]ast.Expr{goIdent(goName)}, []ast.Expr{goIdent(localGoName)}))
+		l.deferVarToInit(goName, goIdent(localGoName))
 		return
 	}
 	l.decls = append(l.decls, varDecl(goName, nil, goIdent(localGoName)))
+}
+
+// deferVarToInit emits a forward declaration for goName and defers the
+// assignment to init(). Used for exports that reference variables whose
+// value may not be available at package level (cross-file references,
+// re-exported aliases, etc.).
+func (l *Lowerer) deferVarToInit(goName string, rhs ast.Expr) {
+	if l.emittedExportNames[goName] {
+		return
+	}
+	l.jsvalueImport()
+	l.decls = append(l.decls, varDecl(goName, jsValuePtrType(), nil))
+	l.initStmts = append(l.initStmts, assignStmt([]ast.Expr{goIdent(goName)}, []ast.Expr{rhs}))
+	l.emittedExportNames[goName] = true
 }
 
 // lowerExportDefault handles `export default ...` declarations.
