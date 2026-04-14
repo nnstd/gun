@@ -590,6 +590,22 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 	})
 
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Symbol",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return selectorExpr(ident("jsvalue"), "Symbol_")
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Reflect",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return selectorExpr(ident("jsvalue"), "Reflect")
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "Bun",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddImport("github.com/nnstd/gun/runtime/bun")
@@ -659,6 +675,100 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 			},
 		})
 	}
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Date",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return selectorExpr(ident("jsvalue"), "DateCtor")
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Map",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return selectorExpr(ident("jsvalue"), "MapCtor")
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Set",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return selectorExpr(ident("jsvalue"), "SetCtor")
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Uint8Array",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return selectorExpr(ident("jsvalue"), "Uint8ArrayCtor")
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Proxy",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "NewObject"))
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "atob",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return selectorExpr(ident("jsvalue"), "Atob")
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "btoa",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return selectorExpr(ident("jsvalue"), "Btoa")
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "navigator",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "NewUndefined"))
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Function",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "NewObject"))
+		},
+	})
+
+	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
+		Name: "atob",
+		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			for i, arg := range args {
+				args[i] = jsvalueWrapLit(arg)
+			}
+			return callExpr(selectorExpr(ident("jsvalue"), "AtobFunc"), args...)
+		},
+	})
+
+	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
+		Name: "btoa",
+		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			for i, arg := range args {
+				args[i] = jsvalueWrapLit(arg)
+			}
+			return callExpr(selectorExpr(ident("jsvalue"), "BtoaFunc"), args...)
+		},
+	})
 }
 
 // registerModules registers TS module → Go package mappings.

@@ -1,10 +1,22 @@
 package jsvalue
 
-import gomath "math"
+import (
+	"encoding/base64"
+	gomath "math"
+	"time"
+)
 
 var Object *JSValue
 var Array *JSValue
 var Number *JSValue
+var Symbol_ *JSValue
+var Reflect *JSValue
+var DateCtor *JSValue
+var MapCtor *JSValue
+var SetCtor *JSValue
+var Uint8ArrayCtor *JSValue
+var Atob *JSValue
+var Btoa *JSValue
 
 func init() {
 	Object = NewFunction(func(args ...*JSValue) *JSValue {
@@ -146,4 +158,106 @@ func init() {
 		}
 		return NewNumber(0)
 	}))
+
+	Symbol_ = NewFunction(func(args ...*JSValue) *JSValue {
+		desc := ""
+		if len(args) > 0 && args[0] != nil {
+			desc = args[0].String()
+		}
+		return NewSymbol(desc)
+	})
+	Symbol_.Set("hasInstance", NewSymbol("Symbol.hasInstance"))
+	Symbol_.Set("iterator", NewSymbol("Symbol.iterator"))
+	Symbol_.Set("toPrimitive", NewSymbol("Symbol.toPrimitive"))
+	Symbol_.Set("toStringTag", NewSymbol("Symbol.toStringTag"))
+	Symbol_.Set("for", NewFunction(func(args ...*JSValue) *JSValue {
+		desc := ""
+		if len(args) > 0 && args[0] != nil {
+			desc = args[0].String()
+		}
+		return NewSymbol(desc)
+	}))
+
+	Reflect = NewObject()
+	Reflect.Set("ownKeys", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) > 0 {
+			return Keys(args[0])
+		}
+		return NewArray()
+	}))
+	Reflect.Set("get", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) >= 2 {
+			return args[0].Get(PropertyKey(args[1]))
+		}
+		return NewUndefined()
+	}))
+	Reflect.Set("set", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) >= 3 {
+			args[0].Set(PropertyKey(args[1]), args[2])
+			return NewBool(true)
+		}
+		return NewBool(false)
+	}))
+	Reflect.Set("has", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) >= 2 {
+			return NewBool(args[0].HasOwnProperty(PropertyKey(args[1])))
+		}
+		return NewBool(false)
+	}))
+	Reflect.Set("apply", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) >= 3 {
+			callArgs := args[2].Array()
+			return args[0].Call(callArgs...)
+		}
+		return NewUndefined()
+	}))
+
+	DateCtor = NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) == 0 {
+			return NewString(time.Now().Format(time.RFC1123Z))
+		}
+		return NewObject()
+	})
+	DateCtor.Set("now", NewFunction(func(args ...*JSValue) *JSValue {
+		return NewNumber(float64(time.Now().UnixMilli()))
+	}))
+
+	MapCtor = NewFunction(func(args ...*JSValue) *JSValue {
+		return NewMap()
+	})
+
+	SetCtor = NewFunction(func(args ...*JSValue) *JSValue {
+		return NewSet()
+	})
+
+	Uint8ArrayCtor = NewFunction(func(args ...*JSValue) *JSValue {
+		return NewArray()
+	})
+
+	Atob = NewFunction(func(args ...*JSValue) *JSValue {
+		return AtobFunc(args...)
+	})
+
+	Btoa = NewFunction(func(args ...*JSValue) *JSValue {
+		return BtoaFunc(args...)
+	})
+}
+
+// AtobFunc decodes a base64-encoded string.
+func AtobFunc(args ...*JSValue) *JSValue {
+	if len(args) > 0 && args[0] != nil {
+		decoded, err := base64.StdEncoding.DecodeString(args[0].String())
+		if err == nil {
+			return NewString(string(decoded))
+		}
+	}
+	return NewString("")
+}
+
+// BtoaFunc encodes a string to base64.
+func BtoaFunc(args ...*JSValue) *JSValue {
+	if len(args) > 0 && args[0] != nil {
+		return NewString(base64.StdEncoding.EncodeToString([]byte(args[0].String())))
+	}
+	return NewString("")
 }

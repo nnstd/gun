@@ -97,8 +97,10 @@ func (l *Lowerer) lowerAsyncFuncBody(params []*hir.Param, body *hir.BlockStmt, a
 	entryLabel := builder.compileSeq(bodyStmts, endLabel, asyncLoopLabels{}, asyncProtected{}, asyncFinalizer{})
 
 	var stmts []ast.Stmt
-	if bindThis && hirBodyUsesThis(body) {
+	thisUsed := bindThis && hirBodyUsesThis(body)
+	if thisUsed {
 		stmts = append(stmts, l.lowerAsyncThisSetup()...)
+		argOffset++ // params start after 'this' in _args
 	}
 	stmts = append(stmts, l.lowerAsyncParamSetup(params, argOffset)...)
 	stmts = append(stmts, l.lowerAsyncLocalDecls(normalizedBody)...)

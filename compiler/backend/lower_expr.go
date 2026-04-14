@@ -562,6 +562,19 @@ func (l *Lowerer) lowerObjectPropertyValue(prop *hir.Property) ast.Expr {
 func (l *Lowerer) lowerBinaryExpr(e *hir.BinaryExpr) ast.Expr {
 	l.jsvalueImport()
 
+	// Short-circuit operators must evaluate RHS lazily when the RHS
+	// has side effects. Go evaluates function arguments eagerly, so
+	// `jsvalue.Nullish(a, sideEffect())` would run the side effect
+	// even when `a` is defined. Emit an IIFE only in that case to
+	// avoid bloating compile time on large pure expression trees
+	// (e.g. unicode data tables).
+	switch e.Op {
+	case hir.OpOr, hir.OpAnd, hir.OpNullish:
+		if hirExprHasSideEffects(e.Right) {
+			return l.lowerShortCircuitBinary(e)
+		}
+	}
+
 	left := l.lowerExpr(e.Left)
 	right := l.lowerExpr(e.Right)
 
@@ -605,6 +618,115 @@ func (l *Lowerer) lowerBinaryExpr(e *hir.BinaryExpr) ast.Expr {
 	helperName := mapBinaryOpToJSValue(e.Op)
 	return callExpr(selectorExpr(goIdent("jsvalue"), helperName),
 		jsvalueWrapLit(left), jsvalueWrapLit(right))
+}
+
+// hirExprHasSideEffects returns true when evaluating e could have an
+// observable side effect (a call, assignment, new, await, etc.). Used to
+// decide whether short-circuit operators need lazy IIFE lowering.
+func hirExprHasSideEffects(e hir.Expr) bool {
+	switch n := e.(type) {
+	case nil:
+		return false
+	case *hir.CallExpr, *hir.NewExpr, *hir.AssignExpr, *hir.UpdateExpr,
+		*hir.AwaitExpr, *hir.YieldExpr, *hir.ArrowFunc, *hir.FuncExpr, *hir.ClassExpr:
+		return true
+	case *hir.BinaryExpr:
+		return hirExprHasSideEffects(n.Left) || hirExprHasSideEffects(n.Right)
+	case *hir.UnaryExpr:
+		return hirExprHasSideEffects(n.Operand)
+	case *hir.TernaryExpr:
+		return hirExprHasSideEffects(n.Cond) || hirExprHasSideEffects(n.Then) || hirExprHasSideEffects(n.Else)
+	case *hir.MemberExpr:
+		return hirExprHasSideEffects(n.Object)
+	case *hir.ComputedMemberExpr:
+		return hirExprHasSideEffects(n.Object) || hirExprHasSideEffects(n.Property)
+	case *hir.SequenceExpr:
+		for _, x := range n.Exprs {
+			if hirExprHasSideEffects(x) {
+				return true
+			}
+		}
+		return false
+	case *hir.ParenExpr:
+		return hirExprHasSideEffects(n.Expr)
+	case *hir.TypeAssertExpr:
+		return hirExprHasSideEffects(n.Expr)
+	case *hir.NonNullExpr:
+		return hirExprHasSideEffects(n.Expr)
+	case *hir.SpreadExpr:
+		return hirExprHasSideEffects(n.Value)
+	case *hir.TemplateLiteral:
+		for _, x := range n.Parts {
+			if hirExprHasSideEffects(x) {
+				return true
+			}
+		}
+		return false
+	case *hir.ArrayLiteral:
+		for _, el := range n.Elements {
+			if hirExprHasSideEffects(el) {
+				return true
+			}
+		}
+		return false
+	case *hir.ObjectLiteral:
+		for _, p := range n.Properties {
+			if hirExprHasSideEffects(p.Value) {
+				return true
+			}
+			if p.Computed && hirExprHasSideEffects(p.Key) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// lowerShortCircuitBinary emits a lazy IIFE for ||, &&, ??. The RHS is only
+// evaluated when the LHS cannot determine the result, matching JS semantics.
+func (l *Lowerer) lowerShortCircuitBinary(e *hir.BinaryExpr) ast.Expr {
+	l.jsvalueImport()
+
+	left := jsvalueWrapLit(l.lowerExpr(e.Left))
+	right := jsvalueWrapLit(l.lowerExpr(e.Right))
+
+	// Build: if <lhsKeeps> { return _l }
+	var keepLHSCond ast.Expr
+	switch e.Op {
+	case hir.OpOr:
+		// lhs truthy → keep lhs: _l.Bool()
+		keepLHSCond = callExpr(selectorExpr(goIdent("_l"), "Bool"))
+	case hir.OpAnd:
+		// lhs falsy → keep lhs: !_l.Bool()
+		keepLHSCond = &ast.UnaryExpr{Op: token.NOT, X: callExpr(selectorExpr(goIdent("_l"), "Bool"))}
+	case hir.OpNullish:
+		// lhs not nullish → keep lhs: !jsvalue.IsNullish(_l)
+		keepLHSCond = &ast.UnaryExpr{Op: token.NOT, X: callExpr(selectorExpr(goIdent("jsvalue"), "IsNullish"), goIdent("_l"))}
+	}
+
+	body := blockStmt(
+		&ast.AssignStmt{
+			Lhs: []ast.Expr{goIdent("_l")},
+			Tok: token.DEFINE,
+			Rhs: []ast.Expr{left},
+		},
+		&ast.IfStmt{
+			Cond: keepLHSCond,
+			Body: blockStmt(returnStmt(goIdent("_l"))),
+		},
+		returnStmt(right),
+	)
+
+	return &ast.CallExpr{
+		Fun: &ast.FuncLit{
+			Type: &ast.FuncType{
+				Params:  fieldList(),
+				Results: fieldList(goField("", jsValuePtrType())),
+			},
+			Body: body,
+		},
+	}
 }
 
 func (l *Lowerer) lowerUnaryExpr(e *hir.UnaryExpr) ast.Expr {
@@ -782,6 +904,18 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 			}
 		}
 
+		// Same-package namespace method call: ns.foo(args) → DirectVar.Call(args)
+		// Resolve at compile time to avoid runtime dependency on namespace object.
+		if id, ok := mem.Object.(*hir.Identifier); ok && id.Sym != nil {
+			if res, ok := l.importedSyms[id.Sym]; ok && res.isTranspiled && res.goImportPath == "" {
+				if mapped, ok := l.importNameMap[res.modulePath+"\x00"+mem.Property]; ok {
+					l.jsvalueImport()
+					argExprs, hasSpread := l.lowerCallArgs(e.Args, true)
+					return buildCallWithSpread(selectorExpr(goIdent(mapped), "Call"), argExprs, hasSpread)
+				}
+			}
+		}
+
 		// JSValue method dispatch: obj.method(args) → obj.MethodCall("method", wrappedArgs...)
 		if l.exprIsJSValue(mem.Object) {
 			argExprs, hasSpread := l.lowerCallArgs(e.Args, true)
@@ -856,9 +990,12 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 			isJSValueFunc := false
 			if res, ok := l.importedSyms[id.Sym]; ok && res.isTranspiled {
 				isJSValueFunc = true
-			} else if id.Sym.Kind == symbol.KindVariable || id.Sym.Kind == symbol.KindParameter || id.Sym.Kind == symbol.KindFunction {
-				// In all-JSValue architecture, all functions are JSValue (except main/init)
-				if id.Sym.OriginalName != "main" && id.Sym.OriginalName != "init" {
+			} else if id.Sym.Kind == symbol.KindVariable || id.Sym.Kind == symbol.KindParameter {
+				isJSValueFunc = true
+			} else if id.Sym.Kind == symbol.KindFunction {
+				// In all-JSValue architecture, all functions are JSValue (except main/init at top level)
+				emittedName := l.emitName(id.Sym)
+				if emittedName != "main" && emittedName != "init" {
 					isJSValueFunc = true
 				}
 			}
@@ -1036,7 +1173,7 @@ func (l *Lowerer) lowerNewExpr(e *hir.NewExpr) ast.Expr {
 		arg := l.lowerExpr(a)
 		args = append(args, jsvalueWrapLit(arg))
 	}
-	return callExpr(selectorExpr(callee, "Call"), args...)
+	return callExpr(selectorExpr(callee, "New"), args...)
 }
 
 func (l *Lowerer) lowerClassExpr(e *hir.ClassExpr) ast.Expr {
@@ -1088,11 +1225,14 @@ func (l *Lowerer) lowerClassExpr(e *hir.ClassExpr) ast.Expr {
 			callExpr(selectorExpr(goIdent("jsvalue"), "NewClass"), ctorLit, parentExpr),
 		}),
 	)
+	returnVar := classVar
 	if e.Name != "" {
-		stmts = append(stmts, assignStmt([]ast.Expr{goIdent(symbol.Sanitize(e.Name))}, []ast.Expr{classVar}))
+		namedVar := goIdent(symbol.Sanitize(e.Name))
+		stmts = append(stmts, assignStmt([]ast.Expr{namedVar}, []ast.Expr{classVar}))
+		returnVar = namedVar
 	}
 	stmts = append(stmts, l.lowerClassSetups(classVar, goIdent(brandKey), e.Properties, e.Methods, e.StaticInits)...)
-	stmts = append(stmts, returnStmt(classVar))
+	stmts = append(stmts, returnStmt(returnVar))
 
 	return &ast.CallExpr{
 		Fun: &ast.FuncLit{
@@ -1267,13 +1407,17 @@ func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 		return l.lowerOptionalMember(e)
 	}
 
-	// Same-package namespace import: templates.foo → Foo (capitalized package var)
+	// Same-package namespace import: templates.foo → direct package-level var
+	// This avoids going through the namespace object (which may not be
+	// initialized yet during init()) and instead resolves at compile time.
 	if id, ok := e.Object.(*hir.Identifier); ok && id.Sym != nil {
-		if res, ok := l.importedSyms[id.Sym]; ok && res.goImportPath == "" && res.goSymbol == "" {
+		if res, ok := l.importedSyms[id.Sym]; ok && res.isTranspiled && res.goImportPath == "" {
 			if mapped, ok := l.importNameMap[res.modulePath+"\x00"+e.Property]; ok {
 				return goIdent(mapped)
 			}
-			return goIdent(symbol.Capitalize(symbol.Sanitize(e.Property)))
+			if res.goSymbol == "" {
+				return goIdent(symbol.Capitalize(symbol.Sanitize(e.Property)))
+			}
 		}
 	}
 
@@ -1485,17 +1629,23 @@ func (l *Lowerer) lowerFuncExpr(e *hir.FuncExpr) ast.Expr {
 	l.jsvalueImport()
 
 	// Regular function expressions get their own `this` binding (unlike arrow functions).
-	// If the body references `this`, use lowerMethodBody to unpack it from _args[0].
+	// If the body references `this`, use lowerMethodBody to unpack it from _args[0]
+	// and mark as method so callers (MethodCall, New) prepend `this`.
+	usesThis := e.Body != nil && hirBodyUsesThis(e.Body)
 	var body *ast.BlockStmt
 	if e.IsAsync {
-		body = l.lowerAsyncFuncBody(e.Params, e.Body, 0, e.Body != nil && hirBodyUsesThis(e.Body))
-	} else if e.Body != nil && hirBodyUsesThis(e.Body) {
+		body = l.lowerAsyncFuncBody(e.Params, e.Body, 0, usesThis)
+	} else if usesThis {
 		body = l.lowerMethodBody(e.Params, e.Body)
 	} else {
 		body = l.lowerFuncBody(e.Params, e.Body)
 	}
 	fnLit := l.wrapAsJSValueFunc(e.Params, body)
-	return callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), fnLit)
+	newFunc := callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), fnLit)
+	if usesThis {
+		return callExpr(selectorExpr(newFunc, "MarkAsMethod"))
+	}
+	return newFunc
 }
 
 func (l *Lowerer) lowerSequenceExpr(e *hir.SequenceExpr) ast.Expr {

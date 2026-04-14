@@ -380,6 +380,43 @@ func (v *JSValue) Call(args ...*JSValue) *JSValue {
 	return NewUndefined()
 }
 
+// New simulates JavaScript's `new func(args)` semantics.
+// For class constructors (created via NewClass), delegates to Call which already
+// creates a fresh instance. For method-marked functions (regular functions that
+// use `this`), creates a fresh object and prepends it as _args[0] so the function
+// can extract it as `this`. For other functions, just calls normally.
+func (v *JSValue) New(args ...*JSValue) *JSValue {
+	if v == nil {
+		return NewUndefined()
+	}
+	// Classes already handle new semantics in their Call
+	if v.classInit != nil {
+		return v.Call(args...)
+	}
+	if v.funcVal != nil {
+		// Method-marked function: expects this as _args[0]
+		if v.isMethod {
+			this := NewObject()
+			allArgs := make([]*JSValue, 0, 1+len(args))
+			allArgs = append(allArgs, this)
+			allArgs = append(allArgs, args...)
+			result := v.Call(allArgs...)
+			// If function returns an object, use it; otherwise use `this`
+			if result != nil && result.typ == TypeObject {
+				return result
+			}
+			return this
+		}
+		// Non-method function: call normally, return result or fresh object
+		result := v.Call(args...)
+		if result != nil && result.typ == TypeObject {
+			return result
+		}
+		return NewObject()
+	}
+	return NewUndefined()
+}
+
 // MethodCall invokes a method on a JSValue object with the given arguments.
 // For class methods (marked with MarkAsMethod), prepends the receiver as 'this'
 // so the method can extract it from _args[0]. For plain functions, passes
@@ -697,6 +734,12 @@ func Nullish(a, b *JSValue) *JSValue {
 		return b
 	}
 	return a
+}
+
+// IsNullish returns true if v is nil, undefined, or null. Used by transpiled
+// short-circuit lowerings to avoid evaluating the RHS when LHS is defined.
+func IsNullish(v *JSValue) bool {
+	return v == nil || v.typ == TypeUndefined || v.typ == TypeNull
 }
 
 // ---------------------------------------------------------------------------

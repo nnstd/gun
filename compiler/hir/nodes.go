@@ -218,6 +218,7 @@ type ExportDecl struct {
 	Names []ExportName
 	// For re-exports: export * from "mod"
 	FromModule string
+	IsWildcard bool // true for `export * from "mod"` (wildcard re-export)
 }
 
 // ExportName is a single name in an export clause.

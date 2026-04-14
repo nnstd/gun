@@ -410,7 +410,7 @@ func TestRoundTripPrivateClassExpression(t *testing.T) {
 		};
 	`)
 	assertContains(t, out, `PropertyKey(jsvalue.NewSymbol("Box.#value"))`)
-	assertContains(t, out, `return _class`)
+	assertContains(t, out, `return Box`)
 	assertNotContains(t, out, `Get("#value")`)
 	assertNotContains(t, out, `Set("#value"`)
 }

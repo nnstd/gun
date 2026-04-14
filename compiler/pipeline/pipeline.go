@@ -268,6 +268,13 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 			globalUsedAliases[name] = 1
 		}
 	}
+	// Phase 2c: Resolve re-export aliases transitively.
+	// Barrel files re-export from content files. Their aliases (e.g.
+	// V4_core_index__constructor) are set in init(), creating ordering issues.
+	// Resolve each barrel's alias to the ultimate source file's alias so
+	// importers reference the original package-level variable directly.
+	resolveReexportAliases(hirModules, exportAliases, files, entryFile)
+
 	for fileName, hirMod := range hirModules {
 		localAliases[fileName] = collectTopLevelAliases(hirMod, fileName, entryFile, exportAliases[fileName], globalUsedAliases)
 	}
@@ -354,6 +361,17 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 
 	backend.BreakPackageInitCycles(goFiles)
 
+	// Detect barrel files (files that are predominantly re-exports from other
+	// same-package files). Their init() functions depend on source files' init()
+	// having run first. Go runs init() in alphabetical file order, so we prefix
+	// barrel file output names with "zz_" to ensure they sort last.
+	barrelFiles := make(map[string]bool)
+	for name, hirMod := range hirModules {
+		if isBarrelFile(hirMod, files) {
+			barrelFiles[name] = true
+		}
+	}
+
 	for name, goFile := range goFiles {
 		hirMod := hirModules[name]
 		out, err := backend.GenerateWithSource(goFile, hirMod.SourcePath, hirMod.SourceSize)
@@ -366,10 +384,129 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 			out = renameDefaultExport(out, name)
 		}
 
-		results[name] = out
+		// Rename barrel files so their init() runs after content files
+		outName := name
+		if barrelFiles[name] {
+			dir := filepath.Dir(name)
+			base := filepath.Base(name)
+			outName = filepath.Join(dir, "zz_"+base)
+		}
+		results[outName] = out
 	}
 
 	return results, nil
+}
+
+// isBarrelFile returns true if a module is predominantly re-exports from other
+// same-package files (e.g. an index.ts that does `export * from "./schemas"`).
+// These files' init() must run AFTER the files they re-export from.
+func isBarrelFile(mod *hir.Module, allFiles map[string][]byte) bool {
+	var reexportCount, contentCount int
+	for _, decl := range mod.Declarations {
+		switch d := decl.(type) {
+		case *hir.ExportDecl:
+			if d.FromModule != "" && strings.HasPrefix(d.FromModule, ".") {
+				// Re-export from same-package file
+				target := resolvePackageImportFile(mod.SourcePath, d.FromModule, allFiles)
+				if target != "" {
+					reexportCount++
+					continue
+				}
+			}
+			if d.Decl != nil {
+				contentCount++
+			}
+		case *hir.ImportDecl:
+			// Imports don't count as content
+		default:
+			contentCount++
+		}
+	}
+	// A barrel file has re-exports and very little original content
+	return reexportCount > 0 && reexportCount >= contentCount
+}
+
+// resolveReexportAliases rewrites barrel file export aliases to point directly
+// to the original source file's aliases. This avoids init-ordering problems
+// where a barrel file's init() sets re-export variables that other files need.
+//
+// For example, if core/index.js re-exports $constructor from core/core.js,
+// instead of V4_core_index__constructor (set in barrel's init()),
+// importers get V4_core_core__constructor (set at package level).
+func resolveReexportAliases(hirModules map[string]*hir.Module, exportAliases map[string]map[string]string, files map[string][]byte, entryFile string) {
+	// Build a map of which exports are re-exports and where they come from.
+	// reexportSource[file][exportName] = sourceFile
+	type source struct {
+		file, name string
+	}
+	reexportSource := make(map[string]map[string]source)
+
+	for fileName, mod := range hirModules {
+		for _, decl := range mod.Declarations {
+			ex, ok := decl.(*hir.ExportDecl)
+			if !ok || ex.FromModule == "" || !strings.HasPrefix(ex.FromModule, ".") {
+				continue
+			}
+			target := resolvePackageImportFile(fileName, ex.FromModule, files)
+			if target == "" {
+				continue
+			}
+			if reexportSource[fileName] == nil {
+				reexportSource[fileName] = make(map[string]source)
+			}
+			for _, n := range ex.Names {
+				if n.LocalName == "*" {
+					continue
+				}
+				reexportSource[fileName][n.ExportedName] = source{target, n.LocalName}
+			}
+		}
+	}
+
+	// Resolve transitively: chase re-export chains to find ultimate source.
+	resolve := func(file, exportName string) (string, string) {
+		visited := make(map[string]bool)
+		for {
+			key := file + "\x00" + exportName
+			if visited[key] {
+				break
+			}
+			visited[key] = true
+			src, ok := reexportSource[file]
+			if !ok {
+				break
+			}
+			s, ok := src[exportName]
+			if !ok {
+				break
+			}
+			file = s.file
+			exportName = s.name
+		}
+		return file, exportName
+	}
+
+	// Rewrite barrel file aliases to point to source aliases.
+	// Skip the entry file — its aliases are the package's public API.
+	for fileName, aliases := range exportAliases {
+		if fileName == entryFile {
+			continue
+		}
+		if reexportSource[fileName] == nil {
+			continue
+		}
+		for exportName := range aliases {
+			srcFile, srcExportName := resolve(fileName, exportName)
+			if srcFile == fileName {
+				continue
+			}
+			if srcAliases := exportAliases[srcFile]; srcAliases != nil {
+				if srcAlias := srcAliases[srcExportName]; srcAlias != "" {
+					aliases[exportName] = srcAlias
+				}
+			}
+		}
+	}
 }
 
 // fileDefaultName generates a file-specific name for renamed default exports.
@@ -431,7 +568,7 @@ func expandWildcardReexports(mods map[string]*hir.Module, allExports map[string]
 			}
 			for _, decl := range mod.Declarations {
 				ex, ok := decl.(*hir.ExportDecl)
-				if !ok || ex.FromModule == "" || len(ex.Names) != 0 || !strings.HasPrefix(ex.FromModule, ".") {
+				if !ok || ex.FromModule == "" || !ex.IsWildcard || !strings.HasPrefix(ex.FromModule, ".") {
 					continue
 				}
 				target := resolvePackageImportFile(fileName, ex.FromModule, files)

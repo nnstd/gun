@@ -235,38 +235,59 @@ func (b *Builder) buildDeclarator(node *sitter.Node, exported bool) *Declarator 
 	nameNode := node.ChildByFieldName("name")
 	valueNode := node.ChildByFieldName("value")
 
-	var init Expr
-	if valueNode != nil {
-		init = b.buildExpr(valueNode)
-	}
-
 	if nameNode == nil {
-		return nil
+		var init Expr
+		if valueNode != nil {
+			init = b.buildExpr(valueNode)
+		}
+		return &Declarator{Init: init}
 	}
 
 	switch nameNode.Kind() {
 	case "identifier":
 		name := b.nodeText(nameNode)
-		sym := b.symtab.LookupLocal(name)
+		var sym *symbol.Symbol
+		if b.symtab.IsGlobalScope() {
+			sym = b.symtab.LookupLocal(name)
+		}
 		if sym == nil {
 			sym = b.symtab.Define(name, symbol.KindVariable)
 		}
 		sym.Exported = exported
+		var init Expr
+		if valueNode != nil {
+			init = b.buildExpr(valueNode)
+		}
 		return &Declarator{Symbol: sym, Init: init}
 	case "object_pattern":
+		var init Expr
+		if valueNode != nil {
+			init = b.buildExpr(valueNode)
+		}
 		pat := b.buildObjectPattern(nameNode)
 		return &Declarator{Pattern: pat, Init: init}
 	case "array_pattern":
+		var init Expr
+		if valueNode != nil {
+			init = b.buildExpr(valueNode)
+		}
 		pat := b.buildArrayPattern(nameNode)
 		return &Declarator{Pattern: pat, Init: init}
 	default:
 		// Fallback: treat as identifier
 		name := b.nodeText(nameNode)
-		sym := b.symtab.LookupLocal(name)
+		var sym *symbol.Symbol
+		if b.symtab.IsGlobalScope() {
+			sym = b.symtab.LookupLocal(name)
+		}
 		if sym == nil {
 			sym = b.symtab.Define(name, symbol.KindVariable)
 		}
 		sym.Exported = exported
+		var init Expr
+		if valueNode != nil {
+			init = b.buildExpr(valueNode)
+		}
 		return &Declarator{Symbol: sym, Init: init}
 	}
 }
@@ -277,7 +298,10 @@ func (b *Builder) buildClassDecl(node *sitter.Node, exported bool) *ClassDecl {
 		return nil
 	}
 	name := b.nodeText(nameNode)
-	sym := b.symtab.LookupLocal(name)
+	var sym *symbol.Symbol
+	if b.symtab.IsGlobalScope() {
+		sym = b.symtab.LookupLocal(name)
+	}
 	if sym == nil {
 		sym = b.symtab.Define(name, symbol.KindClass)
 	}
@@ -433,7 +457,10 @@ func (b *Builder) buildEnumDecl(node *sitter.Node, exported bool) *EnumDecl {
 		return nil
 	}
 	name := b.nodeText(nameNode)
-	sym := b.symtab.LookupLocal(name)
+	var sym *symbol.Symbol
+	if b.symtab.IsGlobalScope() {
+		sym = b.symtab.LookupLocal(name)
+	}
 	if sym == nil {
 		sym = b.symtab.Define(name, symbol.KindEnum)
 	}
@@ -490,7 +517,10 @@ func (b *Builder) buildInterfaceDecl(node *sitter.Node, exported bool) *Interfac
 		return nil
 	}
 	name := b.nodeText(nameNode)
-	sym := b.symtab.LookupLocal(name)
+	var sym *symbol.Symbol
+	if b.symtab.IsGlobalScope() {
+		sym = b.symtab.LookupLocal(name)
+	}
 	if sym == nil {
 		sym = b.symtab.Define(name, symbol.KindType)
 	}
@@ -554,7 +584,10 @@ func (b *Builder) buildTypeAliasDecl(node *sitter.Node, exported bool) *TypeAlia
 		return nil
 	}
 	name := b.nodeText(nameNode)
-	sym := b.symtab.LookupLocal(name)
+	var sym *symbol.Symbol
+	if b.symtab.IsGlobalScope() {
+		sym = b.symtab.LookupLocal(name)
+	}
 	if sym == nil {
 		sym = b.symtab.Define(name, symbol.KindType)
 	}
@@ -699,6 +732,7 @@ func (b *Builder) buildExport(mod *Module, node *sitter.Node) {
 				sourceNode := node.ChildByFieldName("source")
 				mod.Declarations = append(mod.Declarations, &ExportDecl{
 					FromModule: strings.Trim(b.nodeText(sourceNode), "'\""),
+					IsWildcard: true,
 				})
 				return
 			}

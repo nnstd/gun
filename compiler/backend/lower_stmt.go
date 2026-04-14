@@ -3,6 +3,7 @@ package backend
 import (
 	"go/ast"
 	"go/token"
+	"strconv"
 
 	"github.com/nnstd/gun/compiler/hir"
 )
@@ -915,13 +916,30 @@ func (l *Lowerer) lowerAssignStmt(assign *hir.AssignExpr) ast.Stmt {
 // lowerUpdateStmt handles update expressions (x++, x--) as statements.
 func (l *Lowerer) lowerUpdateStmt(update *hir.UpdateExpr) ast.Stmt {
 	l.jsvalueImport()
-	operand := l.lowerExpr(update.Operand)
-	if update.Op == hir.OpInc {
-		return assignStmt([]ast.Expr{operand},
-			[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "Inc"), operand)})
+	helperName := "Inc"
+	if update.Op != hir.OpInc {
+		helperName = "Dec"
 	}
+	// For member expression operands (obj.prop++ or obj[key]++),
+	// generate obj.Set(prop, jsvalue.Inc(obj.Get(prop))) instead of
+	// obj.Get(prop) = jsvalue.Inc(...) which is invalid Go.
+	if mem, ok := update.Operand.(*hir.MemberExpr); ok {
+		obj := l.lowerExpr(mem.Object)
+		prop := mem.Property
+		getExpr := callExpr(selectorExpr(obj, "Get"), &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(prop)})
+		incExpr := callExpr(selectorExpr(goIdent("jsvalue"), helperName), getExpr)
+		return exprStmt(callExpr(selectorExpr(obj, "Set"), &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(prop)}, incExpr))
+	}
+	if cmem, ok := update.Operand.(*hir.ComputedMemberExpr); ok {
+		obj := l.lowerExpr(cmem.Object)
+		prop := l.lowerExpr(cmem.Property)
+		getExpr := callExpr(selectorExpr(obj, "Get"), callExpr(selectorExpr(goIdent("fmt"), "Sprint"), prop))
+		incExpr := callExpr(selectorExpr(goIdent("jsvalue"), helperName), getExpr)
+		return exprStmt(callExpr(selectorExpr(obj, "Set"), callExpr(selectorExpr(goIdent("fmt"), "Sprint"), prop), incExpr))
+	}
+	operand := l.lowerExpr(update.Operand)
 	return assignStmt([]ast.Expr{operand},
-		[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "Dec"), operand)})
+		[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), helperName), operand)})
 }
 
 // stripTopLevelReturns removes return values from return statements at the

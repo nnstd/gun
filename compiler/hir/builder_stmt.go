@@ -116,18 +116,41 @@ func (b *Builder) buildStmt(node *sitter.Node) Stmt {
 
 	case "function_declaration":
 		// Function declaration inside a block — treat as local function variable
+		// Use FuncExpr (NOT ArrowFunc) because regular functions have their own
+		// `this` binding, whereas arrow functions inherit `this` from enclosing scope.
 		if d := b.buildFuncDecl(node, false); d != nil {
 			// Convert to a VarDecl with function value
 			return &VarDecl{
 				Kind: VarLet,
 				Declarators: []*Declarator{{
 					Symbol: d.Symbol,
-					Init: &ArrowFunc{
+					Init: &FuncExpr{
 						Params:  d.Params,
 						Body:    d.Body,
 						IsAsync: d.IsAsync,
 						Span:    d.Span,
 					},
+				}},
+			}
+		}
+		return nil
+
+	case "class_declaration", "abstract_class_declaration":
+		// Class declaration inside a block — treat as local class variable
+		if d := b.buildClassDecl(node, false); d != nil {
+			classExpr := &ClassExpr{
+				Name:        d.Symbol.OriginalName,
+				Parent:      d.Parent,
+				Properties:  d.Properties,
+				Methods:     d.Methods,
+				Constructor: d.Constructor,
+				StaticInits: d.StaticInits,
+			}
+			return &VarDecl{
+				Kind: VarLet,
+				Declarators: []*Declarator{{
+					Symbol: d.Symbol,
+					Init:   classExpr,
 				}},
 			}
 		}

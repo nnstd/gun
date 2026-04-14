@@ -50,8 +50,9 @@ type Lowerer struct {
 	namespaceAlias    string
 	namespaceEntries  map[string]string
 	topLevelNames     map[string]string
-	eagerVarInits     map[symbol.ID]bool
-	crossFileExports  map[string]bool // Go names from other files (prevents .Get() dispatch)
+	eagerVarInits      map[symbol.ID]bool
+	emittedExportNames map[string]bool
+	crossFileExports   map[string]bool // Go names from other files (prevents .Get() dispatch)
 	initStmts         []ast.Stmt      // statements for init() function
 	pkgName           string          // Go package name
 	currentClassName  string          // set during class constructor/method lowering
@@ -96,8 +97,9 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 		namespaceAlias:   namespaceAlias,
 		namespaceEntries: namespaceEntries,
 		topLevelNames:    make(map[string]string),
-		eagerVarInits:    make(map[symbol.ID]bool),
-		crossFileExports: cfe,
+		eagerVarInits:      make(map[symbol.ID]bool),
+		emittedExportNames: make(map[string]bool),
+		crossFileExports:   cfe,
 		pkgName:          mod.Package,
 		varTypes:         make(map[string]string),
 		sourcePath:       mod.SourcePath,
@@ -128,16 +130,22 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 		l.decls = append(l.decls, varDecl("Default", nil, goIdent(mod.SynthesizeDefault)))
 	}
 
-	if l.namespaceAlias != "" && len(l.namespaceEntries) > 0 {
+	if l.namespaceAlias != "" {
 		l.jsvalueImport()
 		props := make([]ast.Expr, 0, len(l.namespaceEntries))
 		for exportName, alias := range l.namespaceEntries {
 			props = append(props, &ast.KeyValueExpr{Key: stringLit(exportName), Value: goIdent(alias)})
 		}
-		l.decls = append(l.decls, varDecl(l.namespaceAlias, nil, callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), &ast.CompositeLit{
-			Type: &ast.MapType{Key: goIdent("string"), Value: &ast.InterfaceType{Methods: &ast.FieldList{}}},
-			Elts: props,
-		})))
+		// Declare namespace var, but initialize in init() so all referenced vars
+		// (which may themselves be set in init()) are available.
+		l.decls = append(l.decls, varDecl(l.namespaceAlias, jsValuePtrType(), nil))
+		l.initStmts = append(l.initStmts, assignStmt(
+			[]ast.Expr{goIdent(l.namespaceAlias)},
+			[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), &ast.CompositeLit{
+				Type: &ast.MapType{Key: goIdent("string"), Value: &ast.InterfaceType{Methods: &ast.FieldList{}}},
+				Elts: props,
+			})},
+		))
 	}
 
 	// Fix init cycles: split self-referencing vars into forward decl + init()
@@ -264,8 +272,14 @@ func (l *Lowerer) lowerDecl(d hir.Decl) {
 func (l *Lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 	name := l.emitName(d.Symbol)
 
-	// main and init stay as Go func declarations
-	if name == "main" || name == "init" {
+	// main and init stay as Go func declarations.
+	// Check OriginalName because Sanitize may rename "init" → "init_".
+	origName := name
+	if d.Symbol != nil {
+		origName = d.Symbol.OriginalName
+	}
+	if origName == "main" || origName == "init" {
+		name = origName // Use the original name for Go func declaration
 		body := l.lowerBlock(d.Body)
 		if d.IsAsync {
 			asyncName := l.nextSyntheticName("_" + name + "_async")
@@ -808,6 +822,9 @@ func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 		if alias, ok := l.exportAliasMap[n.ExportedName]; ok {
 			goName = alias
 		}
+		if l.emittedExportNames[goName] {
+			continue
+		}
 		var rhs ast.Expr = goIdent(symbol.Sanitize(n.LocalName))
 		var sym *symbol.Symbol
 		mappedFromModule := false
@@ -836,9 +853,32 @@ func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 			l.jsvalueImport()
 			l.decls = append(l.decls, varDecl(goName, jsValuePtrType(), nil))
 			l.initStmts = append(l.initStmts, assignStmt([]ast.Expr{goIdent(goName)}, []ast.Expr{rhs}))
+			l.emittedExportNames[goName] = true
 			continue
 		}
+		// Re-export aliases from other modules: defer to init() because
+		// the referenced var may itself be set in init().
+		if mappedFromModule {
+			l.jsvalueImport()
+			l.decls = append(l.decls, varDecl(goName, jsValuePtrType(), nil))
+			l.initStmts = append(l.initStmts, assignStmt([]ast.Expr{goIdent(goName)}, []ast.Expr{rhs}))
+			l.emittedExportNames[goName] = true
+			continue
+		}
+		// Imported symbols (e.g. `import * as z; export { z }`) that resolve
+		// to cross-file variables must also be deferred, since the target
+		// variable may only be set in another file's init().
+		if sym != nil && sym.Kind == symbol.KindImport {
+			if _, isImported := l.importedSyms[sym]; isImported {
+				l.jsvalueImport()
+				l.decls = append(l.decls, varDecl(goName, jsValuePtrType(), nil))
+				l.initStmts = append(l.initStmts, assignStmt([]ast.Expr{goIdent(goName)}, []ast.Expr{rhs}))
+				l.emittedExportNames[goName] = true
+				continue
+			}
+		}
 		l.decls = append(l.decls, varDecl(goName, nil, rhs))
+		l.emittedExportNames[goName] = true
 	}
 }
 
@@ -907,7 +947,21 @@ func (l *Lowerer) lowerExportDefault(d *hir.ExportDecl) {
 			if alias, ok := l.exportAliasMap["default"]; ok {
 				defaultName = alias
 			}
-			l.decls = append(l.decls, varDecl(defaultName, nil, value))
+			// If the default export references an imported symbol, defer to
+			// init() since the target may only be set in another file's init().
+			deferToInit := false
+			if ident, ok := decl.Init.(*hir.Identifier); ok && ident.Sym != nil {
+				if _, isImported := l.importedSyms[ident.Sym]; isImported {
+					deferToInit = true
+				}
+			}
+			if deferToInit {
+				l.jsvalueImport()
+				l.decls = append(l.decls, varDecl(defaultName, jsValuePtrType(), nil))
+				l.initStmts = append(l.initStmts, assignStmt([]ast.Expr{goIdent(defaultName)}, []ast.Expr{value}))
+			} else {
+				l.decls = append(l.decls, varDecl(defaultName, nil, value))
+			}
 			return
 		}
 	default:
@@ -2417,6 +2471,8 @@ func hirBodyUsesThis(body *hir.BlockStmt) bool {
 			}
 		case *hir.UpdateExpr:
 			walk(e.Operand)
+		case *hir.AwaitExpr:
+			walk(e.Value)
 		case *hir.ArrowFunc:
 			if e.Body != nil {
 				for _, st := range e.Body.Stmts {

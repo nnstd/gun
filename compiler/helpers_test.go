@@ -248,7 +248,8 @@ func TestCompilePackageSanitizesDollarExportsOnNamespaceImport(t *testing.T) {
 		t.Fatalf("expected package compile success, got %v", err)
 	}
 	got := string(out["entry.ts"])
-	assertContains(t, got, `return Util_namespace.Get("$foo")`)
+	// Direct symbol resolution avoids namespace-init ordering hazards.
+	assertContains(t, got, `return jsvalue.From(Util__foo)`)
 }
 
 func TestCompilePackageWithOptLevelSupportsAsyncFunctionDeclarationPhase1(t *testing.T) {

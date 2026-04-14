@@ -71,6 +71,8 @@ var goKeywords = map[string]bool{
 	"append": true, "cap": true, "close": true, "complex": true, "copy": true,
 	"delete": true, "imag": true, "len": true, "make": true, "new": true,
 	"panic": true, "print": true, "println": true, "real": true, "recover": true,
+	// Special identifiers
+	"_": true, "init": true, "_args": true, "_recv": true,
 }
 
 // Sanitize converts a raw identifier to a valid Go identifier.

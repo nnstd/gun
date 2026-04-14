@@ -315,7 +315,7 @@ func (b *Builder) buildObjectLiteral(node *sitter.Node) *ObjectLiteral {
 			ol.Properties = append(ol.Properties, &Property{
 				KeyName: name,
 				Key:     &Literal{Kind: LitString, Value: name},
-				Value:   &ArrowFunc{Params: params, Body: body, IsAsync: isAsync, Span: b.span(child)},
+				Value:   &FuncExpr{Params: params, Body: body, IsAsync: isAsync, Span: b.span(child)},
 				Method:  true,
 			})
 		case "spread_element":
