@@ -422,4 +422,21 @@ func initStringPrototype() {
 		}
 		return NewNumber(float64(runes[idx]))
 	})
+	defMethod(StringPrototype, "at", func(args ...*JSValue) *JSValue {
+		if len(args) < 1 || args[0] == nil {
+			return NewUndefined()
+		}
+		s := []rune(args[0].String())
+		idx := 0
+		if len(args) > 1 && args[1] != nil {
+			idx = int(args[1].Number())
+		}
+		if idx < 0 {
+			idx = len(s) + idx
+		}
+		if idx < 0 || idx >= len(s) {
+			return NewUndefined()
+		}
+		return NewString(string(s[idx]))
+	})
 }

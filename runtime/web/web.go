@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
+	jsonpkg "github.com/nnstd/gun/runtime/builtin/json"
+	"github.com/nnstd/gun/runtime/promise"
 )
 
 var Headers = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSValue) *jsvalue.JSValue {
@@ -178,15 +180,16 @@ func init() {
 
 	Request.Get("prototype").Set("text", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		if len(args) < 1 || args[0] == nil {
-			return jsvalue.NewString("")
+			return promise.Promise.Get("resolve").Call(jsvalue.NewString(""))
 		}
-		return jsvalue.NewString(args[0].Get("body").String())
+		return promise.Promise.Get("resolve").Call(jsvalue.NewString(args[0].Get("body").String()))
 	}).MarkAsMethod())
 	Request.Get("prototype").Set("json", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		if len(args) < 1 || args[0] == nil {
-			return jsvalue.NewUndefined()
+			return promise.Promise.Get("resolve").Call(jsvalue.NewUndefined())
 		}
-		return jsvalue.NewString(args[0].Get("body").String())
+		parsed := jsonpkg.Parse(jsvalue.NewString(args[0].Get("body").String()))
+		return promise.Promise.Get("resolve").Call(jsvalue.From(parsed))
 	}).MarkAsMethod())
 
 	Response.Get("prototype").Set("text", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {

@@ -99,9 +99,12 @@ func initFunctionPrototype() {
 		if origFn == nil || origFn.funcVal == nil {
 			return NewUndefined()
 		}
+		isMethod := origFn.isMethod
 		return NewFunction(func(callArgs ...*JSValue) *JSValue {
 			all := make([]*JSValue, 0, 1+len(boundArgs)+len(callArgs))
-			all = append(all, thisArg)
+			if isMethod {
+				all = append(all, thisArg)
+			}
 			all = append(all, boundArgs...)
 			all = append(all, callArgs...)
 			return origFn.funcVal(all...)

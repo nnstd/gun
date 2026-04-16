@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"strconv"
 	"syscall"
+	"sync"
 	"time"
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
 	error "github.com/nnstd/gun/runtime/builtin/error"
 	"github.com/nnstd/gun/runtime/eventloop"
+	"github.com/nnstd/gun/runtime/promise"
 	"github.com/nnstd/gun/runtime/web"
 )
 
@@ -86,10 +88,14 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 	serverObj.Set("port", jsvalue.NewNumber(float64(actualPort)))
 	serverObj.Set("url", jsvalue.NewString(fmt.Sprintf("http://127.0.0.1:%d", actualPort)))
 
+	var fetchMu sync.Mutex
 	server := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fetchMu.Lock()
+			defer fetchMu.Unlock()
 			req := web.RequestFromHTTP(r)
 			res := fetch.Call(req, serverObj)
+			res = promise.Await(res)
 			web.WriteResponse(w, res)
 		}),
 	}

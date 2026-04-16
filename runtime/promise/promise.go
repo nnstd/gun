@@ -49,6 +49,19 @@ func isPromise(v *jsvalue.JSValue) bool {
 	return v != nil && jsvalue.InstanceOf(v, Promise).Bool()
 }
 
+// Await unwraps a resolved Promise, returning its value directly.
+// If the value is not a Promise, returns it unchanged.
+// If the Promise is pending, returns nil.
+func Await(v *jsvalue.JSValue) *jsvalue.JSValue {
+	if !isPromise(v) {
+		return v
+	}
+	if getState(v) != stateFulfilled {
+		return nil
+	}
+	return v.Get(promiseValueKey)
+}
+
 func thenMethod(v *jsvalue.JSValue) *jsvalue.JSValue {
 	if v == nil {
 		return nil
