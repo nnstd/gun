@@ -12,6 +12,7 @@ import (
 	"time"
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
+	"github.com/nnstd/gun/runtime/eventloop"
 	"github.com/nnstd/gun/runtime/web"
 )
 
@@ -88,17 +89,17 @@ func TestWriteResponseFromFetchResult(t *testing.T) {
 	_ = req
 }
 
-func TestWaitReturnsWhenNoActiveServers(t *testing.T) {
+func TestEventLoopRunReturnsWhenNoActiveServers(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
-		Wait()
+		eventloop.Default.Run()
 		close(done)
 	}()
 
 	select {
 	case <-done:
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("Wait blocked with no active servers")
+		t.Fatal("eventloop.Run blocked with no active servers")
 	}
 }
 

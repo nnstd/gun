@@ -249,6 +249,23 @@ func registerGlobalFunctions(ctx *tcontext.TranspilerContext) {
 		},
 	})
 
+	// Timer functions: setTimeout, setInterval, setImmediate, clearTimeout, clearInterval, clearImmediate
+	for _, timerFn := range []string{"setTimeout", "setInterval", "setImmediate", "clearTimeout", "clearInterval", "clearImmediate"} {
+		fn := timerFn
+		goFn := capitalize(fn)
+		ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
+			Name: fn,
+			Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+				imp.AddAliasedImport("github.com/nnstd/gun/runtime/eventloop", "eventloop")
+				wrapped := make([]ast.Expr, len(args))
+				for i, a := range args {
+					wrapped[i] = jsvalueWrapLit(a)
+				}
+				return callExpr(selectorExpr(ident("eventloop"), goFn), wrapped...)
+			},
+		})
+	}
+
 	for _, fnName := range []string{"decodeURI", "decodeURIComponent", "encodeURI"} {
 		name := fnName
 		ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{

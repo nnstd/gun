@@ -7,19 +7,16 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"sync"
 	"syscall"
 	"time"
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
 	error "github.com/nnstd/gun/runtime/builtin/error"
+	"github.com/nnstd/gun/runtime/eventloop"
 	"github.com/nnstd/gun/runtime/web"
 )
 
 var (
-	mu        sync.Mutex
-	active    int
-	waitCh    chan struct{}
 	listenFn  = net.Listen
 	AsJSValue = func() *jsvalue.JSValue {
 		obj := jsvalue.NewObject()
@@ -97,54 +94,20 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 		}),
 	}
 
-	registerActive()
+	eventloop.Default.RegisterServer()
 
 	serverObj.Set("stop", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_ = server.Shutdown(ctx)
 		_ = listener.Close()
-		unregisterActive()
 		return jsvalue.NewUndefined()
 	}))
 
 	go func() {
-		defer unregisterActive()
+		defer eventloop.Default.UnregisterServer()
 		_ = server.Serve(listener)
 	}()
 
 	return serverObj
-}
-
-func Wait() {
-	mu.Lock()
-	ch := waitCh
-	if active == 0 || ch == nil {
-		mu.Unlock()
-		return
-	}
-	mu.Unlock()
-	<-ch
-}
-
-func registerActive() {
-	mu.Lock()
-	defer mu.Unlock()
-	if active == 0 {
-		waitCh = make(chan struct{})
-	}
-	active++
-}
-
-func unregisterActive() {
-	mu.Lock()
-	defer mu.Unlock()
-	if active == 0 {
-		return
-	}
-	active--
-	if active == 0 && waitCh != nil {
-		close(waitCh)
-		waitCh = nil
-	}
 }

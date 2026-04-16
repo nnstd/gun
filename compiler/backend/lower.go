@@ -154,9 +154,11 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 	// Ensure main() exists for runnable packages
 	if mod.Package == "main" {
 		l.getOrCreateMain()
-		l.addImport("github.com/nnstd/gun/runtime/bun")
+		l.addAliasedImport("github.com/nnstd/gun/runtime/eventloop", "eventloop")
 		if mainFn := l.findMainFunc(); mainFn != nil {
-			mainFn.Body.List = append(mainFn.Body.List, exprStmt(callExpr(selectorExpr(goIdent("bun"), "Wait"))))
+			mainFn.Body.List = append(mainFn.Body.List, exprStmt(callExpr(
+				selectorExpr(selectorExpr(goIdent("eventloop"), "Default"), "Run"),
+			)))
 		}
 	}
 
