@@ -6,7 +6,6 @@ import (
 	"net"
 	"strconv"
 	"syscall"
-	"sync"
 
 	"github.com/valyala/fasthttp"
 
@@ -87,15 +86,15 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 	serverObj.Set("port", jsvalue.NewNumber(float64(actualPort)))
 	serverObj.Set("url", jsvalue.NewString(fmt.Sprintf("http://127.0.0.1:%d", actualPort)))
 
-	// fetchMu serializes all JS execution within the HTTP handler.
-	// JS is single-threaded by spec — concurrent access to JSValue maps,
-	// closures, and global state would cause data races without this lock.
-	var fetchMu sync.Mutex
-
+	// JSValues are self-locking via per-object RWMutex — no global mutex needed.
 	server := &fasthttp.Server{
 		Handler: func(ctx *fasthttp.RequestCtx) {
-			fetchMu.Lock()
-			defer fetchMu.Unlock()
+			defer func() {
+				if r := recover(); r != nil {
+					ctx.SetStatusCode(500)
+					ctx.SetBodyString("Internal Server Error")
+				}
+			}()
 			req := web.RequestFromFastHTTP(ctx)
 			res := fetch.Call(req, serverObj)
 			res = promise.Await(res)

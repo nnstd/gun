@@ -26,7 +26,6 @@ import (
 	"math"
 	"strconv"
 	"strings"
-
 	"github.com/nnstd/gun/compiler/hir"
 	"github.com/nnstd/gun/compiler/symbol"
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
@@ -737,24 +736,23 @@ func (interp *Interpreter) evalFuncDecl(params []*hir.Param, body *hir.BlockStmt
 	superVal := interp.superVal
 
 	return jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
-		savedScopes := interp.scopes
-		savedGlobals := interp.globals
-		savedThis := interp.thisVal
-		savedSuper := interp.superVal
+		// Per-call child interpreter: avoids shared mutable state.
+		// Safe for concurrent calls (no mutex) and nested calls (no deadlock).
+		child := &Interpreter{
+			globals:  capturedGlobals,
+			thisVal:  thisVal,
+			superVal: superVal,
+		}
+		child.scopes = make([]map[symbol.ID]*jsvalue.JSValue, len(capturedScopes))
+		for i, s := range capturedScopes {
+			cs := make(map[symbol.ID]*jsvalue.JSValue, len(s))
+			for k, v := range s {
+				cs[k] = v
+			}
+			child.scopes[i] = cs
+		}
 
-		interp.scopes = capturedScopes
-		interp.globals = capturedGlobals
-		interp.thisVal = thisVal
-		interp.superVal = superVal
-		defer func() {
-			interp.scopes = savedScopes
-			interp.globals = savedGlobals
-			interp.thisVal = savedThis
-			interp.superVal = savedSuper
-		}()
-
-		interp.pushScope()
-		defer interp.popScope()
+		child.pushScope()
 
 		// Bind parameters (including pattern parameters)
 		for i, p := range params {
@@ -764,9 +762,9 @@ func (interp *Interpreter) evalFuncDecl(params []*hir.Param, body *hir.BlockStmt
 					val = args[i]
 				}
 				if p.Default != nil && val.Type() == jsvalue.TypeUndefined {
-					val = interp.evalExpr(p.Default)
+					val = child.evalExpr(p.Default)
 				}
-				interp.bindPattern(p.Pattern, val)
+				child.bindPattern(p.Pattern, val)
 				continue
 			}
 			if p.Symbol == nil {
@@ -777,25 +775,25 @@ func (interp *Interpreter) evalFuncDecl(params []*hir.Param, body *hir.BlockStmt
 				for j := i; j < len(args); j++ {
 					restElems = append(restElems, args[j])
 				}
-				interp.set(p.Symbol, jsvalue.NewArray(restElems...))
+				child.set(p.Symbol, jsvalue.NewArray(restElems...))
 			} else {
 				val := jsvalue.NewUndefined()
 				if i < len(args) && args[i] != nil {
 					val = args[i]
 				}
 				if p.Default != nil && val.Type() == jsvalue.TypeUndefined {
-					val = interp.evalExpr(p.Default)
+					val = child.evalExpr(p.Default)
 				}
-				interp.set(p.Symbol, val)
+				child.set(p.Symbol, val)
 			}
 		}
 
 		// Execute body
 		if exprBody != nil {
-			return interp.evalExpr(exprBody)
+			return child.evalExpr(exprBody)
 		}
 		if body != nil {
-			result := interp.execBlock(body)
+			result := child.execBlock(body)
 			if ret, ok := result.(signalReturn); ok {
 				return ret.value
 			}

@@ -27,111 +27,143 @@ type PropertyDescriptor struct {
 }
 
 // Get retrieves a property by name, walking the prototype chain.
-// Uses a fixed 4-entry inline cache with generation-based invalidation.
+// Uses double-checked locking: RLock for cache hits, Lock for cache misses.
+// Prototype chain walk uses RLock per object with next-pointer pattern to prevent races.
 // Special: "__proto__" returns the internal prototype (not an own property).
 // Nil-safe: returns undefined for nil receiver.
 func (v *JSValue) Get(name string) *JSValue {
 	if v == nil {
 		return NewUndefined()
 	}
-	// __proto__ returns the internal prototype link, not an own property.
-	// This is safe from prototype pollution because Set("__proto__", x)
-	// creates an own property — it never modifies the internal chain.
 	if name == "__proto__" {
 		return v.GetPrototype()
 	}
-	// For arrays, numeric string keys access arrayVal (JS: arr["0"] === arr[0])
+
+	// Phase 1: RLock receiver — check cache + array/string fast paths
+	v.rlock()
 	if v.arrayVal != nil {
 		if idx, ok := parseArrayIndex(name); ok {
 			if idx < len(v.arrayVal) {
-				return v.arrayVal[idx]
+				val := v.arrayVal[idx]
+				v.runlock()
+				return val
 			}
+			v.runlock()
 			return NewUndefined()
 		}
 	}
-	// For strings, numeric string keys access characters (JS: str["0"] === str[0])
 	if v.typ == TypeString {
 		if idx, ok := parseArrayIndex(name); ok {
+			v.runlock()
 			return v.Index(idx)
 		}
 	}
-	// Inline cache: scan 4 fixed entries before walking prototype chain.
-	// Only data descriptors (no getter) are cached.
-	// Must validate both receiver gen (own mutations) and source gen (prototype mutations).
-	recvGen := v.gen
+	recvGen := v.gen.Load()
 	for i := range v.cache {
 		e := &v.cache[i]
-		if e.key == name && e.source != nil && e.recvGen == recvGen && e.gen == e.source.gen {
+		if e.key == name && e.source != nil && e.recvGen == recvGen && e.gen == e.source.gen.Load() {
+			val := e.desc.Value
+			v.runlock()
+			return val
+		}
+	}
+	v.runlock()
+
+	// Phase 2: Cache miss — Lock receiver, recheck, walk prototype chain
+	v.lock()
+	recvGen = v.gen.Load()
+	for i := range v.cache {
+		e := &v.cache[i]
+		if e.key == name && e.source != nil && e.recvGen == recvGen && e.gen == e.source.gen.Load() {
+			v.unlock()
 			return e.desc.Value
 		}
 	}
-	// Cache miss — walk prototype chain.
-	// For getters, pass the original receiver (v) as 'this'.
-	for cur := v; cur != nil; cur = cur.prototype {
+	var next *JSValue
+	for cur := v; cur != nil; cur = next {
+		if cur != v {
+			cur.rlock()
+		}
+		next = cur.prototype
 		if cur.properties != nil {
 			if desc, ok := cur.properties[name]; ok {
-				if desc.Get != nil {
-					return desc.Get(v)
-				}
-				// Cache data descriptors only (accessors are dynamic).
-				// FIFO: shift entries down, place newest at [0].
 				copy(v.cache[1:], v.cache[:3])
 				v.cache[0] = cacheEntry{
 					key:     name,
 					desc:    desc,
 					source:  cur,
-					gen:     cur.gen,
+					gen:     cur.gen.Load(),
 					recvGen: recvGen,
 				}
-				return desc.Value
+				val := desc.Value
+				if cur != v {
+					cur.runlock()
+				}
+				v.unlock()
+				if desc.Get != nil {
+					return desc.Get(v)
+				}
+				return val
 			}
 		}
+		if cur != v {
+			cur.runlock()
+		}
 	}
+	v.unlock()
 	return NewUndefined()
 }
 
-// Set sets an own property. If an accessor (getter/setter) descriptor already exists
-// on this object or its prototype chain, the setter is invoked instead of overwriting.
-// Nil-safe: does nothing for nil, undefined, or null receivers (type guard protects singletons).
+// Set sets an own property with Lock protection. If an accessor (getter/setter) descriptor
+// already exists on this object or its prototype chain, the setter is invoked instead.
+// Prototype chain walk uses RLock with next-pointer pattern to prevent races with SetPrototype().
+// Nil-safe: does nothing for nil, undefined, or null receivers.
 func (v *JSValue) Set(name string, value *JSValue) {
 	if v == nil || v.typ == TypeUndefined || v.typ == TypeNull {
 		return
 	}
-	v.gen++
-	// Fast path: if own-property exists as data descriptor (no setter), update directly.
-	// This skips the prototype chain walk for the common case (~99% of sets in web serving).
+	v.lock()
+	v.gen.Add(1)
+	// Fast path: own-property exists as data descriptor
 	if v.properties != nil {
 		if desc, ok := v.properties[name]; ok {
 			if desc.Set != nil {
 				desc.Set(v, value)
+				v.unlock()
 				return
 			}
-			// Data descriptor — update value in place
 			desc.Value = value
+			v.unlock()
 			return
 		}
 	}
 	// Walk prototype chain for inherited accessor descriptors
-	for proto := v.prototype; proto != nil; proto = proto.prototype {
+	var next *JSValue
+	for proto := v.prototype; proto != nil; proto = next {
+		proto.rlock()
+		next = proto.prototype
 		if proto.properties != nil {
 			if desc, ok := proto.properties[name]; ok && desc.Set != nil {
+				proto.runlock()
+				v.unlock()
 				desc.Set(v, value)
 				return
 			}
 		}
+		proto.runlock()
 	}
-	// For arrays, numeric string keys update arrayVal (JS: arr["0"] = x sets arr[0])
+	// Array index fast path
 	if v.arrayVal != nil {
 		if idx, ok := parseArrayIndex(name); ok {
-			// Grow the array if needed
 			for idx >= len(v.arrayVal) {
 				v.arrayVal = append(v.arrayVal, nil)
 			}
 			v.arrayVal[idx] = value
+			v.unlock()
 			return
 		}
 	}
-	// No accessor found — create a data descriptor
+	// Create new data descriptor
 	if v.properties == nil {
 		v.properties = make(map[string]*PropertyDescriptor)
 	}
@@ -141,6 +173,7 @@ func (v *JSValue) Set(name string, value *JSValue) {
 		Enumerable:   true,
 		Configurable: true,
 	}
+	v.unlock()
 }
 
 // GetOwnProperty returns the property descriptor for an own property, or nil.
@@ -151,13 +184,15 @@ func (v *JSValue) GetOwnProperty(name string) *PropertyDescriptor {
 	return v.properties[name]
 }
 
-// DefineProperty sets a property descriptor directly.
+// DefineProperty sets a property descriptor directly with Lock protection.
 // Type guard: no-op for undefined/null receivers (protects singletons).
 func (v *JSValue) DefineProperty(name string, desc *PropertyDescriptor) {
 	if v == nil || v.typ == TypeUndefined || v.typ == TypeNull {
 		return
 	}
-	v.gen++
+	v.lock()
+	defer v.unlock()
+	v.gen.Add(1)
 	if v.properties == nil {
 		v.properties = make(map[string]*PropertyDescriptor)
 	}

@@ -68,7 +68,7 @@ func SpreadIntoArray(v *JSValue) []*JSValue {
 		return nil
 	}
 	if v.arrayVal != nil {
-		return v.arrayVal
+		return append([]*JSValue{}, v.arrayVal...)
 	}
 	if v.typ == TypeString {
 		runes := []rune(v.strVal)
@@ -285,11 +285,13 @@ func initArrayPrototype() {
 			if len(args) < 1 || args[0] == nil || args[0].arrayVal == nil {
 				return NewArray()
 			}
+			args[0].lock()
+			defer args[0].unlock()
 			arr := args[0].arrayVal
 			for i, j := 0, len(arr)-1; i < j; i, j = i+1, j-1 {
 				arr[i], arr[j] = arr[j], arr[i]
 			}
-			args[0].gen++
+			args[0].gen.Add(1)
 			return args[0]
 		}).MarkAsMethod(),
 		Writable: true, Enumerable: false, Configurable: true,
@@ -303,10 +305,12 @@ func initArrayPrototype() {
 			if this == nil || this.arrayVal == nil {
 				return NewArray()
 			}
+			this.lock()
+			defer this.unlock()
 			for i := range this.arrayVal {
 				this.arrayVal[i] = args[1]
 			}
-			this.gen++
+			this.gen.Add(1)
 			return this
 		}).MarkAsMethod(),
 		Writable: true, Enumerable: false, Configurable: true,
@@ -337,6 +341,8 @@ func initArrayPrototype() {
 				return NewArray()
 			}
 			this := args[0]
+			this.lock()
+			defer this.unlock()
 			var compareFn *JSValue
 			if len(args) >= 2 {
 				compareFn = args[1]
@@ -348,7 +354,7 @@ func initArrayPrototype() {
 				}
 				return a.String() < b.String()
 			})
-			this.gen++
+			this.gen.Add(1)
 			return this
 		}).MarkAsMethod(),
 		Writable: true, Enumerable: false, Configurable: true,
@@ -373,8 +379,10 @@ func initArrayPrototype() {
 			return NewNumber(0)
 		}
 		this := args[0]
+		this.lock()
+		defer this.unlock()
 		this.arrayVal = append(this.arrayVal, args[1:]...)
-		this.gen++
+		this.gen.Add(1)
 		return NewNumber(float64(len(this.arrayVal)))
 	})
 	defMethod(ArrayPrototype, "pop", func(args ...*JSValue) *JSValue {
@@ -382,9 +390,11 @@ func initArrayPrototype() {
 			return NewUndefined()
 		}
 		this := args[0]
+		this.lock()
+		defer this.unlock()
 		last := this.arrayVal[len(this.arrayVal)-1]
 		this.arrayVal = this.arrayVal[:len(this.arrayVal)-1]
-		this.gen++
+		this.gen.Add(1)
 		return last
 	})
 	defMethod(ArrayPrototype, "shift", func(args ...*JSValue) *JSValue {
@@ -392,9 +402,11 @@ func initArrayPrototype() {
 			return NewUndefined()
 		}
 		this := args[0]
+		this.lock()
+		defer this.unlock()
 		first := this.arrayVal[0]
 		this.arrayVal = this.arrayVal[1:]
-		this.gen++
+		this.gen.Add(1)
 		return first
 	})
 	defMethod(ArrayPrototype, "unshift", func(args ...*JSValue) *JSValue {
@@ -402,8 +414,10 @@ func initArrayPrototype() {
 			return NewNumber(0)
 		}
 		this := args[0]
+		this.lock()
+		defer this.unlock()
 		this.arrayVal = append(args[1:], this.arrayVal...)
-		this.gen++
+		this.gen.Add(1)
 		return NewNumber(float64(len(this.arrayVal)))
 	})
 	defMethod(ArrayPrototype, "splice", func(args ...*JSValue) *JSValue {
@@ -411,6 +425,8 @@ func initArrayPrototype() {
 			return NewArray()
 		}
 		this := args[0]
+		this.lock()
+		defer this.unlock()
 		rest := args[1:]
 		length := len(this.arrayVal)
 		start := 0
@@ -447,7 +463,7 @@ func initArrayPrototype() {
 		result = append(result, newItems...)
 		result = append(result, this.arrayVal[start+deleteCount:]...)
 		this.arrayVal = result
-		this.gen++
+		this.gen.Add(1)
 		return NewArray(removed...)
 	})
 	defMethod(ArrayPrototype, "indexOf", func(args ...*JSValue) *JSValue {

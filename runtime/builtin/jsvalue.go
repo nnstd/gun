@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -56,8 +57,9 @@ type JSValue struct {
 	setVal     *jsSet
 	isMethod   bool                                           // true for class methods that expect this as _args[0]
 	classInit  func(this *JSValue, args ...*JSValue) *JSValue // raw constructor for super() calls
-	gen        uint64       // incremented on every mutation for cache invalidation
-	cache      [4]cacheEntry // fixed inline cache for Get() optimization
+	mu         sync.RWMutex   // per-object RWMutex for concurrent access
+	gen        atomic.Uint64  // incremented on every mutation for cache invalidation
+	cache      [4]cacheEntry  // fixed inline cache for Get() optimization
 }
 
 // MarkAsMethod marks this function as a class method that expects 'this'
@@ -68,6 +70,14 @@ func (v *JSValue) MarkAsMethod() *JSValue {
 	}
 	return v
 }
+
+// lock acquires a write lock on the JSValue's RWMutex.
+func (v *JSValue) lock()   { v.mu.Lock() }
+func (v *JSValue) unlock() { v.mu.Unlock() }
+
+// rlock acquires a read lock on the JSValue's RWMutex.
+func (v *JSValue) rlock()   { v.mu.RLock() }
+func (v *JSValue) runlock() { v.mu.RUnlock() }
 
 var symbolCounter uint64
 
@@ -316,8 +326,10 @@ func (v *JSValue) SymbolDesc() string {
 // This is the ONLY way to change the prototype chain. Set("__proto__", v)
 // creates an own property — it does NOT modify the chain (prototype pollution safe).
 func (v *JSValue) SetPrototype(proto *JSValue) {
+	v.lock()
 	v.prototype = proto
-	v.gen++
+	v.gen.Add(1)
+	v.unlock()
 }
 
 // GetPrototype returns the [[Prototype]] internal slot.
@@ -328,9 +340,13 @@ func (v *JSValue) GetPrototype() *JSValue {
 	return _null
 }
 
-// Array returns the underlying array elements, or nil if not an array.
+// Array returns a copy of the underlying array elements, or nil if not an array.
+// Returns a copy for thread safety — callers can mutate the returned slice freely.
 func (v *JSValue) Array() []*JSValue {
-	return v.arrayVal
+	if v.arrayVal == nil {
+		return nil
+	}
+	return append([]*JSValue{}, v.arrayVal...)
 }
 
 // Index returns the element at position i in an array or string JSValue.
