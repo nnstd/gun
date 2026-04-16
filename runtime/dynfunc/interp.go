@@ -39,6 +39,10 @@ import (
 	typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 )
 
+func init() {
+	jsvalue.CompileFunctionFn = CompileFunctionHIR
+}
+
 // --- Control flow signals (sent via panic/recover) ---
 
 type signalReturn struct{ value *jsvalue.JSValue }

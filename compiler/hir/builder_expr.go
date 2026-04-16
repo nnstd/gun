@@ -306,17 +306,25 @@ func (b *Builder) buildObjectLiteral(node *sitter.Node) *ObjectLiteral {
 				body = b.buildBlock(bodyNode)
 			}
 			isAsync := false
+			isGetter := false
+			isSetter := false
 			for j := uint(0); j < child.ChildCount(); j++ {
-				if child.Child(j).Kind() == "async" {
+				ck := child.Child(j).Kind()
+				if ck == "async" {
 					isAsync = true
-					break
+				} else if ck == "get" {
+					isGetter = true
+				} else if ck == "set" {
+					isSetter = true
 				}
 			}
 			ol.Properties = append(ol.Properties, &Property{
-				KeyName: name,
-				Key:     &Literal{Kind: LitString, Value: name},
-				Value:   &FuncExpr{Params: params, Body: body, IsAsync: isAsync, Span: b.span(child)},
-				Method:  true,
+				KeyName:  name,
+				Key:      &Literal{Kind: LitString, Value: name},
+				Value:    &FuncExpr{Params: params, Body: body, IsAsync: isAsync, Span: b.span(child)},
+				Method:   true,
+				IsGetter: isGetter,
+				IsSetter: isSetter,
 			})
 		case "spread_element":
 			if child.NamedChildCount() > 0 {

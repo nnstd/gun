@@ -744,7 +744,8 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		Name: "Function",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "NewObject"))
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/dynfunc", "_")
+			return selectorExpr(ident("jsvalue"), "FunctionCtor")
 		},
 	})
 

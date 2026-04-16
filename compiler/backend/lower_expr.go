@@ -432,6 +432,18 @@ func (l *Lowerer) lowerObjectLiteral(e *hir.ObjectLiteral) ast.Expr {
 		return l.lowerObjectWithComputed(e)
 	}
 
+	// Check for accessor properties (getters/setters)
+	hasAccessor := false
+	for _, prop := range e.Properties {
+		if prop.IsGetter || prop.IsSetter {
+			hasAccessor = true
+			break
+		}
+	}
+	if hasAccessor {
+		return l.lowerObjectWithAccessors(e)
+	}
+
 	// jsvalue.ObjectFrom(map[string]any{...})
 	var elts []ast.Expr
 	for _, prop := range e.Properties {
@@ -445,6 +457,52 @@ func (l *Lowerer) lowerObjectLiteral(e *hir.ObjectLiteral) ast.Expr {
 	}
 	mapLit := &ast.CompositeLit{Type: mapType, Elts: elts}
 	return callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), mapLit)
+}
+
+// lowerObjectWithAccessors handles object literals with getter/setter properties.
+// Uses DefineProperty with get/set descriptors.
+func (l *Lowerer) lowerObjectWithAccessors(e *hir.ObjectLiteral) ast.Expr {
+	l.jsvalueImport()
+	// Start with non-accessor properties in ObjectFrom
+	var regularElts []ast.Expr
+	for _, prop := range e.Properties {
+		if !prop.IsGetter && !prop.IsSetter {
+			key := stringLit(prop.KeyName)
+			value := l.lowerObjectPropertyValue(prop)
+			regularElts = append(regularElts, &ast.KeyValueExpr{Key: key, Value: value})
+		}
+	}
+	mapType := &ast.MapType{
+		Key:   goIdent("string"),
+		Value: &ast.InterfaceType{Methods: &ast.FieldList{}},
+	}
+	mapLit := &ast.CompositeLit{Type: mapType, Elts: regularElts}
+	result := callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), mapLit)
+	// Apply accessor properties via DefineProperty
+	for _, prop := range e.Properties {
+		if prop.IsGetter || prop.IsSetter {
+			var descElts []ast.Expr
+			fnExpr := l.lowerExpr(prop.Value)
+			if prop.IsGetter {
+				descElts = append(descElts, &ast.KeyValueExpr{Key: stringLit("get"), Value: fnExpr})
+			}
+			if prop.IsSetter {
+				descElts = append(descElts, &ast.KeyValueExpr{Key: stringLit("set"), Value: fnExpr})
+			}
+			descMapType := &ast.MapType{
+				Key:   goIdent("string"),
+				Value: &ast.InterfaceType{Methods: &ast.FieldList{}},
+			}
+			descMapLit := &ast.CompositeLit{Type: descMapType, Elts: descElts}
+			result = callExpr(
+				selectorExpr(goIdent("jsvalue"), "DefineProperty"),
+				result,
+				stringLit(prop.KeyName),
+				callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), descMapLit),
+			)
+		}
+	}
+	return result
 }
 
 // lowerObjectWithComputed handles object literals with computed property names

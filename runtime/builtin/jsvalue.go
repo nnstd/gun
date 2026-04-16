@@ -409,7 +409,7 @@ func (v *JSValue) New(args ...*JSValue) *JSValue {
 		}
 		// Non-method function: call normally, return result or fresh object
 		result := v.Call(args...)
-		if result != nil && result.typ == TypeObject {
+		if result != nil && (result.typ == TypeObject || result.typ == TypeFunction) {
 			return result
 		}
 		return NewObject()

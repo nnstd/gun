@@ -154,11 +154,9 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 	// Ensure main() exists for runnable packages
 	if mod.Package == "main" {
 		l.getOrCreateMain()
-		if l.needsBunWait {
-			l.addImport("github.com/nnstd/gun/runtime/bun")
-			if mainFn := l.findMainFunc(); mainFn != nil {
-				mainFn.Body.List = append(mainFn.Body.List, exprStmt(callExpr(selectorExpr(goIdent("bun"), "Wait"))))
-			}
+		l.addImport("github.com/nnstd/gun/runtime/bun")
+		if mainFn := l.findMainFunc(); mainFn != nil {
+			mainFn.Body.List = append(mainFn.Body.List, exprStmt(callExpr(selectorExpr(goIdent("bun"), "Wait"))))
 		}
 	}
 
@@ -179,7 +177,7 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 		if pkgIdent == "" {
 			pkgIdent = path.Base(pkg)
 		}
-		if !usedIdents[pkgIdent] {
+		if pkgIdent != "_" && !usedIdents[pkgIdent] {
 			delete(l.imports, pkg)
 		}
 	}

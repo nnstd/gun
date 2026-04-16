@@ -18,6 +18,12 @@ var Uint8ArrayCtor *JSValue
 var Atob *JSValue
 var Btoa *JSValue
 
+// CompileFunctionFn is set by runtime/dynfunc to provide new Function() support.
+// When nil, new Function() returns a no-op function.
+var CompileFunctionFn func(args ...*JSValue) *JSValue
+
+var FunctionCtor *JSValue
+
 func init() {
 	Object = NewFunction(func(args ...*JSValue) *JSValue {
 		if len(args) == 0 || args[0] == nil || args[0].typ == TypeUndefined || args[0].typ == TypeNull {
@@ -241,6 +247,18 @@ func init() {
 	Btoa = NewFunction(func(args ...*JSValue) *JSValue {
 		return BtoaFunc(args...)
 	})
+
+	// FunctionCtor implements new Function(paramNames..., body) via the HIR interpreter.
+	// CompileFunctionFn is wired by runtime/dynfunc.
+	FunctionCtor = NewFunction(func(args ...*JSValue) *JSValue {
+		if CompileFunctionFn == nil {
+			return NewFunction(func(args ...*JSValue) *JSValue { return NewUndefined() })
+		}
+		if len(args) == 0 {
+			return NewFunction(func(args ...*JSValue) *JSValue { return NewUndefined() })
+		}
+		return CompileFunctionFn(args...)
+	})
 }
 
 // AtobFunc decodes a base64-encoded string.
@@ -293,6 +311,7 @@ func init() {
 	RegisterGlobal("atob", Atob)
 	RegisterGlobal("btoa", Btoa)
 	RegisterGlobal("RegExp", RegexpCtor)
+	RegisterGlobal("Function", FunctionCtor)
 
 	// Global functions
 	RegisterGlobal("parseInt", NewFunction(func(args ...*JSValue) *JSValue {

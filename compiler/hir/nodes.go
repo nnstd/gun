@@ -458,6 +458,8 @@ type Property struct {
 	Value    Expr
 	Computed bool // true if key is [expr]
 	Method   bool // true for method shorthand { foo() {} }
+	IsGetter bool // true for get prop() {} in object literals
+	IsSetter bool // true for set prop(v) {} in object literals
 }
 
 // SpreadExpr is a spread element: ...expr.
