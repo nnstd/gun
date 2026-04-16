@@ -4,20 +4,37 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
+
+var arraySlicePool = sync.Pool{
+	New: func() any {
+		return make([]*JSValue, 0, 8)
+	},
+}
 
 // NewArray creates an array JSValue (stored as TypeObject).
 func NewArray(elems ...*JSValue) *JSValue {
 	arr := elems
 	if arr == nil {
-		arr = []*JSValue{}
+		arr = arraySlicePool.Get().([]*JSValue)[:0]
 	}
 	return &JSValue{
 		typ:        TypeObject,
-		properties: make(map[string]*PropertyDescriptor),
+		properties: propMapPool.Get().(map[string]*PropertyDescriptor),
 		prototype:  ArrayPrototype,
 		arrayVal:   arr,
 	}
+}
+
+// ReleaseArraySlice returns an array slice to the pool for reuse.
+// Slices with capacity > 16 are discarded.
+func ReleaseArraySlice(s []*JSValue) {
+	if cap(s) > 16 {
+		return
+	}
+	clear(s)
+	arraySlicePool.Put(s[:0])
 }
 
 // ToSlice converts an any value to []*JSValue. Handles []*JSValue passthrough

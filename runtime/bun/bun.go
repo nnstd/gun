@@ -1,15 +1,14 @@
 package bun
 
 import (
-	"context"
 	stdErrors "errors"
 	"fmt"
 	"net"
-	"net/http"
 	"strconv"
 	"syscall"
 	"sync"
-	"time"
+
+	"github.com/valyala/fasthttp"
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
 	error "github.com/nnstd/gun/runtime/builtin/error"
@@ -88,24 +87,26 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 	serverObj.Set("port", jsvalue.NewNumber(float64(actualPort)))
 	serverObj.Set("url", jsvalue.NewString(fmt.Sprintf("http://127.0.0.1:%d", actualPort)))
 
+	// fetchMu serializes all JS execution within the HTTP handler.
+	// JS is single-threaded by spec — concurrent access to JSValue maps,
+	// closures, and global state would cause data races without this lock.
 	var fetchMu sync.Mutex
-	server := &http.Server{
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
 			fetchMu.Lock()
 			defer fetchMu.Unlock()
-			req := web.RequestFromHTTP(r)
+			req := web.RequestFromFastHTTP(ctx)
 			res := fetch.Call(req, serverObj)
 			res = promise.Await(res)
-			web.WriteResponse(w, res)
-		}),
+			web.WriteResponseFastHTTP(ctx, res)
+		},
 	}
 
 	eventloop.Default.RegisterServer()
 
 	serverObj.Set("stop", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = server.Shutdown(ctx)
+		_ = server.Shutdown()
 		_ = listener.Close()
 		return jsvalue.NewUndefined()
 	}))

@@ -6,6 +6,8 @@ import (
 	neturl "net/url"
 	"strings"
 
+	"github.com/valyala/fasthttp"
+
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
 	jsonpkg "github.com/nnstd/gun/runtime/builtin/json"
 	"github.com/nnstd/gun/runtime/promise"
@@ -280,7 +282,7 @@ func WriteResponse(w http.ResponseWriter, value *jsvalue.JSValue) {
 		headers := value.Get("headers")
 		if headers != nil && headers.TypeString() == "object" {
 			for _, key := range headers.OwnKeys() {
-				w.Header().Set(key, headers.Get(key).String())
+				w.Header().Set(strings.Trim(key, "\""), headers.Get(key).String())
 			}
 		}
 		status := int(value.Get("status").Number())
@@ -297,6 +299,67 @@ func WriteResponse(w http.ResponseWriter, value *jsvalue.JSValue) {
 	}
 
 	_, _ = io.WriteString(w, value.String())
+}
+
+func RequestFromFastHTTP(ctx *fasthttp.RequestCtx) *jsvalue.JSValue {
+	body := string(ctx.PostBody())
+
+	scheme := "http"
+	if ctx.IsTLS() {
+		scheme = "https"
+	}
+	host := string(ctx.Host())
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	url := scheme + "://" + host + string(ctx.URI().RequestURI())
+
+	method := string(ctx.Method())
+
+	headers := Headers.Call()
+	for key, value := range ctx.Request.Header.All() {
+		headers.Set(strings.ToLower(string(key)), jsvalue.NewString(string(value)))
+	}
+
+	req := Request.Call(
+		jsvalue.NewString(url),
+		jsvalue.ObjectFrom(
+			"method", jsvalue.NewString(method),
+			"headers", headers,
+			"body", jsvalue.NewString(body),
+		),
+	)
+	req.Set("raw", req)
+	return req
+}
+
+func WriteResponseFastHTTP(ctx *fasthttp.RequestCtx, value *jsvalue.JSValue) {
+	if value == nil || value.TypeString() == "undefined" {
+		ctx.SetStatusCode(fasthttp.StatusNoContent)
+		return
+	}
+
+	if value.Get("status").TypeString() == "number" || value.Get("headers").TypeString() == "object" || value.Get("_bodyInit").TypeString() != "undefined" {
+		headers := value.Get("headers")
+		if headers != nil && headers.TypeString() == "object" {
+			for _, key := range headers.OwnKeys() {
+				ctx.Response.Header.Set(strings.Trim(key, "\""), headers.Get(key).String())
+			}
+		}
+		status := int(value.Get("status").Number())
+		if status == 0 {
+			status = fasthttp.StatusOK
+		}
+		ctx.SetStatusCode(status)
+		body := value.Get("_bodyInit")
+		if body.TypeString() == "undefined" {
+			body = value.Get("body")
+		}
+		ctx.WriteString(body.String())
+		return
+	}
+
+	ctx.WriteString(value.String())
 }
 
 func URLString(v *jsvalue.JSValue) *jsvalue.JSValue {
