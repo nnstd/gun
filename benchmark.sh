@@ -134,13 +134,14 @@ bootstrap() {
 run_k6() {
   local label=$1
   local port=$2
+  local jsonfile=$3
   local base="http://127.0.0.1:${port}"
 
   echo ""
   log "=== $label ==="
   echo ""
 
-  k6 run - <<K6SCRIPT
+  k6 run --out json="$jsonfile" - <<K6SCRIPT
 import http from 'k6/http';
 import { check } from 'k6';
 
@@ -180,6 +181,75 @@ export default function () {
   check(res, { 'status 2xx/3xx': (s) => s.status >= 200 && s.status < 400 });
 }
 K6SCRIPT
+}
+
+# ── Parse k6 JSON output for metrics ───────────────────────
+
+parse_k6_json() {
+  local jsonfile=$1
+  python3 -c "
+import json, sys
+
+durations = []
+total_reqs = 0
+failed_reqs = 0
+max_vus = 0
+test_start = None
+test_end = None
+
+with open('$jsonfile') as f:
+    for line in f:
+        try:
+            e = json.loads(line)
+        except: continue
+        t = e.get('type')
+        m = e.get('metric','')
+        data = e.get('data', {})
+
+        if t == 'Point':
+            if m == 'http_req_duration':
+                durations.append(data['value'])  # k6 stores ms
+            elif m == 'http_reqs':
+                total_reqs += 1
+            elif m == 'http_req_failed':
+                if data.get('value', 0) > 0:
+                    failed_reqs += 1
+            elif m == 'vus_max':
+                max_vus = max(max_vus, int(data['value']))
+        elif t == 'VU':
+            max_vus = max(max_vus, int(data['value']))
+
+if not durations:
+    print('ERROR:no_data')
+    sys.exit(0)
+
+durations.sort()
+n = len(durations)
+err_rate = (failed_reqs / total_reqs * 100) if total_reqs > 0 else 0
+
+def pct(p):
+    idx = int(n * p / 100)
+    return durations[min(idx, n-1)]
+
+def fmt_ms(ms):
+    if ms < 1:
+        return f'{ms*1000:.0f}µs'
+    elif ms < 1000:
+        return f'{ms:.2f}ms'
+    else:
+        return f'{ms/1000:.2f}s'
+
+test_duration = ${K6_DURATION%s}
+rps = total_reqs / test_duration if test_duration > 0 else 0
+
+print(f'rps={rps:.0f}')
+print(f'err={err_rate:.2f}%')
+print(f'avg={fmt_ms(sum(durations)/n)}')
+print(f'p50={fmt_ms(pct(50))}')
+print(f'p90={fmt_ms(pct(90))}')
+print(f'p95={fmt_ms(pct(95))}')
+print(f'vus={max_vus}')
+"
 }
 
 # ── Verify a server responds correctly ─────────────────────
@@ -241,8 +311,10 @@ main() {
   local gun_pid=$!
   sleep 1
 
+  local gun_metrics=""
   if verify_server "Gun" $GUN_PORT; then
-    run_k6 "Gun (Go)" $GUN_PORT
+    run_k6 "Gun (Go)" $GUN_PORT "$BENCH_DIR/gun-results.json"
+    gun_metrics=$(parse_k6_json "$BENCH_DIR/gun-results.json")
   else
     warn "Gun server verification failed, skipping benchmark"
   fi
@@ -256,8 +328,10 @@ main() {
   local bun_pid=$!
   sleep 1
 
+  local bun_metrics=""
   if verify_server "Bun" $BUN_PORT; then
-    run_k6 "Bun" $BUN_PORT
+    run_k6 "Bun" $BUN_PORT "$BENCH_DIR/bun-results.json"
+    bun_metrics=$(parse_k6_json "$BENCH_DIR/bun-results.json")
   else
     warn "Bun server verification failed, skipping benchmark"
   fi
@@ -265,10 +339,39 @@ main() {
   kill $bun_pid 2>/dev/null || true
   kill_servers
 
+  # ── Extract metrics ──
+  local gun_rps gun_err gun_avg gun_p50 gun_p90 gun_p95 gun_vus
+  local bun_rps bun_err bun_avg bun_p50 bun_p90 bun_p95 bun_vus
+
+  while IFS='=' read -r k v; do
+    case "$k" in
+      rps) gun_rps="$v" ;; err) gun_err="$v" ;; avg) gun_avg="$v" ;;
+      p50) gun_p50="$v" ;; p90) gun_p90="$v" ;; p95) gun_p95="$v" ;; vus) gun_vus="$v" ;;
+    esac
+  done <<< "$gun_metrics"
+
+  while IFS='=' read -r k v; do
+    case "$k" in
+      rps) bun_rps="$v" ;; err) bun_err="$v" ;; avg) bun_avg="$v" ;;
+      p50) bun_p50="$v" ;; p90) bun_p90="$v" ;; p95) bun_p95="$v" ;; vus) bun_vus="$v" ;;
+    esac
+  done <<< "$bun_metrics"
+
+  # ── Summary table ──
   echo ""
   echo -e "${BOLD}========================================${RESET}"
-  echo -e "${BOLD}  Done!${RESET}"
+  echo -e "${BOLD}  Summary${RESET}"
   echo -e "${BOLD}========================================${RESET}"
+  echo ""
+  printf "${BOLD}%-20s %-15s %-15s${RESET}\n" "Metric" "Gun (Go)" "Bun"
+  printf "%-20s %-15s %-15s\n" "Throughput" "${gun_rps:-N/A} req/s" "${bun_rps:-N/A} req/s"
+  printf "%-20s %-15s %-15s\n" "Error rate" "${gun_err:-N/A}" "${bun_err:-N/A}"
+  printf "%-20s %-15s %-15s\n" "Latency (avg)" "${gun_avg:-N/A}" "${bun_avg:-N/A}"
+  printf "%-20s %-15s %-15s\n" "Latency (p50)" "${gun_p50:-N/A}" "${bun_p50:-N/A}"
+  printf "%-20s %-15s %-15s\n" "Latency (p90)" "${gun_p90:-N/A}" "${bun_p90:-N/A}"
+  printf "%-20s %-15s %-15s\n" "Latency (p95)" "${gun_p95:-N/A}" "${bun_p95:-N/A}"
+  printf "%-20s %-15s %-15s\n" "VUs needed" "${gun_vus:-N/A}" "${bun_vus:-N/A}"
+  echo ""
 }
 
 main "$@"

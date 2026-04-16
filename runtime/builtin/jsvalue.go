@@ -27,6 +27,16 @@ const (
 	TypeSet
 )
 
+// cacheEntry is a single inline cache slot for Get() optimization.
+// Fixed-size array on JSValue avoids allocation for the cache itself.
+type cacheEntry struct {
+	key     string
+	desc    *PropertyDescriptor
+	source  *JSValue // object where property was found in prototype chain
+	gen     uint64   // source.gen when cached
+	recvGen uint64   // receiver's gen when cached
+}
+
 // JSValue models a JavaScript value with typed storage and prototype chain.
 type JSValue struct {
 	typ        ValueType
@@ -46,6 +56,8 @@ type JSValue struct {
 	setVal     *jsSet
 	isMethod   bool                                           // true for class methods that expect this as _args[0]
 	classInit  func(this *JSValue, args ...*JSValue) *JSValue // raw constructor for super() calls
+	gen        uint64       // incremented on every mutation for cache invalidation
+	cache      [4]cacheEntry // fixed inline cache for Get() optimization
 }
 
 // MarkAsMethod marks this function as a class method that expects 'this'
@@ -81,14 +93,22 @@ func PropertyKey(v any) string {
 	return fmt.Sprint(v)
 }
 
-// NewNull creates a null JSValue.
+// Package-level singletons for undefined and null. These are immutable in
+// correct JS semantics — type guards in Set()/DefineProperty() prevent
+// accidental mutation of the singleton's (nil) properties map.
+var (
+	_undefined = &JSValue{typ: TypeUndefined}
+	_null      = &JSValue{typ: TypeNull}
+)
+
+// NewNull returns a singleton null JSValue (zero allocation).
 func NewNull() *JSValue {
-	return &JSValue{typ: TypeNull}
+	return _null
 }
 
-// NewUndefined creates an undefined JSValue.
+// NewUndefined returns a singleton undefined JSValue (zero allocation).
 func NewUndefined() *JSValue {
-	return &JSValue{typ: TypeUndefined}
+	return _undefined
 }
 
 // NewFunction creates a function JSValue.
@@ -297,6 +317,7 @@ func (v *JSValue) SymbolDesc() string {
 // creates an own property — it does NOT modify the chain (prototype pollution safe).
 func (v *JSValue) SetPrototype(proto *JSValue) {
 	v.prototype = proto
+	v.gen++
 }
 
 // GetPrototype returns the [[Prototype]] internal slot.
@@ -304,7 +325,7 @@ func (v *JSValue) GetPrototype() *JSValue {
 	if v.prototype != nil {
 		return v.prototype
 	}
-	return NewNull()
+	return _null
 }
 
 // Array returns the underlying array elements, or nil if not an array.

@@ -27,6 +27,7 @@ type PropertyDescriptor struct {
 }
 
 // Get retrieves a property by name, walking the prototype chain.
+// Uses a fixed 4-entry inline cache with generation-based invalidation.
 // Special: "__proto__" returns the internal prototype (not an own property).
 // Nil-safe: returns undefined for nil receiver.
 func (v *JSValue) Get(name string) *JSValue {
@@ -54,13 +55,33 @@ func (v *JSValue) Get(name string) *JSValue {
 			return v.Index(idx)
 		}
 	}
-	// Walk own properties, then prototype chain. For getters, pass the original
-	// receiver (v) as 'this' so Map/Set size getters can access their data.
+	// Inline cache: scan 4 fixed entries before walking prototype chain.
+	// Only data descriptors (no getter) are cached.
+	// Must validate both receiver gen (own mutations) and source gen (prototype mutations).
+	recvGen := v.gen
+	for i := range v.cache {
+		e := &v.cache[i]
+		if e.key == name && e.source != nil && e.recvGen == recvGen && e.gen == e.source.gen {
+			return e.desc.Value
+		}
+	}
+	// Cache miss — walk prototype chain.
+	// For getters, pass the original receiver (v) as 'this'.
 	for cur := v; cur != nil; cur = cur.prototype {
 		if cur.properties != nil {
 			if desc, ok := cur.properties[name]; ok {
 				if desc.Get != nil {
 					return desc.Get(v)
+				}
+				// Cache data descriptors only (accessors are dynamic).
+				// FIFO: shift entries down, place newest at [0].
+				copy(v.cache[1:], v.cache[:3])
+				v.cache[0] = cacheEntry{
+					key:     name,
+					desc:    desc,
+					source:  cur,
+					gen:     cur.gen,
+					recvGen: recvGen,
 				}
 				return desc.Value
 			}
@@ -71,15 +92,22 @@ func (v *JSValue) Get(name string) *JSValue {
 
 // Set sets an own property. If an accessor (getter/setter) descriptor already exists
 // on this object or its prototype chain, the setter is invoked instead of overwriting.
-// Nil-safe: does nothing for nil receiver.
+// Nil-safe: does nothing for nil, undefined, or null receivers (type guard protects singletons).
 func (v *JSValue) Set(name string, value *JSValue) {
-	if v == nil {
+	if v == nil || v.typ == TypeUndefined || v.typ == TypeNull {
 		return
 	}
-	// Check own properties first for an accessor descriptor
+	v.gen++
+	// Fast path: if own-property exists as data descriptor (no setter), update directly.
+	// This skips the prototype chain walk for the common case (~99% of sets in web serving).
 	if v.properties != nil {
-		if desc, ok := v.properties[name]; ok && desc.Set != nil {
-			desc.Set(v, value)
+		if desc, ok := v.properties[name]; ok {
+			if desc.Set != nil {
+				desc.Set(v, value)
+				return
+			}
+			// Data descriptor — update value in place
+			desc.Value = value
 			return
 		}
 	}
@@ -124,7 +152,12 @@ func (v *JSValue) GetOwnProperty(name string) *PropertyDescriptor {
 }
 
 // DefineProperty sets a property descriptor directly.
+// Type guard: no-op for undefined/null receivers (protects singletons).
 func (v *JSValue) DefineProperty(name string, desc *PropertyDescriptor) {
+	if v == nil || v.typ == TypeUndefined || v.typ == TypeNull {
+		return
+	}
+	v.gen++
 	if v.properties == nil {
 		v.properties = make(map[string]*PropertyDescriptor)
 	}
