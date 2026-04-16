@@ -215,6 +215,16 @@ var SyntaxError = makeErrorClass("SyntaxError", Error)
 var URIError = makeErrorClass("URIError", Error)
 var EvalError = makeErrorClass("EvalError", Error)
 
+func init() {
+	jsvalue.RegisterGlobal("Error", Error)
+	jsvalue.RegisterGlobal("TypeError", TypeError)
+	jsvalue.RegisterGlobal("RangeError", RangeError)
+	jsvalue.RegisterGlobal("ReferenceError", ReferenceError)
+	jsvalue.RegisterGlobal("SyntaxError", SyntaxError)
+	jsvalue.RegisterGlobal("URIError", URIError)
+	jsvalue.RegisterGlobal("EvalError", EvalError)
+}
+
 func InvalidArgType(message string) *jsvalue.JSValue {
 	err := TypeError.Call(jsvalue.NewString(message))
 	err.Set("code", jsvalue.NewString("ERR_INVALID_ARG_TYPE"))

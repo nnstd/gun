@@ -126,6 +126,7 @@ func NewRegex(regex interface{}) *JSValue {
 func init() {
 	RegexpCtor.Set("prototype", RegexpPrototype)
 	RegexpPrototype.Set("constructor", RegexpCtor)
+	RegisterGlobal("RegExp", RegexpCtor)
 }
 
 // MatchString tests whether a JSValue regex matches a given string.

@@ -261,3 +261,85 @@ func BtoaFunc(args ...*JSValue) *JSValue {
 	}
 	return NewString("")
 }
+
+// --- Global registry ---
+
+// globalRegistry maps JS global names to their *JSValue runtime values.
+// Packages register their globals via RegisterGlobal in init().
+// The HIR interpreter and any runtime consumer reads via Globals().
+var globalRegistry = make(map[string]*JSValue)
+
+// RegisterGlobal adds a named global value to the registry.
+func RegisterGlobal(name string, val *JSValue) {
+	globalRegistry[name] = val
+}
+
+// Globals returns all registered global JS values.
+func Globals() map[string]*JSValue {
+	return globalRegistry
+}
+
+func init() {
+	// Core constructors
+	RegisterGlobal("Object", Object)
+	RegisterGlobal("Array", Array)
+	RegisterGlobal("Number", Number)
+	RegisterGlobal("Symbol", Symbol_)
+	RegisterGlobal("Reflect", Reflect)
+	RegisterGlobal("Date", DateCtor)
+	RegisterGlobal("Map", MapCtor)
+	RegisterGlobal("Set", SetCtor)
+	RegisterGlobal("Uint8Array", Uint8ArrayCtor)
+	RegisterGlobal("atob", Atob)
+	RegisterGlobal("btoa", Btoa)
+	RegisterGlobal("RegExp", RegexpCtor)
+
+	// Global functions
+	RegisterGlobal("parseInt", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) == 0 {
+			return NewNumber(gomath.NaN())
+		}
+		base := NewNumber(10)
+		if len(args) > 1 {
+			base = args[1]
+		}
+		return ParseInt(args[0], base)
+	}))
+	RegisterGlobal("parseFloat", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) == 0 {
+			return NewNumber(gomath.NaN())
+		}
+		return ParseFloat(args[0])
+	}))
+	RegisterGlobal("isNaN", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) == 0 {
+			return NewBool(true)
+		}
+		return NewBool(gomath.IsNaN(args[0].Number()))
+	}))
+	RegisterGlobal("isFinite", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) == 0 {
+			return NewBool(false)
+		}
+		n := args[0].Number()
+		return NewBool(!gomath.IsInf(n, 0) && !gomath.IsNaN(n))
+	}))
+	RegisterGlobal("String", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) == 0 {
+			return NewString("")
+		}
+		return NewString(args[0].String())
+	}))
+	RegisterGlobal("Boolean", NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) == 0 {
+			return NewBool(false)
+		}
+		return NewBool(args[0].Bool())
+	}))
+
+	// Global constants
+	RegisterGlobal("undefined", NewUndefined())
+	RegisterGlobal("NaN", NewNumber(gomath.NaN()))
+	RegisterGlobal("Infinity", NewNumber(gomath.Inf(1)))
+	RegisterGlobal("globalThis", NewObject())
+}

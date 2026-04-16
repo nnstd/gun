@@ -18,3 +18,7 @@ var AsJSValue = func() *jsvalue.JSValue {
 	}))
 	return obj
 }()
+
+func init() {
+	jsvalue.RegisterGlobal("JSON", AsJSValue)
+}

@@ -32,3 +32,26 @@ func Dir(args ...*jsvalue.JSValue) {
 		fmt.Printf("%+v\n", a)
 	}
 }
+
+// AsJSValue returns console as a callable JSValue object.
+var AsJSValue = jsvalue.NewObject()
+
+func init() {
+	AsJSValue.Set("log", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		Log(args...)
+		return jsvalue.NewUndefined()
+	}))
+	AsJSValue.Set("error", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		Error(args...)
+		return jsvalue.NewUndefined()
+	}))
+	AsJSValue.Set("warn", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		Warn(args...)
+		return jsvalue.NewUndefined()
+	}))
+	AsJSValue.Set("dir", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		Dir(args...)
+		return jsvalue.NewUndefined()
+	}))
+	jsvalue.RegisterGlobal("console", AsJSValue)
+}
