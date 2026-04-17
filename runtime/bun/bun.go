@@ -3,7 +3,9 @@ package bun
 import (
 	stdErrors "errors"
 	"fmt"
+	"log"
 	"net"
+	"runtime/debug"
 	"strconv"
 	"syscall"
 
@@ -91,8 +93,9 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 		Handler: func(ctx *fasthttp.RequestCtx) {
 			defer func() {
 				if r := recover(); r != nil {
+					log.Printf("[gun] panic serving %s %s: %v\n%s", ctx.Method(), ctx.Path(), r, debug.Stack())
 					ctx.SetStatusCode(500)
-					ctx.SetBodyString("Internal Server Error")
+					ctx.SetBodyString(fmt.Sprintf("Internal Server Error: %v", r))
 				}
 			}()
 			req := web.RequestFromFastHTTP(ctx)

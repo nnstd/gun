@@ -62,8 +62,12 @@ func (v *JSValue) Get(name string) *JSValue {
 	for i := range v.cache {
 		e := &v.cache[i]
 		if e.key == name && e.source != nil && e.recvGen == recvGen && e.gen == e.source.gen.Load() {
-			val := e.desc.Value
+			val := e.value
+			getter := e.getter
 			v.runlock()
+			if getter != nil {
+				return getter(v)
+			}
 			return val
 		}
 	}
@@ -75,8 +79,13 @@ func (v *JSValue) Get(name string) *JSValue {
 	for i := range v.cache {
 		e := &v.cache[i]
 		if e.key == name && e.source != nil && e.recvGen == recvGen && e.gen == e.source.gen.Load() {
+			val := e.value
+			getter := e.getter
 			v.unlock()
-			return e.desc.Value
+			if getter != nil {
+				return getter(v)
+			}
+			return val
 		}
 	}
 	var next *JSValue
@@ -90,7 +99,8 @@ func (v *JSValue) Get(name string) *JSValue {
 				copy(v.cache[1:], v.cache[:3])
 				v.cache[0] = cacheEntry{
 					key:     name,
-					desc:    desc,
+					value:   desc.Value,
+					getter:  desc.Get,
 					source:  cur,
 					gen:     cur.gen.Load(),
 					recvGen: recvGen,
@@ -181,7 +191,10 @@ func (v *JSValue) GetOwnProperty(name string) *PropertyDescriptor {
 	if v.properties == nil {
 		return nil
 	}
-	return v.properties[name]
+	v.rlock()
+	desc := v.properties[name]
+	v.runlock()
+	return desc
 }
 
 // DefineProperty sets a property descriptor directly with Lock protection.
@@ -204,7 +217,9 @@ func (v *JSValue) HasOwnProperty(name string) bool {
 	if v.properties == nil {
 		return false
 	}
+	v.rlock()
 	_, ok := v.properties[name]
+	v.runlock()
 	return ok
 }
 
@@ -213,10 +228,12 @@ func (v *JSValue) OwnKeys() []string {
 	if v.properties == nil {
 		return nil
 	}
+	v.rlock()
 	keys := make([]string, 0, len(v.properties))
 	for k := range v.properties {
 		keys = append(keys, k)
 	}
+	v.runlock()
 	return keys
 }
 
@@ -225,11 +242,13 @@ func (v *JSValue) EnumerableOwnKeys() []string {
 	if v.properties == nil {
 		return nil
 	}
+	v.rlock()
 	keys := make([]string, 0, len(v.properties))
 	for k, desc := range v.properties {
 		if desc != nil && desc.Enumerable {
 			keys = append(keys, k)
 		}
 	}
+	v.runlock()
 	return keys
 }

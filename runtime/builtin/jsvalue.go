@@ -30,12 +30,15 @@ const (
 
 // cacheEntry is a single inline cache slot for Get() optimization.
 // Fixed-size array on JSValue avoids allocation for the cache itself.
+// Stores the resolved value directly (not a *PropertyDescriptor pointer) to avoid
+// data races when Set() mutates desc.Value in-place on shared objects.
 type cacheEntry struct {
 	key     string
-	desc    *PropertyDescriptor
-	source  *JSValue // object where property was found in prototype chain
-	gen     uint64   // source.gen when cached
-	recvGen uint64   // receiver's gen when cached
+	value   *JSValue                          // cached resolved value (snapshot)
+	getter  func(*JSValue) *JSValue           // cached accessor (may be nil)
+	source  *JSValue                          // object where property was found
+	gen     uint64                            // source.gen when cached
+	recvGen uint64                            // receiver's gen when cached
 }
 
 // JSValue models a JavaScript value with typed storage and prototype chain.
