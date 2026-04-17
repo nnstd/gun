@@ -51,10 +51,11 @@ type JSValue struct {
 	bigIntVal  int64
 	symbolDesc string
 	symbolID   uint64
-	properties map[string]*PropertyDescriptor
+	properties SmallPropMap
 	prototype  *JSValue
 	funcVal    func(...*JSValue) *JSValue
-	arrayVal   []*JSValue
+	arrayVal   SmallValueList
+	isArr      bool // true when this JSValue has array semantics (even if empty)
 	regexVal   interface{} // stores GoRegex (see jsregex.go)
 	mapVal     *jsMap
 	setVal     *jsSet
@@ -127,10 +128,9 @@ func NewUndefined() *JSValue {
 // NewFunction creates a function JSValue.
 func NewFunction(fn func(...*JSValue) *JSValue) *JSValue {
 	return &JSValue{
-		typ:        TypeFunction,
-		properties: make(map[string]*PropertyDescriptor),
-		prototype:  FunctionPrototype,
-		funcVal:    fn,
+		typ:       TypeFunction,
+		prototype: FunctionPrototype,
+		funcVal:   fn,
 	}
 }
 
@@ -194,9 +194,11 @@ func (v *JSValue) String() string {
 		return fmt.Sprintf("Symbol(%s)", v.symbolDesc)
 	case TypeObject:
 		// Arrays: JS Array.toString() joins elements with commas
-		if v.arrayVal != nil {
-			strs := make([]string, len(v.arrayVal))
-			for i, elem := range v.arrayVal {
+		if v.isArr {
+			n := v.arrayVal.Len()
+			strs := make([]string, n)
+			for i := 0; i < n; i++ {
+				elem := v.arrayVal.Get(i)
 				if elem == nil || elem.typ == TypeNull || elem.typ == TypeUndefined {
 					strs[i] = ""
 				} else {
@@ -346,10 +348,13 @@ func (v *JSValue) GetPrototype() *JSValue {
 // Array returns a copy of the underlying array elements, or nil if not an array.
 // Returns a copy for thread safety — callers can mutate the returned slice freely.
 func (v *JSValue) Array() []*JSValue {
-	if v.arrayVal == nil {
+	if !v.isArr {
 		return nil
 	}
-	return append([]*JSValue{}, v.arrayVal...)
+	if v.arrayVal.Len() == 0 {
+		return []*JSValue{}
+	}
+	return append([]*JSValue{}, v.arrayVal.Slice()...)
 }
 
 // Index returns the element at position i in an array or string JSValue.
@@ -357,8 +362,8 @@ func (v *JSValue) Array() []*JSValue {
 // For strings: returns a single-character string (matching JS "str"[i] semantics).
 // Returns undefined if out of bounds or not an array/string.
 func (v *JSValue) Index(i int) *JSValue {
-	if v.arrayVal != nil && i >= 0 && i < len(v.arrayVal) {
-		return v.arrayVal[i]
+	if v.isArr && i >= 0 && i < v.arrayVal.Len() {
+		return v.arrayVal.Get(i)
 	}
 	if v.typ == TypeString && i >= 0 {
 		runes := []rune(v.strVal)
@@ -371,7 +376,7 @@ func (v *JSValue) Index(i int) *JSValue {
 
 // IsArray returns true if the JSValue holds an array.
 func (v *JSValue) IsArray() bool {
-	return v != nil && v.arrayVal != nil
+	return v != nil && v.isArr
 }
 
 // Len returns the length of the JSValue, matching JavaScript semantics.
@@ -389,8 +394,8 @@ func (v *JSValue) Len() int {
 		// In Go, we approximate this with rune count
 		return len([]rune(v.strVal))
 	case TypeObject:
-		if v.arrayVal != nil {
-			return len(v.arrayVal)
+		if v.isArr {
+			return v.arrayVal.Len()
 		}
 	case TypeMap:
 		if v.mapVal != nil {
@@ -468,8 +473,8 @@ func (v *JSValue) MethodCall(method string, args ...*JSValue) *JSValue {
 	// Handle Function.prototype.apply(thisArg, argsArray) and .call(thisArg, ...args)
 	if v.typ == TypeFunction && method == "apply" && len(args) >= 2 {
 		argsArray := args[1]
-		if argsArray != nil && argsArray.arrayVal != nil {
-			return v.Call(argsArray.arrayVal...)
+		if argsArray != nil && argsArray.isArr {
+			return v.Call(argsArray.arrayVal.Slice()...)
 		}
 		return v.Call()
 	}
@@ -532,20 +537,6 @@ func From(v any) *JSValue {
 	switch val := v.(type) {
 	case *JSValue:
 		if val == nil {
-			return NewUndefined()
-		}
-		switch val.typ {
-		case TypeBoolean:
-			return NewBool(val.boolVal)
-		case TypeNumber:
-			return NewNumber(val.numVal)
-		case TypeBigInt:
-			return NewBigInt(val.bigIntVal)
-		case TypeString:
-			return NewString(val.strVal)
-		case TypeNull:
-			return NewNull()
-		case TypeUndefined:
 			return NewUndefined()
 		}
 		return val

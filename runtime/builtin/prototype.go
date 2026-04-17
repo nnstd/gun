@@ -44,19 +44,18 @@ func defGetter(proto *JSValue, name string, fn func(this *JSValue) *JSValue) {
 func init() {
 	// ObjectPrototype is the root — no parent prototype.
 	ObjectPrototype = &JSValue{
-		typ:        TypeObject,
-		properties: make(map[string]*PropertyDescriptor),
+		typ: TypeObject,
 	}
 	Prototype = ObjectPrototype
 
 	// Wire up child prototypes, all inheriting from ObjectPrototype.
-	StringPrototype = &JSValue{typ: TypeObject, properties: make(map[string]*PropertyDescriptor), prototype: ObjectPrototype}
-	NumberPrototype = &JSValue{typ: TypeObject, properties: make(map[string]*PropertyDescriptor), prototype: ObjectPrototype}
-	BigIntPrototype = &JSValue{typ: TypeObject, properties: make(map[string]*PropertyDescriptor), prototype: ObjectPrototype}
-	BooleanPrototype = &JSValue{typ: TypeObject, properties: make(map[string]*PropertyDescriptor), prototype: ObjectPrototype}
-	SymbolPrototype = &JSValue{typ: TypeObject, properties: make(map[string]*PropertyDescriptor), prototype: ObjectPrototype}
-	ArrayPrototype = &JSValue{typ: TypeObject, properties: make(map[string]*PropertyDescriptor), prototype: ObjectPrototype}
-	FunctionPrototype = &JSValue{typ: TypeObject, properties: make(map[string]*PropertyDescriptor), prototype: ObjectPrototype}
+	StringPrototype = &JSValue{typ: TypeObject, prototype: ObjectPrototype}
+	NumberPrototype = &JSValue{typ: TypeObject, prototype: ObjectPrototype}
+	BigIntPrototype = &JSValue{typ: TypeObject, prototype: ObjectPrototype}
+	BooleanPrototype = &JSValue{typ: TypeObject, prototype: ObjectPrototype}
+	SymbolPrototype = &JSValue{typ: TypeObject, prototype: ObjectPrototype}
+	ArrayPrototype = &JSValue{typ: TypeObject, prototype: ObjectPrototype}
+	FunctionPrototype = &JSValue{typ: TypeObject, prototype: ObjectPrototype}
 
 	// --- FunctionPrototype methods ---
 	initFunctionPrototype()
@@ -142,8 +141,8 @@ func initFunctionPrototype() {
 		if origFn.isMethod && len(args) >= 2 {
 			callArgs = append(callArgs, args[1])
 		}
-		if len(args) >= 3 && args[2] != nil && args[2].arrayVal != nil {
-			callArgs = append(callArgs, args[2].arrayVal...)
+		if len(args) >= 3 && args[2] != nil && args[2].isArr {
+			callArgs = append(callArgs, args[2].arrayVal.Slice()...)
 		}
 		return origFn.funcVal(callArgs...)
 	})

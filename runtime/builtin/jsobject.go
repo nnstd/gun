@@ -2,32 +2,14 @@ package jsvalue
 
 import (
 	"fmt"
-	"sync"
 )
-
-var propMapPool = sync.Pool{
-	New: func() any {
-		return make(map[string]*PropertyDescriptor, 8)
-	},
-}
 
 // NewObject creates an empty object JSValue.
 func NewObject() *JSValue {
 	return &JSValue{
-		typ:        TypeObject,
-		properties: propMapPool.Get().(map[string]*PropertyDescriptor),
-		prototype:  ObjectPrototype,
+		typ:       TypeObject,
+		prototype: ObjectPrototype,
 	}
-}
-
-// ReleaseProps returns a property map to the pool for reuse.
-// Maps with more than 16 entries are discarded to prevent unbounded growth.
-func ReleaseProps(m map[string]*PropertyDescriptor) {
-	if len(m) > 16 {
-		return
-	}
-	clear(m)
-	propMapPool.Put(m)
 }
 
 // ObjectFrom creates an object from alternating key (string) and value (*JSValue) pairs.

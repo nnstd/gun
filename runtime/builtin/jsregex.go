@@ -91,9 +91,8 @@ func CompileRegex(pattern string) GoRegex {
 // exec() methods.
 func NewRegex(regex interface{}) *JSValue {
 	v := &JSValue{
-		typ:        TypeRegex,
-		properties: make(map[string]*PropertyDescriptor),
-		regexVal:   regex,
+		typ:      TypeRegex,
+		regexVal: regex,
 	}
 	v.prototype = RegexpPrototype
 	// Add test() method: regex.test(str) → boolean

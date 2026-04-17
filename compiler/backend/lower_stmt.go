@@ -410,7 +410,18 @@ func (l *Lowerer) lowerForStmt(s *hir.ForStmt) ast.Stmt {
 	if s.Post != nil {
 		postExpr := l.lowerExpr(s.Post)
 		if postExpr != nil {
-			post = exprStmt(postExpr)
+			// Update expressions (i++, i--) must assign the result back since
+			// Inc/Dec return a new JSValue rather than mutating in place.
+			if update, ok := s.Post.(*hir.UpdateExpr); ok {
+				operand := l.lowerExpr(update.Operand)
+				post = &ast.AssignStmt{
+					Lhs: []ast.Expr{operand},
+					Tok: token.ASSIGN,
+					Rhs: []ast.Expr{postExpr},
+				}
+			} else {
+				post = exprStmt(postExpr)
+			}
 		}
 	}
 

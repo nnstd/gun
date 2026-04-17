@@ -316,16 +316,11 @@ func RequestFromFastHTTP(ctx *fasthttp.RequestCtx) *jsvalue.JSValue {
 
 	method := string(ctx.Method())
 
-	headers := Headers.Call()
-	for key, value := range ctx.Request.Header.All() {
-		headers.Set(strings.ToLower(string(key)), jsvalue.NewString(string(value)))
-	}
-
 	req := Request.Call(
 		jsvalue.NewString(url),
 		jsvalue.ObjectFrom(
 			"method", jsvalue.NewString(method),
-			"headers", headers,
+			"headers", Headers.Call(),
 			"body", jsvalue.NewString(body),
 		),
 	)

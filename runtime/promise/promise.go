@@ -237,9 +237,35 @@ func init() {
 			getHandlers(self, promiseFulfillKey).MethodCall("push", fulfillHandler)
 			getHandlers(self, promiseRejectKey).MethodCall("push", rejectHandler)
 		case stateFulfilled:
-			fulfillHandler.Call(self.Get(promiseValueKey))
+			value := self.Get(promiseValueKey)
+			if onFulfilled == nil || onFulfilled.TypeString() != "function" {
+				fulfill(next, value)
+				return next
+			}
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						reject(next, jsvalue.From(r))
+					}
+				}()
+				fulfill(next, onFulfilled.Call(value))
+			}()
+			return next
 		case stateRejected:
-			rejectHandler.Call(self.Get(promiseValueKey))
+			reason := self.Get(promiseValueKey)
+			if onRejected == nil || onRejected.TypeString() != "function" {
+				reject(next, reason)
+				return next
+			}
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						reject(next, jsvalue.From(r))
+					}
+				}()
+				fulfill(next, onRejected.Call(reason))
+			}()
+			return next
 		}
 		return next
 	}).MarkAsMethod())
@@ -386,4 +412,15 @@ func init() {
 		}
 		return next
 	}))
+}
+
+// ResolvedPromise creates a promise in the fulfilled state without allocating
+// handler arrays. Use when the resolution value is known at construction time.
+func ResolvedPromise(value *jsvalue.JSValue) *jsvalue.JSValue {
+	p := jsvalue.NewObject()
+	p.SetPrototype(Promise.Get("prototype"))
+	defineInternal(p, promiseStateKey, jsvalue.NewString(stateFulfilled))
+	defineInternal(p, promiseValueKey, value)
+	// No handler arrays — resolved promise never needs them
+	return p
 }

@@ -31,15 +31,42 @@ func TestFromPassthrough(t *testing.T) {
 	}
 }
 
-func TestFromPrimitiveJSValueClonesValue(t *testing.T) {
-	orig := NewString("hello")
-	v := From(orig)
-	if v == orig {
-		t.Fatal("From(*JSValue string) should clone primitive values")
-	}
-	if got := v.String(); got != "hello" {
-		t.Fatalf("From(*JSValue string) = %q, want %q", got, "hello")
-	}
+func TestFromPrimitiveJSValuePassthrough(t *testing.T) {
+	// From(*JSValue) should return the same pointer — no re-allocation
+	t.Run("string", func(t *testing.T) {
+		orig := NewString("hello")
+		v := From(orig)
+		if v != orig {
+			t.Error("From(*JSValue string) should return same pointer")
+		}
+	})
+	t.Run("number", func(t *testing.T) {
+		orig := NewNumber(42)
+		v := From(orig)
+		if v != orig {
+			t.Error("From(*JSValue number) should return same pointer")
+		}
+	})
+	t.Run("bool", func(t *testing.T) {
+		orig := NewBool(true)
+		v := From(orig)
+		if v != orig {
+			t.Error("From(*JSValue bool) should return same pointer")
+		}
+	})
+	t.Run("nil", func(t *testing.T) {
+		v := From(nil)
+		if v.typ != TypeUndefined {
+			t.Errorf("From(nil) = %v, want TypeUndefined", v.typ)
+		}
+	})
+	t.Run("nil_jsvalue", func(t *testing.T) {
+		var p *JSValue
+		v := From(p)
+		if v.typ != TypeUndefined {
+			t.Errorf("From(nil *JSValue) = %v, want TypeUndefined", v.typ)
+		}
+	})
 }
 
 func TestFromPrimitives(t *testing.T) {
@@ -772,29 +799,32 @@ func TestMapPassesArrayAsThirdArg(t *testing.T) {
 
 // --- Inc/Dec mutation tests ---
 
-func TestIncMutatesInPlace(t *testing.T) {
+func TestIncReturnsNewValue(t *testing.T) {
 	v := NewNumber(5)
-	Inc(v)
-	if v.Number() != 6 {
-		t.Errorf("Inc: expected 6, got %v", v.Number())
+	r := Inc(v)
+	// Original is unchanged (no in-place mutation)
+	if v.Number() != 5 {
+		t.Errorf("Inc mutated original: expected 5, got %v", v.Number())
 	}
-	Inc(v)
-	if v.Number() != 7 {
-		t.Errorf("Inc twice: expected 7, got %v", v.Number())
+	if r.Number() != 6 {
+		t.Errorf("Inc result: expected 6, got %v", r.Number())
 	}
 }
 
-func TestDecMutatesInPlace(t *testing.T) {
+func TestDecReturnsNewValue(t *testing.T) {
 	v := NewNumber(5)
-	Dec(v)
-	if v.Number() != 4 {
-		t.Errorf("Dec: expected 4, got %v", v.Number())
+	r := Dec(v)
+	if v.Number() != 5 {
+		t.Errorf("Dec mutated original: expected 5, got %v", v.Number())
+	}
+	if r.Number() != 4 {
+		t.Errorf("Dec result: expected 4, got %v", r.Number())
 	}
 }
 
 func TestIncInForLoop(t *testing.T) {
 	count := 0
-	for i := NewNumber(0); Lt(From(i), NewNumber(3)).Bool(); Inc(i) {
+	for i := NewNumber(0); Lt(From(i), NewNumber(3)).Bool(); i = Inc(i) {
 		count++
 	}
 	if count != 3 {

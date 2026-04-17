@@ -19,7 +19,7 @@ func NewSet() *JSValue {
 }
 
 func initSetPrototype() {
-	SetPrototype = &JSValue{typ: TypeObject, properties: make(map[string]*PropertyDescriptor), prototype: ObjectPrototype}
+	SetPrototype = &JSValue{typ: TypeObject, prototype: ObjectPrototype}
 
 	defGetter(SetPrototype, "size", func(this *JSValue) *JSValue {
 		if this == nil || this.setVal == nil { return NewNumber(0) }

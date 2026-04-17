@@ -49,11 +49,11 @@ func jsValueEqual(a, b *JSValue) bool {
 
 // NewMap creates an empty Map JSValue with methods on MapPrototype.
 func NewMap() *JSValue {
-	return &JSValue{typ: TypeMap, mapVal: &jsMap{}, properties: make(map[string]*PropertyDescriptor), prototype: MapPrototype}
+	return &JSValue{typ: TypeMap, mapVal: &jsMap{}, prototype: MapPrototype}
 }
 
 func initMapPrototype() {
-	MapPrototype = &JSValue{typ: TypeObject, properties: make(map[string]*PropertyDescriptor), prototype: ObjectPrototype}
+	MapPrototype = &JSValue{typ: TypeObject, prototype: ObjectPrototype}
 
 	defGetter(MapPrototype, "size", func(this *JSValue) *JSValue {
 		if this == nil || this.mapVal == nil { return NewNumber(0) }

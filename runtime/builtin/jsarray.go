@@ -4,37 +4,19 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 )
-
-var arraySlicePool = sync.Pool{
-	New: func() any {
-		return make([]*JSValue, 0, 8)
-	},
-}
 
 // NewArray creates an array JSValue (stored as TypeObject).
 func NewArray(elems ...*JSValue) *JSValue {
-	arr := elems
-	if arr == nil {
-		arr = arraySlicePool.Get().([]*JSValue)[:0]
+	v := &JSValue{
+		typ:       TypeObject,
+		prototype: ArrayPrototype,
+		isArr:     true,
 	}
-	return &JSValue{
-		typ:        TypeObject,
-		properties: propMapPool.Get().(map[string]*PropertyDescriptor),
-		prototype:  ArrayPrototype,
-		arrayVal:   arr,
+	for _, e := range elems {
+		v.arrayVal.Push(e)
 	}
-}
-
-// ReleaseArraySlice returns an array slice to the pool for reuse.
-// Slices with capacity > 16 are discarded.
-func ReleaseArraySlice(s []*JSValue) {
-	if cap(s) > 16 {
-		return
-	}
-	clear(s)
-	arraySlicePool.Put(s[:0])
+	return v
 }
 
 // ToSlice converts an any value to []*JSValue. Handles []*JSValue passthrough
@@ -67,8 +49,8 @@ func SpreadIntoArray(v *JSValue) []*JSValue {
 	if v == nil {
 		return nil
 	}
-	if v.arrayVal != nil {
-		return append([]*JSValue{}, v.arrayVal...)
+	if v.isArr {
+		return append([]*JSValue{}, v.arrayVal.Slice()...)
 	}
 	if v.typ == TypeString {
 		runes := []rune(v.strVal)
@@ -122,10 +104,10 @@ func Slice(arr *JSValue, args ...*JSValue) *JSValue {
 		}
 		return NewString(string(runes[start:end]))
 	}
-	if arr.arrayVal == nil {
+	if !arr.isArr {
 		return NewArray()
 	}
-	length := len(arr.arrayVal)
+	length := arr.arrayVal.Len()
 	start, end := 0, length
 	if len(args) >= 1 && args[0] != nil {
 		start = normalizeIndex(int(args[0].Number()), length)
@@ -148,19 +130,27 @@ func Slice(arr *JSValue, args ...*JSValue) *JSValue {
 	if end < start {
 		end = start
 	}
-	return NewArray(arr.arrayVal[start:end]...)
+	// Build result slice from range.
+	result := make([]*JSValue, end-start)
+	for i := start; i < end; i++ {
+		result[i-start] = arr.arrayVal.Get(i)
+	}
+	return NewArray(result...)
 }
 
 // Concat concatenates arrays and values.
 func Concat(arr *JSValue, items ...*JSValue) *JSValue {
 	var result []*JSValue
-	if arr != nil && arr.arrayVal != nil {
-		result = make([]*JSValue, len(arr.arrayVal))
-		copy(result, arr.arrayVal)
+	if arr != nil && arr.isArr {
+		n := arr.arrayVal.Len()
+		result = make([]*JSValue, n)
+		for i := 0; i < n; i++ {
+			result[i] = arr.arrayVal.Get(i)
+		}
 	}
 	for _, item := range items {
-		if item != nil && item.arrayVal != nil {
-			result = append(result, item.arrayVal...)
+		if item != nil && item.isArr {
+			result = append(result, item.arrayVal.Slice()...)
 		} else {
 			result = append(result, item)
 		}
@@ -170,16 +160,17 @@ func Concat(arr *JSValue, items ...*JSValue) *JSValue {
 
 // Join joins array elements into a string with separator.
 func Join(arr *JSValue, sep *JSValue) *JSValue {
-	if arr == nil || arr.arrayVal == nil {
+	if arr == nil || !arr.isArr {
 		return NewString("")
 	}
 	s := ","
 	if sep != nil {
 		s = sep.String()
 	}
-	strs := make([]string, len(arr.arrayVal))
-	for i, elem := range arr.arrayVal {
-		strs[i] = fmt.Sprint(elem)
+	n := arr.arrayVal.Len()
+	strs := make([]string, n)
+	for i := 0; i < n; i++ {
+		strs[i] = fmt.Sprint(arr.arrayVal.Get(i))
 	}
 	return NewString(strings.Join(strs, s))
 }
@@ -195,10 +186,12 @@ func Includes(arr *JSValue, val *JSValue) *JSValue {
 		}
 		return NewBool(strings.Contains(arr.strVal, val.String()))
 	}
-	if arr.arrayVal == nil {
+	if !arr.isArr {
 		return NewBool(false)
 	}
-	for _, elem := range arr.arrayVal {
+	n := arr.arrayVal.Len()
+	for i := 0; i < n; i++ {
+		elem := arr.arrayVal.Get(i)
 		if elem == val {
 			return NewBool(true)
 		}
@@ -282,14 +275,17 @@ func initArrayPrototype() {
 	})
 	ArrayPrototype.DefineProperty("reverse", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
-			if len(args) < 1 || args[0] == nil || args[0].arrayVal == nil {
+			if len(args) < 1 || args[0] == nil || !args[0].isArr {
 				return NewArray()
 			}
 			args[0].lock()
 			defer args[0].unlock()
-			arr := args[0].arrayVal
-			for i, j := 0, len(arr)-1; i < j; i, j = i+1, j-1 {
-				arr[i], arr[j] = arr[j], arr[i]
+			n := args[0].arrayVal.Len()
+			for i, j := 0, n-1; i < j; i, j = i+1, j-1 {
+				a := args[0].arrayVal.Get(i)
+				b := args[0].arrayVal.Get(j)
+				args[0].arrayVal.Set(i, b)
+				args[0].arrayVal.Set(j, a)
 			}
 			args[0].gen.Add(1)
 			return args[0]
@@ -302,13 +298,14 @@ func initArrayPrototype() {
 				return NewArray()
 			}
 			this := args[0]
-			if this == nil || this.arrayVal == nil {
+			if this == nil || !this.isArr {
 				return NewArray()
 			}
 			this.lock()
 			defer this.unlock()
-			for i := range this.arrayVal {
-				this.arrayVal[i] = args[1]
+			n := this.arrayVal.Len()
+			for i := 0; i < n; i++ {
+				this.arrayVal.Set(i, args[1])
 			}
 			this.gen.Add(1)
 			return this
@@ -322,22 +319,23 @@ func initArrayPrototype() {
 			}
 			this := args[0]
 			idx := int(args[1].Number())
-			if this == nil || this.arrayVal == nil {
+			if this == nil || !this.isArr {
 				return NewUndefined()
 			}
+			n := this.arrayVal.Len()
 			if idx < 0 {
-				idx = len(this.arrayVal) + idx
+				idx = n + idx
 			}
-			if idx < 0 || idx >= len(this.arrayVal) {
+			if idx < 0 || idx >= n {
 				return NewUndefined()
 			}
-			return this.arrayVal[idx]
+			return this.arrayVal.Get(idx)
 		}).MarkAsMethod(),
 		Writable: true, Enumerable: false, Configurable: true,
 	})
 	ArrayPrototype.DefineProperty("sort", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
-			if len(args) < 1 || args[0] == nil || args[0].arrayVal == nil {
+			if len(args) < 1 || args[0] == nil || !args[0].isArr {
 				return NewArray()
 			}
 			this := args[0]
@@ -347,13 +345,20 @@ func initArrayPrototype() {
 			if len(args) >= 2 {
 				compareFn = args[1]
 			}
-			sort.SliceStable(this.arrayVal, func(i, j int) bool {
-				a, b := this.arrayVal[i], this.arrayVal[j]
+			// Materialise to a plain slice for sort.SliceStable, then replace.
+			n := this.arrayVal.Len()
+			slice := make([]*JSValue, n)
+			for i := 0; i < n; i++ {
+				slice[i] = this.arrayVal.Get(i)
+			}
+			sort.SliceStable(slice, func(i, j int) bool {
+				a, b := slice[i], slice[j]
 				if compareFn != nil && compareFn.funcVal != nil {
 					return compareFn.Call(a, b).Number() < 0
 				}
 				return a.String() < b.String()
 			})
+			this.arrayVal.ReplaceAll(slice)
 			this.gen.Add(1)
 			return this
 		}).MarkAsMethod(),
@@ -361,13 +366,14 @@ func initArrayPrototype() {
 	})
 	ArrayPrototype.DefineProperty("entries", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
-			if len(args) < 1 || args[0] == nil || args[0].arrayVal == nil {
+			if len(args) < 1 || args[0] == nil || !args[0].isArr {
 				return NewArray()
 			}
 			this := args[0]
-			entries := make([]*JSValue, len(this.arrayVal))
-			for i, v := range this.arrayVal {
-				entries[i] = NewArray(NewNumber(float64(i)), v)
+			n := this.arrayVal.Len()
+			entries := make([]*JSValue, n)
+			for i := 0; i < n; i++ {
+				entries[i] = NewArray(NewNumber(float64(i)), this.arrayVal.Get(i))
 			}
 			return NewArray(entries...)
 		}).MarkAsMethod(),
@@ -381,31 +387,33 @@ func initArrayPrototype() {
 		this := args[0]
 		this.lock()
 		defer this.unlock()
-		this.arrayVal = append(this.arrayVal, args[1:]...)
+		for _, a := range args[1:] {
+			this.arrayVal.Push(a)
+		}
 		this.gen.Add(1)
-		return NewNumber(float64(len(this.arrayVal)))
+		return NewNumber(float64(this.arrayVal.Len()))
 	})
 	defMethod(ArrayPrototype, "pop", func(args ...*JSValue) *JSValue {
-		if len(args) < 1 || args[0] == nil || args[0].arrayVal == nil || len(args[0].arrayVal) == 0 {
+		if len(args) < 1 || args[0] == nil || !args[0].isArr || args[0].arrayVal.Len() == 0 {
 			return NewUndefined()
 		}
 		this := args[0]
 		this.lock()
 		defer this.unlock()
-		last := this.arrayVal[len(this.arrayVal)-1]
-		this.arrayVal = this.arrayVal[:len(this.arrayVal)-1]
+		last := this.arrayVal.Get(this.arrayVal.Len() - 1)
+		this.arrayVal.Truncate()
 		this.gen.Add(1)
 		return last
 	})
 	defMethod(ArrayPrototype, "shift", func(args ...*JSValue) *JSValue {
-		if len(args) < 1 || args[0] == nil || args[0].arrayVal == nil || len(args[0].arrayVal) == 0 {
+		if len(args) < 1 || args[0] == nil || !args[0].isArr || args[0].arrayVal.Len() == 0 {
 			return NewUndefined()
 		}
 		this := args[0]
 		this.lock()
 		defer this.unlock()
-		first := this.arrayVal[0]
-		this.arrayVal = this.arrayVal[1:]
+		first := this.arrayVal.Get(0)
+		this.arrayVal.RemoveFirst()
 		this.gen.Add(1)
 		return first
 	})
@@ -416,19 +424,19 @@ func initArrayPrototype() {
 		this := args[0]
 		this.lock()
 		defer this.unlock()
-		this.arrayVal = append(args[1:], this.arrayVal...)
+		this.arrayVal.Prepend(args[1:]...)
 		this.gen.Add(1)
-		return NewNumber(float64(len(this.arrayVal)))
+		return NewNumber(float64(this.arrayVal.Len()))
 	})
 	defMethod(ArrayPrototype, "splice", func(args ...*JSValue) *JSValue {
-		if len(args) < 1 || args[0] == nil || args[0].arrayVal == nil {
+		if len(args) < 1 || args[0] == nil || !args[0].isArr {
 			return NewArray()
 		}
 		this := args[0]
 		this.lock()
 		defer this.unlock()
 		rest := args[1:]
-		length := len(this.arrayVal)
+		length := this.arrayVal.Len()
 		start := 0
 		if len(rest) >= 1 && rest[0] != nil {
 			start = int(rest[0].Number())
@@ -452,48 +460,59 @@ func initArrayPrototype() {
 				deleteCount = length - start
 			}
 		}
+		// Collect removed elements.
 		removed := make([]*JSValue, deleteCount)
-		copy(removed, this.arrayVal[start:start+deleteCount])
+		for i := 0; i < deleteCount; i++ {
+			removed[i] = this.arrayVal.Get(start + i)
+		}
+		// Collect new items.
 		var newItems []*JSValue
 		for i := 2; i < len(rest); i++ {
 			newItems = append(newItems, rest[i])
 		}
+		// Build result slice.
 		result := make([]*JSValue, 0, length-deleteCount+len(newItems))
-		result = append(result, this.arrayVal[:start]...)
+		for i := 0; i < start; i++ {
+			result = append(result, this.arrayVal.Get(i))
+		}
 		result = append(result, newItems...)
-		result = append(result, this.arrayVal[start+deleteCount:]...)
-		this.arrayVal = result
+		for i := start + deleteCount; i < length; i++ {
+			result = append(result, this.arrayVal.Get(i))
+		}
+		this.arrayVal.ReplaceAll(result)
 		this.gen.Add(1)
 		return NewArray(removed...)
 	})
 	defMethod(ArrayPrototype, "indexOf", func(args ...*JSValue) *JSValue {
-		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+		if len(args) < 2 || args[0] == nil || !args[0].isArr {
 			return NewNumber(-1)
 		}
-		for i, elem := range args[0].arrayVal {
-			if jsValueEqual(elem, args[1]) {
+		n := args[0].arrayVal.Len()
+		for i := 0; i < n; i++ {
+			if jsValueEqual(args[0].arrayVal.Get(i), args[1]) {
 				return NewNumber(float64(i))
 			}
 		}
 		return NewNumber(-1)
 	})
 	defMethod(ArrayPrototype, "findIndex", func(args ...*JSValue) *JSValue {
-		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+		if len(args) < 2 || args[0] == nil || !args[0].isArr {
 			return NewNumber(-1)
 		}
 		fn := args[1]
 		if fn == nil || fn.funcVal == nil {
 			return NewNumber(-1)
 		}
-		for i, elem := range args[0].arrayVal {
-			if Truthy(fn.funcVal(elem, NewNumber(float64(i)))) {
+		n := args[0].arrayVal.Len()
+		for i := 0; i < n; i++ {
+			if Truthy(fn.funcVal(args[0].arrayVal.Get(i), NewNumber(float64(i)))) {
 				return NewNumber(float64(i))
 			}
 		}
 		return NewNumber(-1)
 	})
 	defMethod(ArrayPrototype, "map", func(args ...*JSValue) *JSValue {
-		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+		if len(args) < 2 || args[0] == nil || !args[0].isArr {
 			return NewArray()
 		}
 		this := args[0]
@@ -501,14 +520,15 @@ func initArrayPrototype() {
 		if fn == nil || fn.funcVal == nil {
 			return NewArray()
 		}
-		results := make([]*JSValue, len(this.arrayVal))
-		for i, elem := range this.arrayVal {
-			results[i] = fn.funcVal(elem, NewNumber(float64(i)), this)
+		n := this.arrayVal.Len()
+		results := make([]*JSValue, n)
+		for i := 0; i < n; i++ {
+			results[i] = fn.funcVal(this.arrayVal.Get(i), NewNumber(float64(i)), this)
 		}
 		return NewArray(results...)
 	})
 	defMethod(ArrayPrototype, "filter", func(args ...*JSValue) *JSValue {
-		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+		if len(args) < 2 || args[0] == nil || !args[0].isArr {
 			return NewArray()
 		}
 		this := args[0]
@@ -517,7 +537,9 @@ func initArrayPrototype() {
 			return NewArray()
 		}
 		var results []*JSValue
-		for i, elem := range this.arrayVal {
+		n := this.arrayVal.Len()
+		for i := 0; i < n; i++ {
+			elem := this.arrayVal.Get(i)
 			r := fn.funcVal(elem, NewNumber(float64(i)), this)
 			if r != nil && r.Bool() {
 				results = append(results, elem)
@@ -526,7 +548,7 @@ func initArrayPrototype() {
 		return NewArray(results...)
 	})
 	defMethod(ArrayPrototype, "forEach", func(args ...*JSValue) *JSValue {
-		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+		if len(args) < 2 || args[0] == nil || !args[0].isArr {
 			return NewUndefined()
 		}
 		this := args[0]
@@ -534,20 +556,23 @@ func initArrayPrototype() {
 		if fn == nil || fn.funcVal == nil {
 			return NewUndefined()
 		}
-		for i, elem := range this.arrayVal {
-			fn.funcVal(elem, NewNumber(float64(i)), this)
+		n := this.arrayVal.Len()
+		for i := 0; i < n; i++ {
+			fn.funcVal(this.arrayVal.Get(i), NewNumber(float64(i)), this)
 		}
 		return NewUndefined()
 	})
 	defMethod(ArrayPrototype, "find", func(args ...*JSValue) *JSValue {
-		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+		if len(args) < 2 || args[0] == nil || !args[0].isArr {
 			return NewUndefined()
 		}
 		fn := args[1]
 		if fn == nil || fn.funcVal == nil {
 			return NewUndefined()
 		}
-		for _, elem := range args[0].arrayVal {
+		n := args[0].arrayVal.Len()
+		for i := 0; i < n; i++ {
+			elem := args[0].arrayVal.Get(i)
 			if Truthy(fn.funcVal(elem)) {
 				return elem
 			}
@@ -555,37 +580,39 @@ func initArrayPrototype() {
 		return NewUndefined()
 	})
 	defMethod(ArrayPrototype, "some", func(args ...*JSValue) *JSValue {
-		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+		if len(args) < 2 || args[0] == nil || !args[0].isArr {
 			return NewBool(false)
 		}
 		fn := args[1]
 		if fn == nil || fn.funcVal == nil {
 			return NewBool(false)
 		}
-		for _, elem := range args[0].arrayVal {
-			if Truthy(fn.funcVal(elem)) {
+		n := args[0].arrayVal.Len()
+		for i := 0; i < n; i++ {
+			if Truthy(fn.funcVal(args[0].arrayVal.Get(i))) {
 				return NewBool(true)
 			}
 		}
 		return NewBool(false)
 	})
 	defMethod(ArrayPrototype, "every", func(args ...*JSValue) *JSValue {
-		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+		if len(args) < 2 || args[0] == nil || !args[0].isArr {
 			return NewBool(true)
 		}
 		fn := args[1]
 		if fn == nil || fn.funcVal == nil {
 			return NewBool(true)
 		}
-		for _, elem := range args[0].arrayVal {
-			if !Truthy(fn.funcVal(elem)) {
+		n := args[0].arrayVal.Len()
+		for i := 0; i < n; i++ {
+			if !Truthy(fn.funcVal(args[0].arrayVal.Get(i))) {
 				return NewBool(false)
 			}
 		}
 		return NewBool(true)
 	})
 	defMethod(ArrayPrototype, "reduce", func(args ...*JSValue) *JSValue {
-		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+		if len(args) < 2 || args[0] == nil || !args[0].isArr {
 			if len(args) >= 3 {
 				return args[2]
 			}
@@ -595,30 +622,32 @@ func initArrayPrototype() {
 		if fn == nil || fn.funcVal == nil {
 			return NewUndefined()
 		}
-		arr := args[0].arrayVal
+		n := args[0].arrayVal.Len()
 		var acc *JSValue
 		startIdx := 0
 		if len(args) >= 3 {
 			acc = args[2]
-		} else if len(arr) > 0 {
-			acc = arr[0]
+		} else if n > 0 {
+			acc = args[0].arrayVal.Get(0)
 			startIdx = 1
 		} else {
 			return NewUndefined()
 		}
-		for i := startIdx; i < len(arr); i++ {
-			acc = fn.funcVal(acc, arr[i])
+		for i := startIdx; i < n; i++ {
+			acc = fn.funcVal(acc, args[0].arrayVal.Get(i))
 		}
 		return acc
 	})
 	defMethod(ArrayPrototype, "flat", func(args ...*JSValue) *JSValue {
-		if len(args) < 1 || args[0] == nil || args[0].arrayVal == nil {
+		if len(args) < 1 || args[0] == nil || !args[0].isArr {
 			return NewArray()
 		}
 		var result []*JSValue
-		for _, elem := range args[0].arrayVal {
-			if elem != nil && elem.arrayVal != nil {
-				result = append(result, elem.arrayVal...)
+		n := args[0].arrayVal.Len()
+		for i := 0; i < n; i++ {
+			elem := args[0].arrayVal.Get(i)
+			if elem != nil && elem.isArr {
+				result = append(result, elem.arrayVal.Slice()...)
 			} else {
 				result = append(result, elem)
 			}
@@ -626,7 +655,7 @@ func initArrayPrototype() {
 		return NewArray(result...)
 	})
 	defMethod(ArrayPrototype, "flatMap", func(args ...*JSValue) *JSValue {
-		if len(args) < 2 || args[0] == nil || args[0].arrayVal == nil {
+		if len(args) < 2 || args[0] == nil || !args[0].isArr {
 			return NewArray()
 		}
 		fn := args[1]
@@ -634,10 +663,11 @@ func initArrayPrototype() {
 			return NewArray()
 		}
 		var result []*JSValue
-		for i, elem := range args[0].arrayVal {
-			r := fn.funcVal(elem, NewNumber(float64(i)))
-			if r != nil && r.arrayVal != nil {
-				result = append(result, r.arrayVal...)
+		n := args[0].arrayVal.Len()
+		for i := 0; i < n; i++ {
+			r := fn.funcVal(args[0].arrayVal.Get(i), NewNumber(float64(i)))
+			if r != nil && r.isArr {
+				result = append(result, r.arrayVal.Slice()...)
 			} else {
 				result = append(result, r)
 			}
