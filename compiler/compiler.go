@@ -82,7 +82,7 @@ func CompilePackageWithOptLevel(files map[string][]byte, pkgName, moduleName, en
 func newDefaultPipeline(optLevel int) *pipeline.Pipeline {
 	ctx := tcontext.New()
 	RegisterDefaultBuiltins(ctx)
-	return pipeline.NewWithContext(pipeline.OptLevel(optLevel), ctx)
+	return pipeline.NewWithContext(tcontext.OptLevel(optLevel), ctx)
 }
 
 func compileWithExportsMetadata(exports PackageExports, currentFile string) ([]backend.CrossFileExport, []string) {

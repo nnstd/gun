@@ -23,18 +23,9 @@ import (
 	typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 )
 
-// OptLevel controls the optimization aggressiveness.
-type OptLevel int
-
-const (
-	O0 OptLevel = iota // No optimization (fastest compile)
-	O1                 // Basic optimizations
-	O2                 // Full optimization
-)
-
 // Pipeline orchestrates the compilation stages.
 type Pipeline struct {
-	OptLevel OptLevel
+	OptLevel context.OptLevel
 	Passes   []passes.Pass
 	Ctx      *context.TranspilerContext
 
@@ -56,23 +47,23 @@ type compileOptions struct {
 
 // New creates a pipeline with the given optimization level and default passes.
 // The context is empty — call NewWithContext to use pre-registered builtins.
-func New(level OptLevel) *Pipeline {
+func New(level context.OptLevel) *Pipeline {
 	return NewWithContext(level, context.New())
 }
 
 // NewWithContext creates a pipeline with a pre-configured TranspilerContext.
-func NewWithContext(level OptLevel, ctx *context.TranspilerContext) *Pipeline {
+func NewWithContext(level context.OptLevel, ctx *context.TranspilerContext) *Pipeline {
 	p := &Pipeline{
 		OptLevel: level,
 		Ctx:      ctx,
 	}
 
 	switch level {
-	case O1:
+	case context.O1:
 		p.Passes = []passes.Pass{
 			passes.ConstFold{},
 		}
-	case O2:
+	case context.O2:
 		p.Passes = []passes.Pass{
 			passes.ConstFold{},
 			passes.DCE{},
@@ -127,7 +118,7 @@ func (p *Pipeline) compileHIRModule(hirMod *hir.Module, moduleName string, sameP
 		p.OnMIR(mirMod)
 	}
 
-	if p.OptLevel > O0 && len(p.Passes) > 0 {
+	if p.OptLevel > context.O0 && len(p.Passes) > 0 {
 		ssaMod := ssa.Build(mirMod)
 		if p.OnSSA != nil {
 			p.OnSSA(ssaMod)
@@ -146,9 +137,9 @@ func (p *Pipeline) compileHIRModule(hirMod *hir.Module, moduleName string, sameP
 
 	var goFile *ast.File
 	if len(opts.crossFileExports) == 0 && len(opts.reservedNames) == 0 && len(opts.importNameMap) == 0 && len(opts.exportAliasMap) == 0 && len(opts.localAliasMap) == 0 && opts.namespaceAlias == "" && len(opts.namespaceEntries) == 0 {
-		goFile = backend.Lower(hirMod, p.Ctx, moduleName, samePackageImports)
+		goFile = backend.Lower(hirMod, p.Ctx, moduleName, samePackageImports, p.OptLevel)
 	} else {
-		goFile = backend.LowerWithExports(hirMod, p.Ctx, moduleName, samePackageImports, opts.crossFileExports, opts.reservedNames, opts.importNameMap, opts.exportAliasMap, opts.localAliasMap, opts.namespaceAlias, opts.namespaceEntries)
+		goFile = backend.LowerWithExports(hirMod, p.Ctx, moduleName, samePackageImports, opts.crossFileExports, opts.reservedNames, opts.importNameMap, opts.exportAliasMap, opts.localAliasMap, opts.namespaceAlias, opts.namespaceEntries, p.OptLevel)
 	}
 	return backend.GenerateWithSource(goFile, hirMod.SourcePath, hirMod.SourceSize)
 }
@@ -356,7 +347,7 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 			}
 		}
 
-		goFiles[name] = backend.LowerWithExports(hirMod, p.Ctx, moduleName, true, crossExports, reservedNames, importNameMap, exportAliases[name], localAliases[name], namespaceAliases[name], exportAliases[name])
+		goFiles[name] = backend.LowerWithExports(hirMod, p.Ctx, moduleName, true, crossExports, reservedNames, importNameMap, exportAliases[name], localAliases[name], namespaceAliases[name], exportAliases[name], p.OptLevel)
 	}
 
 	backend.BreakPackageInitCycles(goFiles)

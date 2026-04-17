@@ -11,12 +11,11 @@ set -uo pipefail
 GUN_DIR="$(cd "$(dirname "$0")" && pwd)"
 GUN_BIN="${GUN_BIN:-go run $GUN_DIR}"
 BUN_BIN="${BUN_BIN:-bun}"
-GUN_PORT=3080
-BUN_PORT=3081
 BENCH_DIR="/tmp/gun-bench"
 K6_DURATION="${K6_DURATION:-10s}"
 K6_RATE="${K6_RATE:-10000}"
 K6_VUS="${K6_VUS:-100}"
+GUN_OPT_LEVELS="${GUN_OPT_LEVELS:-0 1 2}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -46,7 +45,7 @@ check_deps() {
 # ── Kill servers on our ports ───────────────────────────────
 
 kill_servers() {
-  for port in $GUN_PORT $BUN_PORT; do
+  for port in 3080 3081 3082 3083 3090; do
     local pid=$(lsof -ti :$port 2>/dev/null || true)
     if [ -n "$pid" ]; then
       kill $pid 2>/dev/null || true
@@ -112,15 +111,18 @@ bootstrap() {
   log "Bootstrapping in $BENCH_DIR ..."
 
   rm -rf "$BENCH_DIR"
-  mkdir -p "$BENCH_DIR/gun-out" "$BENCH_DIR/bun"
+  mkdir -p "$BENCH_DIR/bun"
 
   write_server_ts
 
-  # ── Gun: transpile + build ──
-  log "Transpiling with Gun ..."
-  PORT=$GUN_PORT $GUN_BIN transpile "$BENCH_DIR/server.ts" -o "$BENCH_DIR/gun-out" 2>&1 | tail -3
-  (cd "$BENCH_DIR/gun-out" && go mod tidy 2>&1 && go build -o bench-server . 2>&1)
-  ok "Gun build done"
+  # ── Gun: transpile + build for each opt level ──
+  for level in $GUN_OPT_LEVELS; do
+    log "Transpiling with Gun -O $level ..."
+    mkdir -p "$BENCH_DIR/gun-o$level"
+    $GUN_BIN transpile "$BENCH_DIR/server.ts" -o "$BENCH_DIR/gun-o$level" -O $level 2>&1 | tail -3
+    (cd "$BENCH_DIR/gun-o$level" && go mod tidy 2>&1 && go build -o bench-server . 2>&1)
+    ok "Gun -O $level build done"
+  done
 
   # ── Bun: install deps ──
   log "Installing Bun deps ..."
@@ -292,70 +294,73 @@ verify_server() {
   [ "$all_ok" = true ]
 }
 
+# ── Extract metrics from parse_k6_json output into prefixed variables ──
+
+extract_metrics() {
+  local prefix=$1
+  local output=$2
+  while IFS='=' read -r k v; do
+    eval "${prefix}_${k}=\"${v}\""
+  done <<< "$output"
+}
+
+get_metric() {
+  eval echo "\"\${${1}_${2}:-N/A}\""
+}
+
 # ── Main ────────────────────────────────────────────────────
 
 main() {
   echo ""
   echo -e "${BOLD}========================================${RESET}"
-  echo -e "${BOLD}  Hono + Zod Benchmark: Gun vs Bun${RESET}"
+  echo -e "${BOLD}  Hono + Zod Benchmark: Gun (O0/O1/O2) vs Bun${RESET}"
   echo -e "${BOLD}========================================${RESET}"
   echo ""
 
   check_deps
   bootstrap
 
-  # ── Gun benchmark ──
-  kill_servers
-  log "Starting Gun server on :$GUN_PORT ..."
-  PORT=$GUN_PORT "$BENCH_DIR/gun-out/bench-server" &
-  local gun_pid=$!
-  sleep 1
+  # ── Gun benchmarks for each opt level ──
+  local port=3080
+  for level in $GUN_OPT_LEVELS; do
+    kill_servers
+    local label="Gun -O${level}"
+    log "Starting ${label} server on :${port} ..."
+    PORT=$port "$BENCH_DIR/gun-o${level}/bench-server" &
+    local pid=$!
+    sleep 1
 
-  local gun_metrics=""
-  if verify_server "Gun" $GUN_PORT; then
-    run_k6 "Gun (Go)" $GUN_PORT "$BENCH_DIR/gun-results.json"
-    gun_metrics=$(parse_k6_json "$BENCH_DIR/gun-results.json")
-  else
-    warn "Gun server verification failed, skipping benchmark"
-  fi
+    if verify_server "$label" $port; then
+      run_k6 "$label" $port "$BENCH_DIR/gun-o${level}-results.json"
+      local m=$(parse_k6_json "$BENCH_DIR/gun-o${level}-results.json")
+      extract_metrics "gun_o${level}" "$m"
+    else
+      warn "${label} server verification failed, skipping"
+    fi
 
-  kill $gun_pid 2>/dev/null || true
+    kill $pid 2>/dev/null || true
+    port=$((port + 1))
+  done
+
   kill_servers
 
   # ── Bun benchmark ──
-  log "Starting Bun server on :$BUN_PORT ..."
-  PORT=$BUN_PORT $BUN_BIN run "$BENCH_DIR/bun/server.ts" &
+  local bun_port=3090
+  log "Starting Bun server on :${bun_port} ..."
+  PORT=$bun_port $BUN_BIN run "$BENCH_DIR/bun/server.ts" &
   local bun_pid=$!
   sleep 1
 
-  local bun_metrics=""
-  if verify_server "Bun" $BUN_PORT; then
-    run_k6 "Bun" $BUN_PORT "$BENCH_DIR/bun-results.json"
-    bun_metrics=$(parse_k6_json "$BENCH_DIR/bun-results.json")
+  if verify_server "Bun" $bun_port; then
+    run_k6 "Bun" $bun_port "$BENCH_DIR/bun-results.json"
+    local m=$(parse_k6_json "$BENCH_DIR/bun-results.json")
+    extract_metrics "bun" "$m"
   else
-    warn "Bun server verification failed, skipping benchmark"
+    warn "Bun server verification failed, skipping"
   fi
 
   kill $bun_pid 2>/dev/null || true
   kill_servers
-
-  # ── Extract metrics ──
-  local gun_rps gun_err gun_avg gun_p50 gun_p90 gun_p95 gun_vus
-  local bun_rps bun_err bun_avg bun_p50 bun_p90 bun_p95 bun_vus
-
-  while IFS='=' read -r k v; do
-    case "$k" in
-      rps) gun_rps="$v" ;; err) gun_err="$v" ;; avg) gun_avg="$v" ;;
-      p50) gun_p50="$v" ;; p90) gun_p90="$v" ;; p95) gun_p95="$v" ;; vus) gun_vus="$v" ;;
-    esac
-  done <<< "$gun_metrics"
-
-  while IFS='=' read -r k v; do
-    case "$k" in
-      rps) bun_rps="$v" ;; err) bun_err="$v" ;; avg) bun_avg="$v" ;;
-      p50) bun_p50="$v" ;; p90) bun_p90="$v" ;; p95) bun_p95="$v" ;; vus) bun_vus="$v" ;;
-    esac
-  done <<< "$bun_metrics"
 
   # ── Summary table ──
   echo ""
@@ -363,14 +368,25 @@ main() {
   echo -e "${BOLD}  Summary${RESET}"
   echo -e "${BOLD}========================================${RESET}"
   echo ""
-  printf "${BOLD}%-20s %-15s %-15s${RESET}\n" "Metric" "Gun (Go)" "Bun"
-  printf "%-20s %-15s %-15s\n" "Throughput" "${gun_rps:-N/A} req/s" "${bun_rps:-N/A} req/s"
-  printf "%-20s %-15s %-15s\n" "Error rate" "${gun_err:-N/A}" "${bun_err:-N/A}"
-  printf "%-20s %-15s %-15s\n" "Latency (avg)" "${gun_avg:-N/A}" "${bun_avg:-N/A}"
-  printf "%-20s %-15s %-15s\n" "Latency (p50)" "${gun_p50:-N/A}" "${bun_p50:-N/A}"
-  printf "%-20s %-15s %-15s\n" "Latency (p90)" "${gun_p90:-N/A}" "${bun_p90:-N/A}"
-  printf "%-20s %-15s %-15s\n" "Latency (p95)" "${gun_p95:-N/A}" "${bun_p95:-N/A}"
-  printf "%-20s %-15s %-15s\n" "VUs needed" "${gun_vus:-N/A}" "${bun_vus:-N/A}"
+
+  printf "${BOLD}%-18s %-14s %-14s %-14s %-14s${RESET}\n" "Metric" "Gun -O0" "Gun -O1" "Gun -O2" "Bun"
+
+  for metric in rps err avg p50 p90 p95; do
+    case "$metric" in
+      rps) label="Throughput" ;;
+      err) label="Error rate" ;;
+      avg) label="Latency (avg)" ;;
+      p50) label="Latency (p50)" ;;
+      p90) label="Latency (p90)" ;;
+      p95) label="Latency (p95)" ;;
+    esac
+    local v0="$(get_metric gun_o0 $metric)"
+    local v1="$(get_metric gun_o1 $metric)"
+    local v2="$(get_metric gun_o2 $metric)"
+    local vb="$(get_metric bun $metric)"
+    [ "$metric" = "rps" ] && { v0="$v0 req/s"; v1="$v1 req/s"; v2="$v2 req/s"; vb="$vb req/s"; }
+    printf "%-18s %-14s %-14s %-14s %-14s\n" "$label" "$v0" "$v1" "$v2" "$vb"
+  done
   echo ""
 }
 

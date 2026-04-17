@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nnstd/gun/compiler/context"
 	"github.com/nnstd/gun/compiler/hir"
 	"github.com/nnstd/gun/compiler/mir"
 	"github.com/nnstd/gun/compiler/ssa"
@@ -27,7 +28,7 @@ func parseTS(t *testing.T, source string) *sitter.Tree {
 	return tree
 }
 
-func compile(t *testing.T, source string, level OptLevel) string {
+func compile(t *testing.T, source string, level context.OptLevel) string {
 	t.Helper()
 	tree := parseTS(t, source)
 	defer tree.Close()
@@ -49,19 +50,19 @@ func assertContains(t *testing.T, got, want string) {
 // --- Pipeline creation ---
 
 func TestNewO0(t *testing.T) {
-	p := New(O0)
-	if p.OptLevel != O0 {
-		t.Fatal("expected O0")
+	p := New(context.O0)
+	if p.OptLevel != context.O0 {
+		t.Fatal("expected context.O0")
 	}
 	if len(p.Passes) != 0 {
-		t.Fatalf("O0 should have no passes, got %d", len(p.Passes))
+		t.Fatalf("context.O0 should have no passes, got %d", len(p.Passes))
 	}
 }
 
 func TestNewO1(t *testing.T) {
-	p := New(O1)
+	p := New(context.O1)
 	if len(p.Passes) != 1 {
-		t.Fatalf("O1 should have 1 pass, got %d", len(p.Passes))
+		t.Fatalf("context.O1 should have 1 pass, got %d", len(p.Passes))
 	}
 	if p.Passes[0].Name() != "const-fold" {
 		t.Fatalf("expected const-fold, got %q", p.Passes[0].Name())
@@ -69,7 +70,7 @@ func TestNewO1(t *testing.T) {
 }
 
 func TestNewO2(t *testing.T) {
-	p := New(O2)
+	p := New(context.O2)
 	if len(p.Passes) != 2 {
 		t.Fatalf("O2 should have 2 passes, got %d", len(p.Passes))
 	}
@@ -78,30 +79,30 @@ func TestNewO2(t *testing.T) {
 // --- Full pipeline tests ---
 
 func TestCompileO0(t *testing.T) {
-	out := compile(t, `const x = 42;`, O0)
+	out := compile(t, `const x = 42;`, context.O0)
 	assertContains(t, out, "package main")
 	assertContains(t, out, "42")
 }
 
 func TestCompileO1(t *testing.T) {
-	out := compile(t, `function f() { return 1 + 2; }`, O1)
+	out := compile(t, `function f() { return 1 + 2; }`, context.O1)
 	assertContains(t, out, "package main")
 	assertContains(t, out, "jsvalue.NewFunction")
 }
 
 func TestCompileO2(t *testing.T) {
-	out := compile(t, `const x = "hello";`, O2)
+	out := compile(t, `const x = "hello";`, context.O2)
 	assertContains(t, out, "package main")
 	assertContains(t, out, "hello")
 }
 
 func TestCompileExportedFunction(t *testing.T) {
-	out := compile(t, `export function greet() { return "hi"; }`, O0)
+	out := compile(t, `export function greet() { return "hi"; }`, context.O0)
 	assertContains(t, out, "Greet")
 }
 
 func TestCompileClass(t *testing.T) {
-	out := compile(t, `class Dog { bark() { return "woof"; } }`, O0)
+	out := compile(t, `class Dog { bark() { return "woof"; } }`, context.O0)
 	assertContains(t, out, "Dog")
 	assertContains(t, out, "jsvalue.NewClass")
 }
@@ -112,7 +113,7 @@ func TestHooks(t *testing.T) {
 	tree := parseTS(t, `const x = 42;`)
 	defer tree.Close()
 
-	p := New(O2)
+	p := New(context.O2)
 	hirCalled := false
 	mirCalled := false
 	ssaCalled := false
@@ -144,7 +145,7 @@ func TestCompileHIR(t *testing.T) {
 	defer tree.Close()
 
 	hirMod := hir.BuildModule(tree.RootNode(), []byte(`const x = 42;`), "main")
-	p := New(O0)
+	p := New(context.O0)
 	out, err := p.CompileHIR(hirMod, "", false)
 	if err != nil {
 		t.Fatal(err)
@@ -158,7 +159,7 @@ func TestCompileTreeSupportsAsyncFunctionDeclarationPhase1(t *testing.T) {
 	tree := parseTS(t, `async function load() { return await fetch(); }`)
 	defer tree.Close()
 
-	p := New(O0)
+	p := New(context.O0)
 	out, err := p.CompileTree(tree.RootNode(), []byte(`async function load() { return await fetch(); }`), "main", "", false)
 	if err != nil {
 		t.Fatalf("expected async compile success, got %v", err)
@@ -171,7 +172,7 @@ func TestCompileHIRSupportsAsyncFunctionDeclarationPhase1(t *testing.T) {
 	defer tree.Close()
 
 	hirMod := hir.BuildModule(tree.RootNode(), []byte(`async function load() { return await fetch(); }`), "main")
-	p := New(O0)
+	p := New(context.O0)
 	out, err := p.CompileHIR(hirMod, "", false)
 	if err != nil {
 		t.Fatalf("expected async compile success, got %v", err)
@@ -180,7 +181,7 @@ func TestCompileHIRSupportsAsyncFunctionDeclarationPhase1(t *testing.T) {
 }
 
 func TestCompilePackageSupportsAsyncFunctionDeclarationPhase1(t *testing.T) {
-	p := New(O0)
+	p := New(context.O0)
 	out, err := p.CompilePackage(map[string][]byte{
 		"entry.ts": []byte(`import { load } from "./util"; export function main() { return load(); }`),
 		"util.ts":  []byte(`export async function load() { return await Promise.resolve(1); }`),
@@ -195,7 +196,7 @@ func TestCompileTreeRejectsAwaitInParameterDefaultPhase0(t *testing.T) {
 	tree := parseTS(t, `function load(value = await fetch()) { return value; }`)
 	defer tree.Close()
 
-	p := New(O0)
+	p := New(context.O0)
 	_, err := p.CompileTree(tree.RootNode(), []byte(`function load(value = await fetch()) { return value; }`), "main", "", false)
 	if err == nil {
 		t.Fatal("expected async diagnostic error")
@@ -207,7 +208,7 @@ func TestCompileTreeSupportsAsyncArrowPhase1(t *testing.T) {
 	tree := parseTS(t, `const load = async () => { await Promise.resolve(1); return 2; }`)
 	defer tree.Close()
 
-	p := New(O0)
+	p := New(context.O0)
 	out, err := p.CompileTree(tree.RootNode(), []byte(`const load = async () => { await Promise.resolve(1); return 2; }`), "main", "", false)
 	if err != nil {
 		t.Fatalf("expected async arrow compile success, got %v", err)
@@ -219,7 +220,7 @@ func TestCompileTreeSupportsAsyncFunctionExpressionPhase1(t *testing.T) {
 	tree := parseTS(t, `const load = async function() { await Promise.resolve(1); return 2; }`)
 	defer tree.Close()
 
-	p := New(O0)
+	p := New(context.O0)
 	out, err := p.CompileTree(tree.RootNode(), []byte(`const load = async function() { await Promise.resolve(1); return 2; }`), "main", "", false)
 	if err != nil {
 		t.Fatalf("expected async function expression compile success, got %v", err)
@@ -248,7 +249,7 @@ func TestCompileVariousSnippets(t *testing.T) {
 
 	for _, s := range snippets {
 		t.Run(s.name, func(t *testing.T) {
-			for _, level := range []OptLevel{O0, O1, O2} {
+			for _, level := range []context.OptLevel{context.O0, context.O1, context.O2} {
 				out := compile(t, s.ts, level)
 				if !strings.Contains(out, "package main") {
 					t.Errorf("O%d: missing package declaration for %q", level, s.name)

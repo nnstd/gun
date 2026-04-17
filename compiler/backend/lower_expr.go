@@ -7,6 +7,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/nnstd/gun/compiler/context"
 	"github.com/nnstd/gun/compiler/hir"
 	"github.com/nnstd/gun/compiler/symbol"
 )
@@ -1305,9 +1306,15 @@ func (l *Lowerer) lowerClassExpr(e *hir.ClassExpr) ast.Expr {
 
 func (l *Lowerer) lowerPrivateGet(mem *hir.MemberExpr) ast.Expr {
 	l.jsvalueImport()
-	l.addAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "error")
 	key := l.lowerClassMemberKey(mem.Property, true, nil)
 	objExpr := l.lowerExpr(mem.Object)
+
+	// O1+: skip brand check for this.#field
+	if l.optLevel >= context.O1 && l.isThisExpr(mem.Object) {
+		return callExpr(selectorExpr(objExpr, "Get"), key)
+	}
+
+	l.addAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "error")
 	access := describeHIRExpr(mem.Object) + ".#" + mem.Property
 	marker := l.lineDirectiveMarker(mem.Span)
 	brandCheck := l.privateBrandCheck(goIdent("_obj"))
@@ -1347,9 +1354,30 @@ func (l *Lowerer) lowerPrivateGet(mem *hir.MemberExpr) ast.Expr {
 
 func (l *Lowerer) lowerPrivateAssignExpr(mem *hir.MemberExpr, op hir.AssignOp, rhsHIR hir.Expr, rhs ast.Expr) ast.Expr {
 	l.jsvalueImport()
-	l.addAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "error")
 	key := l.lowerClassMemberKey(mem.Property, true, nil)
 	objExpr := l.lowerExpr(mem.Object)
+
+	// O1+: skip brand check for this.#field = val
+	if l.optLevel >= context.O1 && l.isThisExpr(mem.Object) {
+		val := l.wrapAsJSValue(rhs)
+		if op != hir.OpAssign {
+			helperName := mapAssignOpToJSValue(op)
+			current := callExpr(selectorExpr(objExpr, "Get"), key)
+			val = callExpr(selectorExpr(goIdent("jsvalue"), helperName), current, val)
+		}
+		return callExpr(&ast.FuncLit{
+			Type: &ast.FuncType{
+				Params:  fieldList(),
+				Results: fieldList(goField("", jsValuePtrType())),
+			},
+			Body: blockStmt(
+				exprStmt(callExpr(selectorExpr(objExpr, "Set"), key, val)),
+				returnStmt(val),
+			),
+		})
+	}
+
+	l.addAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "error")
 	access := describeHIRExpr(mem.Object) + ".#" + mem.Property + " = " + describeHIRExpr(rhsHIR)
 	marker := l.lineDirectiveMarker(mem.Span)
 	brandCheck := l.privateBrandCheck(goIdent("_obj"))
@@ -1395,11 +1423,17 @@ func (l *Lowerer) lowerPrivateAssignExpr(mem *hir.MemberExpr, op hir.AssignOp, r
 
 func (l *Lowerer) lowerPrivateMethodCall(mem *hir.MemberExpr, args []ast.Expr, hasSpread bool) ast.Expr {
 	l.jsvalueImport()
-	l.addAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "error")
 	key := l.lowerClassMemberKey(mem.Property, true, nil)
 	objExpr := l.lowerExpr(mem.Object)
-	access := describeHIRExpr(mem.Object) + ".#" + mem.Property
 	callArgs := append([]ast.Expr{key}, args...)
+
+	// O1+: skip brand check for this.#method()
+	if l.optLevel >= context.O1 && l.isThisExpr(mem.Object) {
+		return buildCallWithSpread(selectorExpr(objExpr, "MethodCall"), callArgs, hasSpread)
+	}
+
+	l.addAliasedImport("github.com/nnstd/gun/runtime/builtin/error", "error")
+	access := describeHIRExpr(mem.Object) + ".#" + mem.Property
 	marker := l.lineDirectiveMarker(mem.Span)
 	brandCheck := l.privateBrandCheck(goIdent("_obj"))
 	hasKey := callExpr(selectorExpr(goIdent("_obj"), "HasOwnProperty"), key)
@@ -1428,6 +1462,11 @@ func (l *Lowerer) lowerPrivateMethodCall(mem *hir.MemberExpr, args []ast.Expr, h
 		},
 		Body: blockStmt(body...),
 	}, objExpr)
+}
+
+func (l *Lowerer) isThisExpr(e hir.Expr) bool {
+	_, ok := e.(*hir.ThisExpr)
+	return ok
 }
 
 func describeHIRExpr(e hir.Expr) string {

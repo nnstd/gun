@@ -36,6 +36,7 @@ type CrossFileExport struct {
 type Lowerer struct {
 	symtab            *symbol.Table
 	ctx               *context.TranspilerContext
+	optLevel          context.OptLevel
 	imports           map[string]string // Go import path → alias
 	decls             []ast.Decl
 	importedSyms      map[*symbol.Symbol]importResolution // how each imported symbol resolves to Go
@@ -67,13 +68,13 @@ type Lowerer struct {
 }
 
 // Lower converts an HIR module to a Go AST file.
-func Lower(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool) *ast.File {
-	return LowerWithExports(mod, ctx, moduleName, samePackageImports, nil, nil, nil, nil, nil, "", nil)
+func Lower(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, optLevel context.OptLevel) *ast.File {
+	return LowerWithExports(mod, ctx, moduleName, samePackageImports, nil, nil, nil, nil, nil, "", nil, optLevel)
 }
 
 // LowerWithExports converts an HIR module to a Go AST file with knowledge of
 // symbols exported from other files in the same package.
-func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string, localAliasMap map[symbol.ID]string, namespaceAlias string, namespaceEntries map[string]string) *ast.File {
+func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string, localAliasMap map[symbol.ID]string, namespaceAlias string, namespaceEntries map[string]string, optLevel context.OptLevel) *ast.File {
 	cfe := make(map[string]bool)
 	for _, exp := range crossFileExports {
 		cfe[exp.GoName] = true
@@ -85,6 +86,7 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 	l := &Lowerer{
 		symtab:           mod.SymbolTable,
 		ctx:              ctx,
+		optLevel:         optLevel,
 		imports:          make(map[string]string),
 		importedSyms:     make(map[*symbol.Symbol]importResolution),
 		importedNames:    make(map[string]importResolution),

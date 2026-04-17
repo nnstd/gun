@@ -9,6 +9,15 @@ package context
 
 import "go/ast"
 
+// OptLevel controls the optimization aggressiveness.
+type OptLevel int
+
+const (
+	O0 OptLevel = iota // No optimization (fastest compile)
+	O1                 // Basic optimizations
+	O2                 // Full optimization
+)
+
 // Imports is the interface for adding Go imports during lowering.
 type Imports interface {
 	AddImport(path string)

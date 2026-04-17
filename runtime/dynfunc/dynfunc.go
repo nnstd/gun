@@ -14,10 +14,11 @@ import (
 	"strings"
 	"sync"
 
-	sitter "github.com/tree-sitter/go-tree-sitter"
-	typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
+	"github.com/nnstd/gun/compiler/context"
 	"github.com/nnstd/gun/compiler/pipeline"
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
+	sitter "github.com/tree-sitter/go-tree-sitter"
+	typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 )
 
 var (
@@ -68,7 +69,7 @@ func CompileFunction(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 	body := args[len(args)-1].String()
 	var paramNames []string
 	for _, a := range args[:len(args)-1] {
-		for _, p := range strings.Split(a.String(), ",") {
+		for p := range strings.SplitSeq(a.String(), ",") {
 			p = strings.TrimSpace(p)
 			if p != "" {
 				paramNames = append(paramNames, p)
@@ -137,7 +138,7 @@ func compileJSFunction(jsSource string, uniqueKey string) (*jsvalue.JSValue, err
 	defer tree.Close()
 
 	// 2. Transpile through pipeline
-	pipe := pipeline.New(pipeline.O0)
+	pipe := pipeline.New(context.O0)
 	goSource, err := pipe.CompileTree(tree.RootNode(), source, "main", "github.com/nnstd/gun", false)
 	if err != nil {
 		return nil, fmt.Errorf("transpile: %w", err)

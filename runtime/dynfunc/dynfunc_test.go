@@ -10,6 +10,7 @@ import (
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
+	"github.com/nnstd/gun/compiler/context"
 	"github.com/nnstd/gun/compiler/pipeline"
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
 	"github.com/nnstd/gun/runtime/dynfunc"
@@ -117,7 +118,7 @@ func TestTranspilePlugin(t *testing.T) {
 	tree := parser.Parse(jsSource, nil)
 	defer tree.Close()
 
-	pipe := pipeline.New(pipeline.O0)
+	pipe := pipeline.New(context.O0)
 	goSource, err := pipe.CompileTree(tree.RootNode(), jsSource, "main", "github.com/nnstd/gun", false)
 	if err != nil {
 		t.Fatalf("transpile: %v", err)

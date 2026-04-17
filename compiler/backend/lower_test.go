@@ -34,7 +34,7 @@ func lowerTS(t *testing.T, source string) string {
 
 	mod := hir.BuildModule(tree.RootNode(), []byte(source), "main")
 	ctx := context.New()
-	file := Lower(mod, ctx, "", false)
+	file := Lower(mod, ctx, "", false, context.O0)
 	out, err := Generate(file)
 	if err != nil {
 		t.Fatalf("generate failed: %v", err)
@@ -49,7 +49,7 @@ func lowerTSWithPath(t *testing.T, source, sourcePath string) string {
 
 	mod := hir.BuildModuleWithPath(tree.RootNode(), []byte(source), "main", sourcePath)
 	ctx := context.New()
-	file := Lower(mod, ctx, "", false)
+	file := Lower(mod, ctx, "", false, context.O0)
 	out, err := GenerateWithSource(file, mod.SourcePath, mod.SourceSize)
 	if err != nil {
 		t.Fatalf("generate failed: %v", err)
@@ -106,7 +106,7 @@ func TestLowerFuncDecl(t *testing.T) {
 		},
 	}
 
-	file := Lower(mod, context.New(), "", false)
+	file := Lower(mod, context.New(), "", false, context.O0)
 	out, err := Generate(file)
 	if err != nil {
 		t.Fatalf("generate failed: %v", err)
@@ -134,7 +134,7 @@ func TestLowerVarDecl(t *testing.T) {
 		},
 	}
 
-	file := Lower(mod, context.New(), "", false)
+	file := Lower(mod, context.New(), "", false, context.O0)
 	out, err := Generate(file)
 	if err != nil {
 		t.Fatalf("generate failed: %v", err)
@@ -160,7 +160,7 @@ func TestLowerMainFunc(t *testing.T) {
 		},
 	}
 
-	file := Lower(mod, context.New(), "", false)
+	file := Lower(mod, context.New(), "", false, context.O0)
 	out, err := Generate(file)
 	if err != nil {
 		t.Fatalf("generate failed: %v", err)
@@ -209,7 +209,7 @@ func TestLowerIfStatement(t *testing.T) {
 		},
 	}
 
-	file := Lower(mod, context.New(), "", false)
+	file := Lower(mod, context.New(), "", false, context.O0)
 	out, err := Generate(file)
 	if err != nil {
 		t.Fatalf("generate failed: %v", err)
@@ -247,7 +247,7 @@ func TestLowerClassDecl(t *testing.T) {
 		},
 	}
 
-	file := Lower(mod, context.New(), "", false)
+	file := Lower(mod, context.New(), "", false, context.O0)
 	out, err := Generate(file)
 	if err != nil {
 		t.Fatalf("generate failed: %v", err)
@@ -278,7 +278,7 @@ func TestLowerEnumDecl(t *testing.T) {
 		},
 	}
 
-	file := Lower(mod, context.New(), "", false)
+	file := Lower(mod, context.New(), "", false, context.O0)
 	out, err := Generate(file)
 	if err != nil {
 		t.Fatalf("generate failed: %v", err)
@@ -615,7 +615,7 @@ func TestGenerateProducesValidGo(t *testing.T) {
 	for _, ts := range snippets {
 		tree := parseTS(t, ts)
 		mod := hir.BuildModule(tree.RootNode(), []byte(ts), "main")
-		file := Lower(mod, context.New(), "", false)
+		file := Lower(mod, context.New(), "", false, context.O0)
 		_, err := Generate(file)
 		tree.Close()
 		if err != nil {
@@ -914,4 +914,51 @@ func TestSpreadWithRegularArgs(t *testing.T) {
 		}
 	`)
 	assertContains(t, out, "append")
+}
+
+func TestPrivateFieldBrandCheckOptimization(t *testing.T) {
+	source := `
+class A {
+    #private: number;
+    constructor(x: number) {
+        this.#private = x;
+    }
+    method(other: A) {
+        const a = this.#private;
+        const b = other.#private;
+        return a + b;
+    }
+}
+`
+	// Test O0: brand checks present for both this.#field and other.#field
+	outO0 := lowerTS(t, source)
+	brandCheckCountO0 := strings.Count(outO0, "HasOwnProperty")
+	if brandCheckCountO0 < 4 {
+		t.Errorf("O0: expected >= 4 HasOwnProperty (brand+key for read+read), got %d", brandCheckCountO0)
+	}
+
+	// Test O1: brand check eliminated for this.#field but kept for other.#field
+	tree := parseTS(t, source)
+	defer tree.Close()
+	mod := hir.BuildModule(tree.RootNode(), []byte(source), "main")
+	if err := hir.AsyncPipelinePhase1Error(mod); err != nil {
+		t.Fatal(err)
+	}
+	fileO1 := Lower(mod, context.New(), "", false, context.O1)
+	outO1Bytes, err := Generate(fileO1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outO1 := string(outO1Bytes)
+
+	// O1 should still have brand checks for other.#field
+	brandCheckCountO1 := strings.Count(outO1, "HasOwnProperty")
+	if brandCheckCountO1 < 2 {
+		t.Errorf("O1: expected >= 2 HasOwnProperty for other.#field (brand+key), got %d", brandCheckCountO1)
+	}
+
+	// O1 should have fewer brand checks than O0
+	if brandCheckCountO1 >= brandCheckCountO0 {
+		t.Errorf("O1 should have fewer HasOwnProperty checks than O0: O1=%d, O0=%d", brandCheckCountO1, brandCheckCountO0)
+	}
 }
