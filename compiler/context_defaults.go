@@ -787,6 +787,21 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 			return callExpr(selectorExpr(ident("jsvalue"), "BtoaFunc"), args...)
 		},
 	})
+
+	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
+		Name: "structuredClone",
+		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			if len(args) == 0 {
+				return callExpr(selectorExpr(ident("jsvalue"), "NewUndefined"))
+			}
+			goArgs := []ast.Expr{jsvalueWrapLit(args[0])}
+			if len(args) > 1 {
+				goArgs = append(goArgs, jsvalueWrapLit(args[1]))
+			}
+			return callExpr(selectorExpr(ident("jsvalue"), "StructuredClone"), goArgs...)
+		},
+	})
 }
 
 // registerModules registers TS module → Go package mappings.
