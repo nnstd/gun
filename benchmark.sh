@@ -131,6 +131,39 @@ bootstrap() {
   ok "Bun setup done"
 }
 
+# ── Sample server resource usage during benchmark ───────────
+# Polls ps for RSS (MB) and CPU% of the server PID.
+# Writes one line per sample: "rss_mb cpu_pct" to outfile.
+# Stops when kill -0 fails or stopfile is created.
+
+sample_resources() {
+  local pid=$1
+  local outfile=$2
+  local stopfile=$3
+
+  > "$outfile"
+  while [ ! -f "$stopfile" ] && kill -0 "$pid" 2>/dev/null; do
+    local stats
+    stats=$(ps -o rss= -o %cpu= -p "$pid" 2>/dev/null | awk '{printf "%.0f %.1f", $1/1024, $2}')
+    echo "${stats:-0 0.0}" >> "$outfile"
+    sleep 0.25
+  done
+}
+
+# Parse resource sample file → peak_rss avg_cpu peak_cpu
+parse_resources() {
+  local infile=$1
+  awk '
+  {
+    if ($1 > peak_rss) peak_rss = $1
+    sum_cpu += $2; n++
+    if ($2 > peak_cpu) peak_cpu = $2
+  }
+  END {
+    printf "peak_rss=%.0f avg_cpu=%.1f peak_cpu=%.1f\n", peak_rss, (n>0?sum_cpu/n:0), peak_cpu
+  }' "$infile"
+}
+
 # ── Run k6 benchmark against a server ──────────────────────
 
 run_k6() {
@@ -331,9 +364,19 @@ main() {
     sleep 1
 
     if verify_server "$label" $port; then
+      local stopfile="$BENCH_DIR/gun-o${level}-res.stop"
+      rm -f "$stopfile"
+      sample_resources "$pid" "$BENCH_DIR/gun-o${level}-res.txt" "$stopfile" &
+      local sampler_pid=$!
+
       run_k6 "$label" $port "$BENCH_DIR/gun-o${level}-results.json"
+      touch "$stopfile"
+      wait $sampler_pid 2>/dev/null || true
+
       local m=$(parse_k6_json "$BENCH_DIR/gun-o${level}-results.json")
       extract_metrics "gun_o${level}" "$m"
+      local r=$(parse_resources "$BENCH_DIR/gun-o${level}-res.txt")
+      extract_metrics "gun_o${level}" "$r"
     else
       warn "${label} server verification failed, skipping"
     fi
@@ -352,9 +395,19 @@ main() {
   sleep 1
 
   if verify_server "Bun" $bun_port; then
+    local bun_stopfile="$BENCH_DIR/bun-res.stop"
+    rm -f "$bun_stopfile"
+    sample_resources "$bun_pid" "$BENCH_DIR/bun-res.txt" "$bun_stopfile" &
+    local bun_sampler_pid=$!
+
     run_k6 "Bun" $bun_port "$BENCH_DIR/bun-results.json"
+    touch "$bun_stopfile"
+    wait $bun_sampler_pid 2>/dev/null || true
+
     local m=$(parse_k6_json "$BENCH_DIR/bun-results.json")
     extract_metrics "bun" "$m"
+    local r=$(parse_resources "$BENCH_DIR/bun-res.txt")
+    extract_metrics "bun" "$r"
   else
     warn "Bun server verification failed, skipping"
   fi
@@ -371,7 +424,7 @@ main() {
 
   printf "${BOLD}%-18s %-14s %-14s %-14s %-14s${RESET}\n" "Metric" "Gun -O0" "Gun -O1" "Gun -O2" "Bun"
 
-  for metric in rps err avg p50 p90 p95; do
+  for metric in rps err avg p50 p90 p95 peak_rss avg_cpu peak_cpu; do
     case "$metric" in
       rps) label="Throughput" ;;
       err) label="Error rate" ;;
@@ -379,12 +432,17 @@ main() {
       p50) label="Latency (p50)" ;;
       p90) label="Latency (p90)" ;;
       p95) label="Latency (p95)" ;;
+      peak_rss) label="Peak RSS" ;;
+      avg_cpu) label="CPU (avg)" ;;
+      peak_cpu) label="CPU (peak)" ;;
     esac
     local v0="$(get_metric gun_o0 $metric)"
     local v1="$(get_metric gun_o1 $metric)"
     local v2="$(get_metric gun_o2 $metric)"
     local vb="$(get_metric bun $metric)"
     [ "$metric" = "rps" ] && { v0="$v0 req/s"; v1="$v1 req/s"; v2="$v2 req/s"; vb="$vb req/s"; }
+    [ "$metric" = "peak_rss" ] && { v0="$v0 MB"; v1="$v1 MB"; v2="$v2 MB"; vb="$vb MB"; }
+    [ "$metric" = "avg_cpu" ] || [ "$metric" = "peak_cpu" ] && { v0="$v0%"; v1="$v1%"; v2="$v2%"; vb="$vb%"; }
     printf "%-18s %-14s %-14s %-14s %-14s\n" "$label" "$v0" "$v1" "$v2" "$vb"
   done
   echo ""

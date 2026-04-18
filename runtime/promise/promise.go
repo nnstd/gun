@@ -1,6 +1,11 @@
 package promise
 
-import jsvalue "github.com/nnstd/gun/runtime/builtin"
+import (
+	"sync"
+
+	jsvalue "github.com/nnstd/gun/runtime/builtin"
+	"github.com/nnstd/gun/runtime/eventloop"
+)
 
 const (
 	statePending   = "pending"
@@ -15,6 +20,30 @@ var (
 	promiseFulfillKey = jsvalue.PropertyKey(jsvalue.NewSymbol("Promise.fulfill_handlers"))
 	promiseRejectKey  = jsvalue.PropertyKey(jsvalue.NewSymbol("Promise.reject_handlers"))
 )
+
+// promiseInternal holds Go-native concurrency primitives for a promise.
+// Stored in promiseInternals sync.Map keyed by *jsvalue.JSValue pointer.
+type promiseInternal struct {
+	mu      sync.Mutex
+	settled chan struct{}
+}
+
+var promiseInternals sync.Map // *jsvalue.JSValue -> *promiseInternal
+
+func newPromiseInternal(p *jsvalue.JSValue) *promiseInternal {
+	pi := &promiseInternal{
+		settled: make(chan struct{}),
+	}
+	promiseInternals.Store(p, pi)
+	return pi
+}
+
+func getPromiseInternal(p *jsvalue.JSValue) *promiseInternal {
+	if v, ok := promiseInternals.Load(p); ok {
+		return v.(*promiseInternal)
+	}
+	return nil
+}
 
 func defineInternal(p *jsvalue.JSValue, key string, value *jsvalue.JSValue) {
 	p.DefineProperty(key, &jsvalue.PropertyDescriptor{
@@ -51,13 +80,21 @@ func isPromise(v *jsvalue.JSValue) bool {
 
 // Await unwraps a resolved Promise, returning its value directly.
 // If the value is not a Promise, returns it unchanged.
-// If the Promise is pending, returns nil.
+// If the Promise is pending, blocks the caller goroutine until settlement.
+//
+// MUST NOT be called from a microtask handler on the event loop goroutine (deadlock).
 func Await(v *jsvalue.JSValue) *jsvalue.JSValue {
 	if !isPromise(v) {
 		return v
 	}
-	if getState(v) != stateFulfilled {
-		return nil
+	state := getState(v)
+	if state == stateFulfilled || state == stateRejected {
+		return v.Get(promiseValueKey)
+	}
+	// Pending — block until settled
+	pi := getPromiseInternal(v)
+	if pi != nil {
+		<-pi.settled
 	}
 	return v.Get(promiseValueKey)
 }
@@ -82,32 +119,53 @@ func dispatchHandlers(p *jsvalue.JSValue) {
 		return
 	}
 	value := p.Get(promiseValueKey)
+	var handlers []*jsvalue.JSValue
 	switch getState(p) {
 	case stateFulfilled:
-		for _, h := range getHandlers(p, promiseFulfillKey).Array() {
-			if h != nil {
-				h.Call(value)
-			}
-		}
+		handlers = getHandlers(p, promiseFulfillKey).Array()
 	case stateRejected:
-		for _, h := range getHandlers(p, promiseRejectKey).Array() {
-			if h != nil {
-				h.Call(value)
-			}
-		}
+		handlers = getHandlers(p, promiseRejectKey).Array()
 	}
+	// Clear handler arrays immediately (handlers captured by closures)
 	defineInternal(p, promiseFulfillKey, jsvalue.NewArray())
 	defineInternal(p, promiseRejectKey, jsvalue.NewArray())
+	// Schedule each handler as a separate microtask
+	for _, h := range handlers {
+		if h != nil {
+			val := value
+			handler := h
+			eventloop.Default.ScheduleMicrotask(func() {
+				handler.Call(val)
+			})
+		}
+	}
 }
 
 func fulfill(p *jsvalue.JSValue, value *jsvalue.JSValue) *jsvalue.JSValue {
-	if p == nil || getState(p) != statePending {
+	if p == nil {
 		return p
 	}
+	// Cycle detection — before mutex to avoid deadlock with reject
 	if value == p {
 		return reject(p, jsvalue.NewString("Chaining cycle detected for promise"))
 	}
+
+	pi := getPromiseInternal(p)
+	if pi != nil {
+		pi.mu.Lock()
+	}
+	if getState(p) != statePending {
+		if pi != nil {
+			pi.mu.Unlock()
+		}
+		return p
+	}
+
+	// Thenable: chain instead of resolving directly
 	if isThenable(value) {
+		if pi != nil {
+			pi.mu.Unlock()
+		}
 		value.MethodCall("then",
 			jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 				v := jsvalue.NewUndefined()
@@ -128,19 +186,58 @@ func fulfill(p *jsvalue.JSValue, value *jsvalue.JSValue) *jsvalue.JSValue {
 		)
 		return p
 	}
+
+	// State transition under mutex
 	defineInternal(p, promiseStateKey, jsvalue.NewString(stateFulfilled))
 	defineInternal(p, promiseValueKey, jsvalue.Nullish(value, jsvalue.NewUndefined()))
+	// Close settled channel, clean up internals, release mutex
+	if pi != nil {
+		close(pi.settled)
+		promiseInternals.Delete(p)
+		pi.mu.Unlock()
+	}
+
+	// Dispatch handlers FIRST (increments jobCount via ScheduleMicrotask)
+	// THEN decrement for promise settlement (prevents TOCTOU race)
 	dispatchHandlers(p)
+	if pi != nil {
+		eventloop.Default.SettlePromise()
+	}
+
 	return p
 }
 
 func reject(p *jsvalue.JSValue, reason *jsvalue.JSValue) *jsvalue.JSValue {
-	if p == nil || getState(p) != statePending {
+	if p == nil {
 		return p
 	}
+
+	pi := getPromiseInternal(p)
+	if pi != nil {
+		pi.mu.Lock()
+	}
+	if getState(p) != statePending {
+		if pi != nil {
+			pi.mu.Unlock()
+		}
+		return p
+	}
+
 	defineInternal(p, promiseStateKey, jsvalue.NewString(stateRejected))
 	defineInternal(p, promiseValueKey, jsvalue.Nullish(reason, jsvalue.NewUndefined()))
+	// Close settled channel, clean up internals, release mutex
+	if pi != nil {
+		close(pi.settled)
+		promiseInternals.Delete(p)
+		pi.mu.Unlock()
+	}
+
+	// Dispatch handlers FIRST, THEN settle
 	dispatchHandlers(p)
+	if pi != nil {
+		eventloop.Default.SettlePromise()
+	}
+
 	return p
 }
 
@@ -150,6 +247,12 @@ func init() {
 		defineInternal(this, promiseValueKey, jsvalue.NewUndefined())
 		defineInternal(this, promiseFulfillKey, jsvalue.NewArray())
 		defineInternal(this, promiseRejectKey, jsvalue.NewArray())
+
+		// Initialize concurrency primitives
+		newPromiseInternal(this)
+		// Liveness: keep event loop alive while this promise is pending
+		eventloop.Default.TrackPromise()
+
 		if len(args) > 0 && args[0] != nil && args[0].TypeString() == "function" {
 			resolve := jsvalue.NewFunction(func(inner ...*jsvalue.JSValue) *jsvalue.JSValue {
 				value := jsvalue.NewUndefined()
@@ -232,40 +335,33 @@ func init() {
 			return jsvalue.NewUndefined()
 		})
 
+		// Atomically check state + push/schedule under promiseInternal
+		// mutex.  Prevents TOCTOU race where fulfill() on another goroutine
+		// transitions state and clears handler arrays between the getState
+		// read and the handler push.
+		pi := getPromiseInternal(self)
+		if pi != nil {
+			pi.mu.Lock()
+		}
 		switch getState(self) {
 		case statePending:
 			getHandlers(self, promiseFulfillKey).MethodCall("push", fulfillHandler)
 			getHandlers(self, promiseRejectKey).MethodCall("push", rejectHandler)
 		case stateFulfilled:
-			value := self.Get(promiseValueKey)
-			if onFulfilled == nil || onFulfilled.TypeString() != "function" {
-				fulfill(next, value)
-				return next
-			}
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						reject(next, jsvalue.From(r))
-					}
-				}()
-				fulfill(next, onFulfilled.Call(value))
-			}()
-			return next
+			val := self.Get(promiseValueKey)
+			h := fulfillHandler
+			eventloop.Default.ScheduleMicrotask(func() {
+				h.Call(val)
+			})
 		case stateRejected:
 			reason := self.Get(promiseValueKey)
-			if onRejected == nil || onRejected.TypeString() != "function" {
-				reject(next, reason)
-				return next
-			}
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						reject(next, jsvalue.From(r))
-					}
-				}()
-				fulfill(next, onRejected.Call(reason))
-			}()
-			return next
+			h := rejectHandler
+			eventloop.Default.ScheduleMicrotask(func() {
+				h.Call(reason)
+			})
+		}
+		if pi != nil {
+			pi.mu.Unlock()
 		}
 		return next
 	}).MarkAsMethod())
@@ -315,14 +411,30 @@ func init() {
 			reject(next, reason)
 			return jsvalue.NewUndefined()
 		})
+		// Same atomic state check as .then() — prevents TOCTOU race.
+		pi := getPromiseInternal(self)
+		if pi != nil {
+			pi.mu.Lock()
+		}
 		switch getState(self) {
 		case statePending:
 			getHandlers(self, promiseFulfillKey).MethodCall("push", fulfillHandler)
 			getHandlers(self, promiseRejectKey).MethodCall("push", rejectHandler)
 		case stateFulfilled:
-			fulfillHandler.Call(self.Get(promiseValueKey))
+			val := self.Get(promiseValueKey)
+			h := fulfillHandler
+			eventloop.Default.ScheduleMicrotask(func() {
+				h.Call(val)
+			})
 		case stateRejected:
-			rejectHandler.Call(self.Get(promiseValueKey))
+			reason := self.Get(promiseValueKey)
+			h := rejectHandler
+			eventloop.Default.ScheduleMicrotask(func() {
+				h.Call(reason)
+			})
+		}
+		if pi != nil {
+			pi.mu.Unlock()
 		}
 		return next
 	}).MarkAsMethod())
@@ -415,12 +527,12 @@ func init() {
 }
 
 // ResolvedPromise creates a promise in the fulfilled state without allocating
-// handler arrays. Use when the resolution value is known at construction time.
+// handler arrays or concurrency primitives. Use when the resolution value is
+// known at construction time. No event loop liveness tracking.
 func ResolvedPromise(value *jsvalue.JSValue) *jsvalue.JSValue {
 	p := jsvalue.NewObject()
 	p.SetPrototype(Promise.Get("prototype"))
 	defineInternal(p, promiseStateKey, jsvalue.NewString(stateFulfilled))
 	defineInternal(p, promiseValueKey, value)
-	// No handler arrays — resolved promise never needs them
 	return p
 }

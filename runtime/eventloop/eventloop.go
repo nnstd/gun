@@ -25,7 +25,7 @@ type EventLoop struct {
 
 // Default is the package-level singleton event loop.
 var Default = &EventLoop{
-	jobChan:    make(chan func(), 256),
+	jobChan:    make(chan func(), 4096),
 	wakeupChan: make(chan struct{}, 1),
 }
 
@@ -58,4 +58,28 @@ func (el *EventLoop) RegisterServer() {
 func (el *EventLoop) UnregisterServer() {
 	el.handleCount.Add(-1)
 	el.wake()
+}
+
+// TrackPromise increments the job count to keep the event loop alive while a promise is pending.
+func (el *EventLoop) TrackPromise() {
+	el.jobCount.Add(1)
+}
+
+// SettlePromise decrements the job count for a settled promise and wakes the loop.
+func (el *EventLoop) SettlePromise() {
+	el.jobCount.Add(-1)
+	el.wake()
+}
+
+// ScheduleMicrotask enqueues fn as a microtask on the event loop.
+// The microtask increments jobCount on schedule and decrements it on completion.
+// Used by Promise resolution to dispatch .then()/.catch() handlers asynchronously.
+func (el *EventLoop) ScheduleMicrotask(fn func()) {
+	el.jobCount.Add(1)
+	el.jobChan <- func() {
+		defer func() { recover() }()
+		fn()
+		el.jobCount.Add(-1)
+		el.wake()
+	}
 }
