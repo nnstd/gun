@@ -830,12 +830,17 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 		UseAsJSValue: true,
 	})
 	ctx.RegisterModule("http", &tcontext.ModuleMapping{
-		GoImportPath: "net/http",
-		GoPkgName:    "http",
+		GoImportPath: "github.com/nnstd/gun/runtime/http",
+		GoPkgName:    "nodehttp",
+		UseAsJSValue: true,
 	})
 	ctx.RegisterModule("https", &tcontext.ModuleMapping{
-		GoImportPath: "net/http",
-		GoPkgName:    "http",
+		GoImportPath: "github.com/nnstd/gun/runtime/http",
+		GoPkgName:    "nodehttp",
+		UseAsJSValue: true,
+		SymbolOverrides: map[string]tcontext.SymbolOverride{
+			"default": {GoSymbol: "HTTPSAsJSValue"},
+		},
 	})
 	ctx.RegisterModule("url", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/url",
