@@ -628,3 +628,37 @@ func TestPrinterNested(t *testing.T) {
 	assertHIRContains(t, out, "While")
 	assertHIRContains(t, out, "Return")
 }
+
+func TestTopLevelAwaitDetection(t *testing.T) {
+	mod := buildHIR(t, `const x = await Promise.resolve(42);`)
+	if !mod.HasTopLevelAwait {
+		t.Error("HasTopLevelAwait should be true for top-level await")
+	}
+}
+
+func TestTopLevelAwaitExpression(t *testing.T) {
+	mod := buildHIR(t, `await Promise.resolve(1);`)
+	if !mod.HasTopLevelAwait {
+		t.Error("HasTopLevelAwait should be true for top-level await expression")
+	}
+}
+
+func TestNoTopLevelAwait(t *testing.T) {
+	mod := buildHIR(t, `const x = 42; console.log(x);`)
+	if mod.HasTopLevelAwait {
+		t.Error("HasTopLevelAwait should be false when no await at top level")
+	}
+}
+
+func TestAwaitInsideAsyncFunction(t *testing.T) {
+	mod := buildHIR(t, `
+		async function foo() {
+			const x = await Promise.resolve(42);
+			return x;
+		}
+		const y = 1;
+	`)
+	if mod.HasTopLevelAwait {
+		t.Error("HasTopLevelAwait should be false — await is inside async function, not at top level")
+	}
+}

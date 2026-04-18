@@ -65,6 +65,8 @@ type Lowerer struct {
 	needsBunWait      bool
 	sourcePath        string
 	asyncTempSymbols  []*symbol.Symbol
+	hasTopLevelAwait  bool
+	topLevelAwaitStmts []hir.Stmt
 }
 
 // Lower converts an HIR module to a Go AST file.
@@ -105,6 +107,7 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 		pkgName:          mod.Package,
 		varTypes:         make(map[string]string),
 		sourcePath:       mod.SourcePath,
+		hasTopLevelAwait: mod.HasTopLevelAwait,
 	}
 
 	// Reserve cross-file export names in the symbol table so local symbols
@@ -153,8 +156,30 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 	// Fix init cycles: split self-referencing vars into forward decl + init()
 	l.decls = l.fixInitCycles(l.decls)
 
-	// Ensure main() exists for runnable packages
-	if mod.Package == "main" {
+	// Handle top-level await: wrap main body in async state machine
+	if mod.Package == "main" && l.hasTopLevelAwait && len(l.topLevelAwaitStmts) > 0 {
+		asyncBody := l.lowerAsyncFuncBody(nil, &hir.BlockStmt{Stmts: l.topLevelAwaitStmts}, 0, false)
+		// Replace final return with expression statement (main returns nothing)
+		if len(asyncBody.List) > 0 {
+			if ret, ok := asyncBody.List[len(asyncBody.List)-1].(*ast.ReturnStmt); ok && len(ret.Results) > 0 {
+				asyncBody.List[len(asyncBody.List)-1] = exprStmt(ret.Results[0])
+			}
+		}
+		mainFn := l.getOrCreateMain()
+		// Keep defer error.RecoverMain() if present
+		var prefix []ast.Stmt
+		if len(mainFn.Body.List) > 0 {
+			if _, ok := mainFn.Body.List[0].(*ast.DeferStmt); ok {
+				prefix = mainFn.Body.List[:1]
+			}
+		}
+		mainFn.Body.List = append(prefix, asyncBody.List...)
+		l.addAliasedImport("github.com/nnstd/gun/runtime/eventloop", "eventloop")
+		mainFn.Body.List = append(mainFn.Body.List, exprStmt(callExpr(
+			selectorExpr(selectorExpr(goIdent("eventloop"), "Default"), "Run"),
+		)))
+	} else if mod.Package == "main" {
+		// Ensure main() exists for runnable packages
 		l.getOrCreateMain()
 		l.addAliasedImport("github.com/nnstd/gun/runtime/eventloop", "eventloop")
 		if mainFn := l.findMainFunc(); mainFn != nil {
@@ -253,7 +278,11 @@ func (l *Lowerer) lowerDecl(d hir.Decl) {
 	case *hir.FuncDecl:
 		l.lowerFuncDecl(d)
 	case *hir.VarDecl:
-		l.lowerVarDecl(d)
+		if l.hasTopLevelAwait && l.pkgName == "main" && hir.VarDeclContainsAwait(d) {
+			l.topLevelAwaitStmts = append(l.topLevelAwaitStmts, d)
+		} else {
+			l.lowerVarDecl(d)
+		}
 	case *hir.ClassDecl:
 		l.lowerClassDecl(d)
 	case *hir.EnumDecl:
@@ -1261,6 +1290,10 @@ func fileSpecificDefaultName(modulePath string) string {
 }
 
 func (l *Lowerer) lowerTopLevelStmt(d *hir.TopLevelStmt) {
+	if l.hasTopLevelAwait && l.pkgName == "main" {
+		l.topLevelAwaitStmts = append(l.topLevelAwaitStmts, d.Stmt)
+		return
+	}
 	gs := l.lowerStmt(d.Stmt)
 	if gs == nil {
 		return

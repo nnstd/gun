@@ -100,6 +100,10 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 			}()
 			req := web.RequestFromFastHTTP(ctx)
 			res := fetch.Call(req, serverObj)
+			if !promise.IsPromise(res) {
+				web.WriteResponseFastHTTP(ctx, res)
+				return
+			}
 			res = promise.Await(res)
 			web.WriteResponseFastHTTP(ctx, res)
 		},

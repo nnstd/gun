@@ -52,6 +52,8 @@ func BuildModuleWithPath(root *sitter.Node, source []byte, pkgName, sourcePath s
 		b.buildTopLevel(mod, child)
 	}
 
+	mod.HasTopLevelAwait = scanForTopLevelAwait(mod)
+
 	return mod
 }
 

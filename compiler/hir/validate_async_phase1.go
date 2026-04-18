@@ -8,7 +8,7 @@ func ValidateAsyncPipelinePhase1(mod *Module) []Diagnostic {
 	if mod == nil {
 		return nil
 	}
-	v := asyncPhase1Validator{sourcePath: mod.SourcePath}
+	v := asyncPhase1Validator{sourcePath: mod.SourcePath, hasTopLevelAwait: mod.HasTopLevelAwait}
 	for _, d := range mod.Declarations {
 		v.walkDecl(d, phase1Context{})
 	}
@@ -31,8 +31,9 @@ type phase1Context struct {
 }
 
 type asyncPhase1Validator struct {
-	sourcePath string
-	diags      []Diagnostic
+	sourcePath        string
+	diags             []Diagnostic
+	hasTopLevelAwait  bool
 }
 
 func (v *asyncPhase1Validator) add(span *SourceSpan, message string) {
@@ -55,9 +56,13 @@ func (v *asyncPhase1Validator) walkDecl(d Decl, ctx phase1Context) {
 		v.walkParams(d.Params, ctx)
 		v.walkBlock(d.Body, ctx)
 	case *VarDecl:
+		varDeclCtx := ctx
+		if v.hasTopLevelAwait {
+			varDeclCtx = phase1Context{inAsyncDecl: true}
+		}
 		for _, decl := range d.Declarators {
-			v.walkPattern(decl.Pattern, ctx)
-			v.walkExpr(decl.Init, ctx)
+			v.walkPattern(decl.Pattern, varDeclCtx)
+			v.walkExpr(decl.Init, varDeclCtx)
 		}
 	case *ClassDecl:
 		v.walkExpr(d.Parent, ctx)
@@ -87,7 +92,11 @@ func (v *asyncPhase1Validator) walkDecl(d Decl, ctx phase1Context) {
 			v.walkDecl(d.Decl, ctx)
 		}
 	case *TopLevelStmt:
-		v.walkStmt(d.Stmt, ctx)
+		tlaCtx := ctx
+		if v.hasTopLevelAwait {
+			tlaCtx = phase1Context{inAsyncDecl: true}
+		}
+		v.walkStmt(d.Stmt, tlaCtx)
 	}
 }
 
@@ -476,7 +485,98 @@ func stmtContainsAwait(s Stmt) bool {
 			}
 		}
 		return false
+	case *IfStmt:
+		return exprContainsAwait(s.Cond) || stmtContainsAwaitBlock(s.Then) || stmtContainsAwait(s.Else)
+	case *ForStmt:
+		return stmtContainsAwait(s.Init) || exprContainsAwait(s.Cond) || exprContainsAwait(s.Post) || stmtContainsAwaitBlock(s.Body)
+	case *ForInStmt:
+		return exprContainsAwait(s.Value) || stmtContainsAwaitBlock(s.Body)
+	case *ForOfStmt:
+		return exprContainsAwait(s.Value) || stmtContainsAwaitBlock(s.Body)
+	case *WhileStmt:
+		return exprContainsAwait(s.Cond) || stmtContainsAwaitBlock(s.Body)
+	case *DoWhileStmt:
+		return exprContainsAwait(s.Cond) || stmtContainsAwaitBlock(s.Body)
+	case *SwitchStmt:
+		if exprContainsAwait(s.Tag) {
+			return true
+		}
+		for _, c := range s.Cases {
+			if exprContainsAwait(c.Value) {
+				return true
+			}
+			for _, st := range c.Body {
+				if stmtContainsAwait(st) {
+					return true
+				}
+			}
+		}
+		return false
+	case *TryCatchStmt:
+		if stmtContainsAwaitBlock(s.Try) {
+			return true
+		}
+		if s.Catch != nil && stmtContainsAwaitBlock(s.Catch.Body) {
+			return true
+		}
+		if stmtContainsAwaitBlock(s.Finally) {
+			return true
+		}
+		return false
+	case *ThrowStmt:
+		return exprContainsAwait(s.Value)
+	case *LabeledStmt:
+		return stmtContainsAwait(s.Stmt)
 	default:
 		return false
 	}
+}
+
+func stmtContainsAwaitBlock(b *BlockStmt) bool {
+	if b == nil {
+		return false
+	}
+	for _, st := range b.Stmts {
+		if stmtContainsAwait(st) {
+			return true
+		}
+	}
+	return false
+}
+
+// scanForTopLevelAwait returns true if any TopLevelStmt or top-level VarDecl
+// in the module contains an await expression (not inside a nested function).
+func scanForTopLevelAwait(mod *Module) bool {
+	for _, d := range mod.Declarations {
+		switch d := d.(type) {
+		case *TopLevelStmt:
+			if stmtContainsAwait(d.Stmt) {
+				return true
+			}
+		case *VarDecl:
+			if VarDeclContainsAwait(d) {
+				return true
+			}
+		case *ExportDecl:
+			if d.Decl != nil {
+				if tls, ok := d.Decl.(*TopLevelStmt); ok && stmtContainsAwait(tls.Stmt) {
+					return true
+				}
+				if vd, ok := d.Decl.(*VarDecl); ok && VarDeclContainsAwait(vd) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// VarDeclContainsAwait returns true if any declarator init contains await.
+func VarDeclContainsAwait(d *VarDecl) bool {
+	for _, decl := range d.Declarators {
+		if exprContainsAwait(decl.Init) {
+			return true
+		}
+	}
+	return false
 }

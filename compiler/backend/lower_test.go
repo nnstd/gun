@@ -962,3 +962,26 @@ class A {
 		t.Errorf("O1 should have fewer HasOwnProperty checks than O0: O1=%d, O0=%d", brandCheckCountO1, brandCheckCountO0)
 	}
 }
+
+func TestTopLevelAwaitGeneratesAsyncMain(t *testing.T) {
+	out := lowerTS(t, `const x = await Promise.resolve(42); console.log(x);`)
+	if !strings.Contains(out, "promise") {
+		t.Error("async main should reference promise package")
+	}
+	if !strings.Contains(out, "_async_state") {
+		t.Error("async main should contain async state machine")
+	}
+	if !strings.Contains(out, "eventloop") {
+		t.Error("async main should contain eventloop run")
+	}
+}
+
+func TestNoTopLevelAwaitPlainMain(t *testing.T) {
+	out := lowerTS(t, `const x = 42; console.log(x);`)
+	if strings.Contains(out, "_async_state") {
+		t.Error("non-async module should not contain async state machine")
+	}
+	if strings.Contains(out, "promise.Promise") {
+		t.Error("non-async module should not reference promise.Promise")
+	}
+}

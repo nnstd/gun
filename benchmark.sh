@@ -160,7 +160,7 @@ parse_resources() {
     if ($2 > peak_cpu) peak_cpu = $2
   }
   END {
-    printf "peak_rss=%.0f avg_cpu=%.1f peak_cpu=%.1f\n", peak_rss, (n>0?sum_cpu/n:0), peak_cpu
+    printf "peak_rss=%.0f\navg_cpu=%.1f\npeak_cpu=%.1f\n", peak_rss, (n>0?sum_cpu/n:0), peak_cpu
   }' "$infile"
 }
 

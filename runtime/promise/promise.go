@@ -74,7 +74,7 @@ func getState(p *jsvalue.JSValue) string {
 	return p.Get(promiseStateKey).String()
 }
 
-func isPromise(v *jsvalue.JSValue) bool {
+func IsPromise(v *jsvalue.JSValue) bool {
 	return v != nil && jsvalue.InstanceOf(v, Promise).Bool()
 }
 
@@ -84,7 +84,7 @@ func isPromise(v *jsvalue.JSValue) bool {
 //
 // MUST NOT be called from a microtask handler on the event loop goroutine (deadlock).
 func Await(v *jsvalue.JSValue) *jsvalue.JSValue {
-	if !isPromise(v) {
+	if !IsPromise(v) {
 		return v
 	}
 	state := getState(v)
@@ -486,7 +486,7 @@ func init() {
 				reject(next, value)
 				return jsvalue.NewUndefined()
 			})
-			if isPromise(item) {
+			if IsPromise(item) {
 				item.MethodCall("then", resolveOne, rejectOne)
 			} else {
 				resolveOne.Call(item)
@@ -516,7 +516,7 @@ func init() {
 				reject(next, value)
 				return jsvalue.NewUndefined()
 			})
-			if isPromise(item) {
+			if IsPromise(item) {
 				item.MethodCall("then", resolveOne, rejectOne)
 			} else {
 				resolveOne.Call(item)

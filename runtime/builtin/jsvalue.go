@@ -34,11 +34,11 @@ const (
 // data races when Set() mutates desc.Value in-place on shared objects.
 type cacheEntry struct {
 	key     string
-	value   *JSValue                          // cached resolved value (snapshot)
-	getter  func(*JSValue) *JSValue           // cached accessor (may be nil)
-	source  *JSValue                          // object where property was found
-	gen     uint64                            // source.gen when cached
-	recvGen uint64                            // receiver's gen when cached
+	value   *JSValue                // cached resolved value (snapshot)
+	getter  func(*JSValue) *JSValue // cached accessor (may be nil)
+	source  *JSValue                // object where property was found
+	gen     uint64                  // source.gen when cached
+	recvGen uint64                  // receiver's gen when cached
 }
 
 // JSValue models a JavaScript value with typed storage and prototype chain.
@@ -56,14 +56,14 @@ type JSValue struct {
 	funcVal    func(...*JSValue) *JSValue
 	arrayVal   SmallValueList
 	isArr      bool // true when this JSValue has array semantics (even if empty)
-	regexVal   interface{} // stores GoRegex (see jsregex.go)
+	regexVal   any  // stores GoRegex (see jsregex.go)
 	mapVal     *jsMap
 	setVal     *jsSet
 	isMethod   bool                                           // true for class methods that expect this as _args[0]
 	classInit  func(this *JSValue, args ...*JSValue) *JSValue // raw constructor for super() calls
-	mu         sync.RWMutex   // per-object RWMutex for concurrent access
-	gen        atomic.Uint64  // incremented on every mutation for cache invalidation
-	cache      [4]cacheEntry  // fixed inline cache for Get() optimization
+	mu         sync.RWMutex                                   // per-object RWMutex for concurrent access
+	gen        atomic.Uint64                                  // incremented on every mutation for cache invalidation
+	cache      [4]cacheEntry                                  // fixed inline cache for Get() optimization
 }
 
 // MarkAsMethod marks this function as a class method that expects 'this'
