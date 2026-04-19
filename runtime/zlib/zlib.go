@@ -3,7 +3,6 @@ package zlib
 import (
 	"bytes"
 	gziplib "compress/gzip"
-	"io"
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
 	promise "github.com/nnstd/gun/runtime/promise"
@@ -37,16 +36,3 @@ var PromisesAsJSValue = jsvalue.ObjectFrom(
 		return promise.Promise.Get("resolve").Call(gzipValue(args[0]))
 	}),
 )
-
-func ungzipValue(v *jsvalue.JSValue) *jsvalue.JSValue {
-	if v == nil {
-		return jsvalue.NewString("")
-	}
-	gr, err := gziplib.NewReader(bytes.NewBufferString(v.String()))
-	if err != nil {
-		return jsvalue.NewString("")
-	}
-	defer gr.Close()
-	data, _ := io.ReadAll(gr)
-	return jsvalue.NewString(string(data))
-}

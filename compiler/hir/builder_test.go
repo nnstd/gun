@@ -51,13 +51,6 @@ func assertHIRContains(t *testing.T, hir, want string) {
 	}
 }
 
-func assertHIRNotContains(t *testing.T, hir, notWant string) {
-	t.Helper()
-	if strings.Contains(hir, notWant) {
-		t.Errorf("HIR should not contain %q\nGot:\n%s", notWant, hir)
-	}
-}
-
 // --- Declaration Tests ---
 
 func TestFunctionDeclaration(t *testing.T) {

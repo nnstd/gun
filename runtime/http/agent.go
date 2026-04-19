@@ -16,7 +16,6 @@ type agentInternal struct {
 	keepAlive   bool
 	maxConns    int
 	timeoutMsec int
-	tlsConfig   any // *tls.Config; populated when TLS
 }
 
 func (a *agentInternal) hostClient(host string, isTLS bool) *fasthttp.HostClient {

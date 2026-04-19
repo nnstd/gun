@@ -4,15 +4,6 @@ import (
 	"go/ast"
 )
 
-// isErrorType returns true if the name is a JavaScript Error constructor.
-func isErrorType(name string) bool {
-	switch name {
-	case "Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError":
-		return true
-	}
-	return false
-}
-
 // NOTE: The old transformBuiltinCall, transformGlobalCall, and transformBuiltinNew
 // dispatch functions have been replaced by context-based dispatch. The actual
 // transform implementations below are registered via RegisterDefaultBuiltins()

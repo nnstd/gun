@@ -105,10 +105,6 @@ func ptrType(x ast.Expr) *ast.StarExpr {
 	return &ast.StarExpr{X: x}
 }
 
-func sliceType(elt ast.Expr) *ast.ArrayType {
-	return &ast.ArrayType{Elt: elt}
-}
-
 func jsValuePtrType() ast.Expr {
 	return ptrType(selectorExpr(goIdent("jsvalue"), "JSValue"))
 }

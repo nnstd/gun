@@ -198,7 +198,7 @@ replace github.com/nnstd/gun => %s
 	// 5. Lookup DynFunc (the function declared in the JS source)
 	sym, err := plug.Lookup("DynFunc")
 	if err != nil {
-		return nil, fmt.Errorf("Lookup DynFunc: %w", err)
+		return nil, fmt.Errorf("lookup DynFunc: %w", err)
 	}
 
 	dynFunc, ok := sym.(**jsvalue.JSValue)

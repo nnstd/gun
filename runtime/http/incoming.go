@@ -16,12 +16,12 @@ func newIncomingMessage(ctx *fasthttp.RequestCtx) *jsvalue.JSValue {
 
 	headers := jsvalue.NewObject()
 	rawHeaders := jsvalue.NewArray()
-	ctx.Request.Header.VisitAll(func(key, value []byte) {
+	for key, value := range ctx.Request.Header.All() {
 		k := strings.ToLower(string(key))
 		v := string(value)
 		headers.Set(k, jsvalue.NewString(v))
 		rawHeaders.MethodCall("push", jsvalue.NewString(string(key)), jsvalue.NewString(v))
-	})
+	}
 
 	this.Set("method", jsvalue.NewString(string(ctx.Method())))
 	this.Set("url", jsvalue.NewString(string(ctx.URI().RequestURI())))
@@ -48,10 +48,10 @@ func newClientResponseMessage(resp *fasthttp.Response) *jsvalue.JSValue {
 
 	headers := jsvalue.NewObject()
 	rawHeaders := jsvalue.NewArray()
-	resp.Header.VisitAll(func(key, value []byte) {
+	for key, value := range resp.Header.All() {
 		headers.Set(strings.ToLower(string(key)), jsvalue.NewString(string(value)))
 		rawHeaders.MethodCall("push", jsvalue.NewString(string(key)), jsvalue.NewString(string(value)))
-	})
+	}
 
 	this.Set("statusCode", jsvalue.NewNumber(float64(resp.StatusCode())))
 	this.Set("statusMessage", jsvalue.NewString(string(resp.Header.StatusMessage())))

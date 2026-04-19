@@ -808,7 +808,7 @@ func (b *Builder) buildExport(mod *Module, node *sitter.Node) {
 
 func (b *Builder) buildExportDefault(mod *Module, node *sitter.Node) {
 	// Find the first named child after "default"
-	for i := uint(0); i < node.NamedChildCount(); i++ {
+	for i, n := uint(0), node.NamedChildCount(); i < n; i++ {
 		child := node.NamedChild(i)
 		switch child.Kind() {
 		case "function_declaration":

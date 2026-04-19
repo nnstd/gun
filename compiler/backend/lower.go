@@ -34,38 +34,38 @@ type CrossFileExport struct {
 
 // Lowerer converts an HIR Module into a go/ast.File.
 type Lowerer struct {
-	symtab            *symbol.Table
-	ctx               *context.TranspilerContext
-	optLevel          context.OptLevel
-	imports           map[string]string // Go import path → alias
-	decls             []ast.Decl
-	importedSyms      map[*symbol.Symbol]importResolution // how each imported symbol resolves to Go
-	importedNames     map[string]importResolution         // fallback for unresolved imported identifiers
-	moduleName        string                              // Go module name for relative import resolution
-	samePackage       bool                                // treat relative imports as same-package refs
-	varTypes          map[string]string                   // variable name → module type (e.g. "hono")
-	reservedNames     map[string]bool
-	importNameMap     map[string]string
-	exportAliasMap    map[string]string
-	localAliasMap     map[symbol.ID]string
-	namespaceAlias    string
-	namespaceEntries  map[string]string
-	topLevelNames     map[string]string
+	symtab             *symbol.Table
+	ctx                *context.TranspilerContext
+	optLevel           context.OptLevel
+	imports            map[string]string // Go import path → alias
+	decls              []ast.Decl
+	importedSyms       map[*symbol.Symbol]importResolution // how each imported symbol resolves to Go
+	importedNames      map[string]importResolution         // fallback for unresolved imported identifiers
+	moduleName         string                              // Go module name for relative import resolution
+	samePackage        bool                                // treat relative imports as same-package refs
+	varTypes           map[string]string                   // variable name → module type (e.g. "hono")
+	reservedNames      map[string]bool
+	importNameMap      map[string]string
+	exportAliasMap     map[string]string
+	localAliasMap      map[symbol.ID]string
+	namespaceAlias     string
+	namespaceEntries   map[string]string
+	topLevelNames      map[string]string
 	eagerVarInits      map[symbol.ID]bool
 	emittedExportNames map[string]bool
 	crossFileExports   map[string]bool // Go names from other files (prevents .Get() dispatch)
-	initStmts         []ast.Stmt      // statements for init() function
-	pkgName           string          // Go package name
-	currentClassName  string          // set during class constructor/method lowering
-	insideFunc        int             // >0 when inside a function body
-	insideMethod      int             // >0 when inside a method body (_args[0] is this)
-	privateKeys       map[string]string
-	currentClassBrand string
-	syntheticCounter  int
-	needsBunWait      bool
-	sourcePath        string
-	asyncTempSymbols  []*symbol.Symbol
-	hasTopLevelAwait  bool
+	initStmts          []ast.Stmt      // statements for init() function
+	pkgName            string          // Go package name
+	currentClassName   string          // set during class constructor/method lowering
+	insideFunc         int             // >0 when inside a function body
+	insideMethod       int             // >0 when inside a method body (_args[0] is this)
+	privateKeys        map[string]string
+	currentClassBrand  string
+	syntheticCounter   int
+	needsBunWait       bool
+	sourcePath         string
+	asyncTempSymbols   []*symbol.Symbol
+	hasTopLevelAwait   bool
 	topLevelAwaitStmts []hir.Stmt
 }
 
@@ -86,28 +86,28 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 		reserved[name] = true
 	}
 	l := &Lowerer{
-		symtab:           mod.SymbolTable,
-		ctx:              ctx,
-		optLevel:         optLevel,
-		imports:          make(map[string]string),
-		importedSyms:     make(map[*symbol.Symbol]importResolution),
-		importedNames:    make(map[string]importResolution),
-		moduleName:       moduleName,
-		samePackage:      samePackageImports,
-		reservedNames:    reserved,
-		importNameMap:    importNameMap,
-		exportAliasMap:   exportAliasMap,
-		localAliasMap:    localAliasMap,
-		namespaceAlias:   namespaceAlias,
-		namespaceEntries: namespaceEntries,
-		topLevelNames:    make(map[string]string),
+		symtab:             mod.SymbolTable,
+		ctx:                ctx,
+		optLevel:           optLevel,
+		imports:            make(map[string]string),
+		importedSyms:       make(map[*symbol.Symbol]importResolution),
+		importedNames:      make(map[string]importResolution),
+		moduleName:         moduleName,
+		samePackage:        samePackageImports,
+		reservedNames:      reserved,
+		importNameMap:      importNameMap,
+		exportAliasMap:     exportAliasMap,
+		localAliasMap:      localAliasMap,
+		namespaceAlias:     namespaceAlias,
+		namespaceEntries:   namespaceEntries,
+		topLevelNames:      make(map[string]string),
 		eagerVarInits:      make(map[symbol.ID]bool),
 		emittedExportNames: make(map[string]bool),
 		crossFileExports:   cfe,
-		pkgName:          mod.Package,
-		varTypes:         make(map[string]string),
-		sourcePath:       mod.SourcePath,
-		hasTopLevelAwait: mod.HasTopLevelAwait,
+		pkgName:            mod.Package,
+		varTypes:           make(map[string]string),
+		sourcePath:         mod.SourcePath,
+		hasTopLevelAwait:   mod.HasTopLevelAwait,
 	}
 
 	// Reserve cross-file export names in the symbol table so local symbols
@@ -417,9 +417,7 @@ func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 	brandKey := l.nextSyntheticName(fmt.Sprintf("_brand_%s", symbol.Sanitize(name)))
 	l.decls = append(l.decls, varDecl(brandKey, nil, l.brandKeyValue(name)))
 	privateKeys := l.collectPrivateKeys(name, d.Properties, d.Methods)
-	for _, decl := range l.lowerPrivateKeyDecls(name, privateKeys) {
-		l.decls = append(l.decls, decl)
-	}
+	l.decls = append(l.decls, l.lowerPrivateKeyDecls(name, privateKeys)...)
 
 	prevClassName := l.currentClassName
 	prevClassBrand := l.currentClassBrand
@@ -880,25 +878,25 @@ func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 		if id, ok := rhs.(*ast.Ident); ok && id.Name == goName {
 			continue
 		}
-			if sym != nil && sym.Kind == symbol.KindVariable && !l.eagerVarInits[sym.ID] {
+		if sym != nil && sym.Kind == symbol.KindVariable && !l.eagerVarInits[sym.ID] {
+			l.deferVarToInit(goName, rhs)
+			continue
+		}
+		// Re-export aliases from other modules: defer to init() because
+		// the referenced var may itself be set in init().
+		if mappedFromModule {
+			l.deferVarToInit(goName, rhs)
+			continue
+		}
+		// Imported symbols (e.g. `import * as z; export { z }`) that resolve
+		// to cross-file variables must also be deferred, since the target
+		// variable may only be set in another file's init().
+		if sym != nil && sym.Kind == symbol.KindImport {
+			if _, isImported := l.importedSyms[sym]; isImported {
 				l.deferVarToInit(goName, rhs)
 				continue
 			}
-			// Re-export aliases from other modules: defer to init() because
-			// the referenced var may itself be set in init().
-			if mappedFromModule {
-				l.deferVarToInit(goName, rhs)
-				continue
-			}
-			// Imported symbols (e.g. `import * as z; export { z }`) that resolve
-			// to cross-file variables must also be deferred, since the target
-			// variable may only be set in another file's init().
-			if sym != nil && sym.Kind == symbol.KindImport {
-				if _, isImported := l.importedSyms[sym]; isImported {
-					l.deferVarToInit(goName, rhs)
-					continue
-				}
-			}
+		}
 		l.decls = append(l.decls, varDecl(goName, nil, rhs))
 		l.emittedExportNames[goName] = true
 	}
@@ -971,32 +969,33 @@ func (l *Lowerer) lowerExportDefault(d *hir.ExportDecl) {
 		}
 	case *hir.VarDecl:
 		// export default expr → var Default = expr
-		for _, decl := range inner.Declarators {
-			var value ast.Expr
-			if decl.Init != nil {
-				value = l.lowerExpr(decl.Init)
-				value = jsvalueWrapLit(value)
-			}
-			defaultName := "Default"
-			if alias, ok := l.exportAliasMap["default"]; ok {
-				defaultName = alias
-			}
-			// If the default export references an imported symbol, defer to
-			// init() since the target may only be set in another file's init().
-			deferToInit := false
-			if ident, ok := decl.Init.(*hir.Identifier); ok && ident.Sym != nil {
-				if _, isImported := l.importedSyms[ident.Sym]; isImported {
-					deferToInit = true
-				}
-			}
-			if deferToInit {
-				l.jsvalueImport()
-				l.decls = append(l.decls, varDecl(defaultName, jsValuePtrType(), nil))
-				l.initStmts = append(l.initStmts, assignStmt([]ast.Expr{goIdent(defaultName)}, []ast.Expr{value}))
-			} else {
-				l.decls = append(l.decls, varDecl(defaultName, nil, value))
-			}
+		if len(inner.Declarators) == 0 {
 			return
+		}
+		decl := inner.Declarators[0]
+		var value ast.Expr
+		if decl.Init != nil {
+			value = l.lowerExpr(decl.Init)
+			value = jsvalueWrapLit(value)
+		}
+		defaultName := "Default"
+		if alias, ok := l.exportAliasMap["default"]; ok {
+			defaultName = alias
+		}
+		// If the default export references an imported symbol, defer to
+		// init() since the target may only be set in another file's init().
+		deferToInit := false
+		if ident, ok := decl.Init.(*hir.Identifier); ok && ident.Sym != nil {
+			if _, isImported := l.importedSyms[ident.Sym]; isImported {
+				deferToInit = true
+			}
+		}
+		if deferToInit {
+			l.jsvalueImport()
+			l.decls = append(l.decls, varDecl(defaultName, jsValuePtrType(), nil))
+			l.initStmts = append(l.initStmts, assignStmt([]ast.Expr{goIdent(defaultName)}, []ast.Expr{value}))
+		} else {
+			l.decls = append(l.decls, varDecl(defaultName, nil, value))
 		}
 	default:
 		l.lowerDecl(d.Decl)
@@ -1585,12 +1584,6 @@ func (l *Lowerer) fixInitCycles(decls []ast.Decl) []ast.Decl {
 	}
 
 	return result
-}
-
-// exprReferencesIdent checks if an AST expression references an identifier by name.
-func exprReferencesIdent(expr ast.Expr, name string) bool {
-	_, ok := exprReferencedIdents(expr)[name]
-	return ok
 }
 
 func exprReferencedIdents(expr ast.Expr) map[string]bool {
@@ -2325,16 +2318,6 @@ func collectWritesAndReads(node ast.Node, writes, reads, locals map[string]bool)
 	// Second pass: all idents NOT in write positions are reads
 	ast.Inspect(node, func(n ast.Node) bool {
 		if id, ok := n.(*ast.Ident); ok && !writeIdents[id] && id.Name != "_" {
-			reads[id.Name] = true
-		}
-		return true
-	})
-}
-
-// collectReads walks an expression and records all identifiers as reads.
-func collectReads(node ast.Node, reads map[string]bool) {
-	ast.Inspect(node, func(n ast.Node) bool {
-		if id, ok := n.(*ast.Ident); ok && id.Name != "_" {
 			reads[id.Name] = true
 		}
 		return true

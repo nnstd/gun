@@ -1,7 +1,5 @@
 package backend
 
-import "go/token"
-
 import "github.com/nnstd/gun/compiler/hir"
 
 // mapBinaryOp converts an HIR binary operator to the jsvalue helper function name.
@@ -105,49 +103,5 @@ func mapAssignOpToJSValue(op hir.AssignOp) string {
 		return "Or"
 	default:
 		return "Add"
-	}
-}
-
-// mapBinaryOpToToken converts an HIR binary operator to a go/token for native Go expressions.
-func mapBinaryOpToToken(op hir.BinaryOp) token.Token {
-	switch op {
-	case hir.OpAdd:
-		return token.ADD
-	case hir.OpSub:
-		return token.SUB
-	case hir.OpMul:
-		return token.MUL
-	case hir.OpDiv:
-		return token.QUO
-	case hir.OpMod:
-		return token.REM
-	case hir.OpEq, hir.OpEqLoose:
-		return token.EQL
-	case hir.OpNEq, hir.OpNEqLoose:
-		return token.NEQ
-	case hir.OpLt:
-		return token.LSS
-	case hir.OpGt:
-		return token.GTR
-	case hir.OpLtE:
-		return token.LEQ
-	case hir.OpGtE:
-		return token.GEQ
-	case hir.OpAnd:
-		return token.LAND
-	case hir.OpOr:
-		return token.LOR
-	case hir.OpBitAnd:
-		return token.AND
-	case hir.OpBitOr:
-		return token.OR
-	case hir.OpBitXor:
-		return token.XOR
-	case hir.OpShl:
-		return token.SHL
-	case hir.OpShr, hir.OpUShr:
-		return token.SHR
-	default:
-		return token.ADD
 	}
 }
