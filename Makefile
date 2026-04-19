@@ -3,7 +3,7 @@ PKG     := ./...
 GOBIN   ?= $(shell go env GOPATH)/bin
 LDFLAGS := -X main.gunModuleRoot=$(CURDIR)
 
-.PHONY: build install clean test
+.PHONY: build install clean test check
 
 build:
 	go build -ldflags '$(LDFLAGS)' -o $(BINARY) .
@@ -16,3 +16,6 @@ clean:
 
 test:
 	go test $(PKG)
+
+check:
+	$(GOBIN)/staticcheck $(PKG)
