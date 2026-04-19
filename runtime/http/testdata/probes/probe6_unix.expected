@@ -1,0 +1,4 @@
+addr-typeof=string
+addr=/tmp/_gun_probe6.sock
+status=200
+body=via-unix

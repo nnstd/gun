@@ -1,7 +1,5 @@
 package jsvalue
 
-import "fmt"
-
 // StructuredClone performs a deep clone of v following the HTML structured clone algorithm.
 //
 // options (optional) may contain a "transfer" array of transferable objects. Each item
@@ -80,9 +78,9 @@ func structuredCloneInner(v *JSValue, seen map[*JSValue]*JSValue) *JSValue {
 	case TypeString:
 		return NewString(v.strVal)
 	case TypeSymbol:
-		panic(fmt.Sprintf("DataCloneError: Symbol cannot be cloned"))
+		panic("DataCloneError: Symbol cannot be cloned")
 	case TypeFunction:
-		panic(fmt.Sprintf("DataCloneError: function cannot be cloned"))
+		panic("DataCloneError: function cannot be cloned")
 	case TypeRegex:
 		// Regex is treated as a cloneable object in the spec.
 		return &JSValue{typ: TypeRegex, regexVal: v.regexVal, prototype: RegexpPrototype}

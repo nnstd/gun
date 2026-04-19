@@ -186,19 +186,25 @@ func init() {
 
 		var ln net.Listener
 		var err error
+		var addrLabel string
 		if path != "" {
 			_ = os.Remove(path)
+			addrLabel = path
 			ln, err = net.Listen("unix", path)
-			if err != nil {
-				panic(buildListenError(err, path, "listen"))
+			if err == nil {
+				si.socketPath = path
 			}
-			si.socketPath = path
 		} else {
-			addr := fmt.Sprintf("%s:%d", host, port)
-			ln, err = net.Listen("tcp", addr)
-			if err != nil {
-				panic(buildListenError(err, addr, "listen"))
-			}
+			addrLabel = fmt.Sprintf("%s:%d", host, port)
+			ln, err = net.Listen("tcp", addrLabel)
+		}
+		if err != nil {
+			errVal := buildListenError(err, addrLabel, "listen")
+			go func() {
+				time.Sleep(time.Millisecond)
+				this.MethodCall("emit", jsvalue.NewString("error"), errVal)
+			}()
+			return this
 		}
 		si.listener = ln
 		si.listening.Store(true)
@@ -219,7 +225,8 @@ func init() {
 				serveErr = si.server.Serve(ln)
 			}
 			if serveErr != nil && !si.closed.Load() {
-				log.Printf("[gun http] serve error: %v", serveErr)
+				errVal := jserror.Error.Call(jsvalue.NewString(serveErr.Error()))
+				this.MethodCall("emit", jsvalue.NewString("error"), errVal)
 			}
 		}()
 
@@ -290,6 +297,9 @@ func init() {
 		}
 		this.Set("listening", jsvalue.NewBool(false))
 		this.MethodCall("emit", jsvalue.NewString("close"))
+		serverRegistryMu.Lock()
+		delete(serverRegistry, this)
+		serverRegistryMu.Unlock()
 		if cb != nil {
 			cb.Call()
 		}

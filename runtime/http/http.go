@@ -2,7 +2,6 @@ package nodehttp
 
 import (
 	"strconv"
-	"strings"
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
 	jserror "github.com/nnstd/gun/runtime/builtin/error"
@@ -44,7 +43,11 @@ func buildMethods() *jsvalue.JSValue {
 func buildAgent(defaultPort int) *jsvalue.JSValue {
 	a := newAgentInstance(jsvalue.NewObject())
 	a.Set("defaultPort", jsvalue.NewNumber(float64(defaultPort)))
-	a.Set("protocol", jsvalue.NewString(map[bool]string{true: "https:", false: "http:"}[defaultPort == 443]))
+	protocol := "http:"
+	if defaultPort == 443 {
+		protocol = "https:"
+	}
+	a.Set("protocol", jsvalue.NewString(protocol))
 	return a
 }
 
@@ -130,6 +133,7 @@ func init() {
 	mixEventEmitter(responseCls)
 	mixEventEmitter(incomingCls)
 	mixEventEmitter(clientReqCls)
+	setupClientPrototype()
 
 	httpAgent = buildAgent(80)
 	httpsAgent = buildAgent(443)
@@ -190,9 +194,4 @@ func init() {
 		"Agent", agentClass,
 	)
 	HTTPSAsJSValue = httpsGlobal
-}
-
-// normalizeHeaderKey returns the lowercased form of a header name.
-func normalizeHeaderKey(s string) string {
-	return strings.ToLower(s)
 }

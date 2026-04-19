@@ -270,8 +270,12 @@ func (b *Builder) buildObjectLiteral(node *sitter.Node) *ObjectLiteral {
 			keyNode := child.ChildByFieldName("key")
 			valueNode := child.ChildByFieldName("value")
 			if keyNode != nil && valueNode != nil {
+				keyName := b.nodeText(keyNode)
+				if keyNode.Kind() == "string" {
+					keyName = stripQuotes(keyName)
+				}
 				prop := &Property{
-					KeyName: b.nodeText(keyNode),
+					KeyName: keyName,
 					Key:     b.buildExpr(keyNode),
 					Value:   b.buildExpr(valueNode),
 				}

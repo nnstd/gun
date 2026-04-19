@@ -106,23 +106,26 @@ func TestServerEADDRINUSE(t *testing.T) {
 	port := ln.Addr().(*net.TCPAddr).Port
 
 	srv := CreateServer(false, jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue { return jsvalue.NewUndefined() }))
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected panic on port collision")
+	errCh := make(chan *jsvalue.JSValue, 1)
+	srv.MethodCall("on", jsvalue.NewString("error"), jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		if len(args) > 0 {
+			errCh <- args[0]
 		}
-		errVal, ok := r.(*jsvalue.JSValue)
-		if !ok {
-			t.Fatalf("panic is not *JSValue: %T", r)
-		}
+		return jsvalue.NewUndefined()
+	}))
+	srv.MethodCall("listen", jsvalue.NewNumber(float64(port)), jsvalue.NewString("127.0.0.1"))
+
+	select {
+	case errVal := <-errCh:
 		if errVal.Get("code").String() != "EADDRINUSE" {
 			t.Errorf("code = %s, want EADDRINUSE", errVal.Get("code").String())
 		}
 		if errVal.Get("syscall").String() != "listen" {
 			t.Errorf("syscall = %s, want listen", errVal.Get("syscall").String())
 		}
-	}()
-	srv.MethodCall("listen", jsvalue.NewNumber(float64(port)), jsvalue.NewString("127.0.0.1"))
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected error event for EADDRINUSE")
+	}
 }
 
 func TestServerEmitsRequest(t *testing.T) {

@@ -3,3 +3,5 @@ gun
 plans/*.md
 .omx/
 .omc/
+.claude/
+.sisyphus/

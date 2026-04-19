@@ -795,7 +795,7 @@ console.log("Listening on " + port);
 	}
 
 	cmd := exec.Command(bin)
-	cmd.Env = append(os.Environ())
+	cmd.Env = os.Environ()
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
