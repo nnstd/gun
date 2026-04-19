@@ -3,17 +3,29 @@ package process
 import (
 	"fmt"
 	stdos "os"
+	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/nnstd/gun/runtime/builtin"
 )
 
+// GetEntryScript returns the TypeScript entry script path set by `gun run`
+// via the GUN_ENTRY_SCRIPT env var. Returns "" when unset.
+func GetEntryScript() string {
+	return stdos.Getenv("GUN_ENTRY_SCRIPT")
+}
+
+// GetEntryDir returns filepath.Dir(GetEntryScript()).
+func GetEntryDir() string {
+	return filepath.Dir(GetEntryScript())
+}
+
 // Argv follows Node.js convention: [runtime, script, ...args].
 // GUN_ENTRY_SCRIPT is set by "gun run" to the original .ts entry file path.
 // Without it, Args[0] (the binary) is used as the script path.
 var Argv = func() *jsvalue.JSValue {
-	script := stdos.Getenv("GUN_ENTRY_SCRIPT")
+	script := GetEntryScript()
 	if script == "" {
 		script = stdos.Args[0]
 	}
@@ -81,6 +93,11 @@ func Cwd() *jsvalue.JSValue {
 	dir, _ := stdos.Getwd()
 	return jsvalue.NewString(dir)
 }
+
+// AsJSValueCached is the stable package-level JSValue exports object, computed
+// once at init. ESM `import process from "process"` lowers to a reference to
+// this symbol, so it must be a var — not a function call.
+var AsJSValueCached = AsJSValue()
 
 // AsJSValue returns a JSValue object representing the process global.
 // Used when `process` is referenced as a standalone value (e.g. `process?.version`).

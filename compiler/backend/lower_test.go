@@ -581,6 +581,75 @@ func TestRoundTripImportNamed(t *testing.T) {
 	assertContains(t, out, "ReadFileSync") // capitalized
 }
 
+func TestRoundTripRequireDefaultMatchesImportDefault(t *testing.T) {
+	gotRequire := lowerTS(t, `const fs = require("fs"); const d = fs.readFileSync("x");`)
+	gotImport := lowerTS(t, `import fs from "fs"; const d = fs.readFileSync("x");`)
+	if gotRequire != gotImport {
+		t.Errorf("require() default form must lower identically to import default\n--- require ---\n%s\n--- import ---\n%s", gotRequire, gotImport)
+	}
+}
+
+func TestRoundTripRequireNamedMatchesImportNamed(t *testing.T) {
+	gotRequire := lowerTS(t, `const { readFileSync } = require("fs"); const d = readFileSync("x");`)
+	gotImport := lowerTS(t, `import { readFileSync } from "fs"; const d = readFileSync("x");`)
+	if gotRequire != gotImport {
+		t.Errorf("require() named form must lower identically to named import\n--- require ---\n%s\n--- import ---\n%s", gotRequire, gotImport)
+	}
+}
+
+// lowerTSWithModule parses+lowers source with a context containing a single
+// manually-registered ModuleMapping. Used to drive tests that depend on the
+// UseAsJSValue import path without pulling in the full `compiler` package
+// (which would create an import cycle into compiler/backend).
+func lowerTSWithModule(t *testing.T, source, tsName string, mod *context.ModuleMapping) string {
+	t.Helper()
+	tree := parseTS(t, source)
+	defer tree.Close()
+
+	hirMod := hir.BuildModule(tree.RootNode(), []byte(source), "main")
+	ctx := context.New()
+	ctx.RegisterModule(tsName, mod)
+	file := Lower(hirMod, ctx, "", false, context.O0)
+	out, err := Generate(file)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	return string(out)
+}
+
+func TestRoundTripImportProcessDefault(t *testing.T) {
+	out := lowerTSWithModule(t,
+		`import process from "process"; const a = process.argv;`,
+		"process",
+		&context.ModuleMapping{
+			GoImportPath: "github.com/nnstd/gun/runtime/process",
+			GoPkgName:    "process",
+			UseAsJSValue: true,
+			SymbolOverrides: map[string]context.SymbolOverride{
+				"default": {GoSymbol: "AsJSValueCached"},
+			},
+		},
+	)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/process"`)
+	assertContains(t, out, "process.AsJSValueCached")
+	assertContains(t, out, `.Get("argv")`)
+}
+
+func TestRoundTripImportTimersNamed(t *testing.T) {
+	out := lowerTSWithModule(t,
+		`import { setTimeout } from "timers"; setTimeout(() => {}, 0);`,
+		"timers",
+		&context.ModuleMapping{
+			GoImportPath: "github.com/nnstd/gun/runtime/timers",
+			GoPkgName:    "timers",
+			UseAsJSValue: true,
+		},
+	)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/timers"`)
+	assertContains(t, out, "timers.AsJSValue")
+	assertContains(t, out, `.Get("setTimeout")`)
+}
+
 // --- Export default tests ---
 
 func TestRoundTripExportDefaultExpr(t *testing.T) {

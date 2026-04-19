@@ -1049,7 +1049,7 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 			isJSValueFunc := false
 			if res, ok := l.importedSyms[id.Sym]; ok && res.isTranspiled {
 				isJSValueFunc = true
-			} else if id.Sym.Kind == symbol.KindVariable || id.Sym.Kind == symbol.KindParameter {
+			} else if id.Sym.Kind == symbol.KindVariable || id.Sym.Kind == symbol.KindParameter || id.Sym.Kind == symbol.KindImport {
 				isJSValueFunc = true
 			} else if id.Sym.Kind == symbol.KindFunction {
 				// In all-JSValue architecture, all functions are JSValue (except main/init at top level)
@@ -1652,7 +1652,7 @@ func (l *Lowerer) exprIsJSValue(e hir.Expr) bool {
 			}
 			return res.isTranspiled
 		}
-		if e.Sym.Kind == symbol.KindParameter || e.Sym.Kind == symbol.KindVariable {
+		if e.Sym.Kind == symbol.KindParameter || e.Sym.Kind == symbol.KindVariable || e.Sym.Kind == symbol.KindImport {
 			return true
 		}
 		return false

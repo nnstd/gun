@@ -662,3 +662,122 @@ func TestAwaitInsideAsyncFunction(t *testing.T) {
 		t.Error("HasTopLevelAwait should be false — await is inside async function, not at top level")
 	}
 }
+
+// --- require() desugaring ---
+
+func TestRequireDefaultBindingBecomesImportDecl(t *testing.T) {
+	mod := buildHIR(t, `const fs = require("fs");`)
+	if len(mod.Imports) != 1 {
+		t.Fatalf("expected 1 ImportDecl, got %d", len(mod.Imports))
+	}
+	imp := mod.Imports[0]
+	if imp.ModulePath != "fs" {
+		t.Errorf("ModulePath: want %q, got %q", "fs", imp.ModulePath)
+	}
+	if imp.Default == nil || imp.Default.LocalName != "fs" || imp.Default.OriginalName != "default" {
+		t.Errorf("Default binding incorrect: %+v", imp.Default)
+	}
+	if imp.Default.Symbol == nil || imp.Default.Symbol.Kind != symbol.KindImport {
+		t.Errorf("Default.Symbol should be KindImport, got %+v", imp.Default.Symbol)
+	}
+	if len(imp.Named) != 0 {
+		t.Errorf("Named should be empty, got %+v", imp.Named)
+	}
+}
+
+func TestRequireStripsNodePrefix(t *testing.T) {
+	mod := buildHIR(t, `const fs = require("node:fs");`)
+	if len(mod.Imports) != 1 || mod.Imports[0].ModulePath != "fs" {
+		t.Fatalf("expected ImportDecl with ModulePath=fs, got %+v", mod.Imports)
+	}
+}
+
+func TestRequireNamedBindingsBecomeImportDecl(t *testing.T) {
+	mod := buildHIR(t, `const { readFileSync, writeFileSync } = require("fs");`)
+	if len(mod.Imports) != 1 {
+		t.Fatalf("expected 1 ImportDecl, got %d", len(mod.Imports))
+	}
+	imp := mod.Imports[0]
+	if imp.ModulePath != "fs" {
+		t.Errorf("ModulePath: want %q, got %q", "fs", imp.ModulePath)
+	}
+	if imp.Default != nil {
+		t.Errorf("Default should be nil, got %+v", imp.Default)
+	}
+	if len(imp.Named) != 2 {
+		t.Fatalf("expected 2 Named bindings, got %d", len(imp.Named))
+	}
+	names := map[string]string{}
+	for _, n := range imp.Named {
+		names[n.OriginalName] = n.LocalName
+		if n.Symbol == nil || n.Symbol.Kind != symbol.KindImport {
+			t.Errorf("Named.Symbol should be KindImport, got %+v", n.Symbol)
+		}
+	}
+	if names["readFileSync"] != "readFileSync" || names["writeFileSync"] != "writeFileSync" {
+		t.Errorf("unexpected named bindings: %+v", names)
+	}
+}
+
+func TestRequireNamedBindingsHonorAliasPair(t *testing.T) {
+	mod := buildHIR(t, `const { readFileSync: rfs } = require("fs");`)
+	if len(mod.Imports) != 1 {
+		t.Fatalf("expected 1 ImportDecl, got %d", len(mod.Imports))
+	}
+	imp := mod.Imports[0]
+	if len(imp.Named) != 1 {
+		t.Fatalf("expected 1 Named binding, got %d", len(imp.Named))
+	}
+	b := imp.Named[0]
+	if b.OriginalName != "readFileSync" || b.LocalName != "rfs" {
+		t.Errorf("expected readFileSync→rfs, got %q→%q", b.OriginalName, b.LocalName)
+	}
+}
+
+func TestRequireBareBecomesSideEffectImport(t *testing.T) {
+	mod := buildHIR(t, `require("side-effect");`)
+	if len(mod.Imports) != 1 {
+		t.Fatalf("expected 1 ImportDecl, got %d", len(mod.Imports))
+	}
+	imp := mod.Imports[0]
+	if imp.ModulePath != "side-effect" {
+		t.Errorf("ModulePath: want %q, got %q", "side-effect", imp.ModulePath)
+	}
+	if imp.Default != nil || len(imp.Named) != 0 || imp.Namespace != nil {
+		t.Errorf("side-effect import should have no bindings, got %+v", imp)
+	}
+}
+
+func TestRequireJSONIsNotDesugared(t *testing.T) {
+	mod := buildHIR(t, `const pkg = require("./package.json");`)
+	if len(mod.Imports) != 0 {
+		t.Errorf("JSON require should fall through, got ImportDecls: %+v", mod.Imports)
+	}
+}
+
+func TestRequireShadowedIsNotDesugared(t *testing.T) {
+	mod := buildHIR(t, `
+		function require(m) { return m; }
+		const fs = require("fs");
+	`)
+	if len(mod.Imports) != 0 {
+		t.Errorf("shadowed require must not be desugared, got %+v", mod.Imports)
+	}
+}
+
+func TestRequireDynamicArgIsNotDesugared(t *testing.T) {
+	mod := buildHIR(t, `
+		const m = "fs";
+		const fs = require(m);
+	`)
+	if len(mod.Imports) != 0 {
+		t.Errorf("dynamic require argument must not be desugared, got %+v", mod.Imports)
+	}
+}
+
+func TestRequireNestedDestructuringFallsThrough(t *testing.T) {
+	mod := buildHIR(t, `const { promises: { readFile } } = require("fs");`)
+	if len(mod.Imports) != 0 {
+		t.Errorf("nested destructuring must fall through, got %+v", mod.Imports)
+	}
+}

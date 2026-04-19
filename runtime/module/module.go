@@ -5,15 +5,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
-	"github.com/nnstd/gun/runtime/builtin"
+	jsvalue "github.com/nnstd/gun/runtime/builtin"
 )
+
 
 // BuiltinModules is the list of known built-in module names.
 var BuiltinModules = []string{
-	"assert", "buffer", "child_process", "crypto", "events",
-	"fs", "http", "https", "module", "net", "os", "path",
-	"stream", "string_decoder", "url", "util",
+	"assert", "buffer", "child_process", "crypto", "dns", "events",
+	"fs", "http", "https", "module", "os", "path", "process",
+	"stream", "string_decoder", "timers", "url", "util", "zlib",
 }
 
 // IsBuiltin reports whether the given module name is a Node.js built-in.
@@ -25,6 +27,30 @@ func IsBuiltin(name string) bool {
 		}
 	}
 	return false
+}
+
+// ModuleRegistry is the global runtime module registry. Builtins are loaded
+// from an init() in builtins.go; transpiled packages self-register from
+// their own init() via RegisterModule.
+var (
+	ModuleRegistry = map[string]*jsvalue.JSValue{}
+	registryMu     sync.Mutex
+)
+
+// RegisterModule adds a module's exports object to the global registry.
+// Safe to call from any goroutine and from package init().
+func RegisterModule(name string, exports *jsvalue.JSValue) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	ModuleRegistry[name] = exports
+}
+
+// lookupRegistry reads the registry under the mutex.
+func lookupRegistry(name string) (*jsvalue.JSValue, bool) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	v, ok := ModuleRegistry[name]
+	return v, ok
 }
 
 // Meta holds import.meta properties.
@@ -43,7 +69,6 @@ func init() {
 		if filepath.IsAbs(spec) {
 			return jsvalue.NewString("file://" + spec)
 		}
-		// Resolve relative to the current executable's directory
 		exe, err := os.Executable()
 		if err != nil {
 			return jsvalue.NewString(spec)
@@ -64,35 +89,60 @@ var ImportMeta = &Meta{
 	}()),
 }
 
-// CreateRequire returns a require function (as *JSValue) anchored at the given filename.
-// The returned function supports loading JSON files relative to the anchor.
+// normalizeRequirePath normalizes a module specifier to canonical form for
+// registry lookup. Relative/absolute paths become cleaned absolute-ish paths;
+// bare names are returned untouched.
+func normalizeRequirePath(id, base string) string {
+	id = strings.TrimSuffix(id, "/")
+	if strings.HasPrefix(id, ".") || strings.HasPrefix(id, "/") {
+		return filepath.Clean(filepath.Join(base, id))
+	}
+	return id
+}
+
+// CreateRequire returns a require function (as *JSValue) anchored at the
+// given filename. The returned function:
+//  1. Strips node: prefix.
+//  2. Consults ModuleRegistry directly (builtins + transpiled locals).
+//  3. For relative/absolute paths, also tries the path normalized against the anchor.
+//  4. Falls back to reading JSON/raw files from disk.
+//
+// The returned function additionally carries require.resolve, require.cache,
+// and require.main as properties, matching Node.js semantics.
 func CreateRequire(filename *jsvalue.JSValue) *jsvalue.JSValue {
 	fn := ""
 	if filename != nil {
 		fn = filename.String()
 	}
-	// Strip file:// URL scheme if present.
 	fn = strings.TrimPrefix(fn, "file://")
 	base := filepath.Dir(fn)
 
-	return jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+	requireFn := jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		id := ""
 		if len(args) > 0 && args[0] != nil {
 			id = args[0].String()
 		}
+		id = strings.TrimPrefix(id, "node:")
 
-		var target string
-		if strings.HasPrefix(id, ".") || strings.HasPrefix(id, "/") {
-			target = filepath.Join(base, id)
-		} else {
-			target = filepath.Join(base, "node_modules", id)
+		if mod, ok := lookupRegistry(id); ok {
+			return mod
 		}
 
+		if strings.HasPrefix(id, ".") || strings.HasPrefix(id, "/") {
+			resolved := normalizeRequirePath(id, base)
+			if mod, ok := lookupRegistry(resolved); ok {
+				return mod
+			}
+		}
+
+		target := id
+		if strings.HasPrefix(id, ".") || strings.HasPrefix(id, "/") {
+			target = filepath.Join(base, id)
+		}
 		candidates := []string{target}
 		if filepath.Ext(target) == "" {
 			candidates = append(candidates, target+".json", filepath.Join(target, "index.json"))
 		}
-
 		for _, c := range candidates {
 			data, err := os.ReadFile(c)
 			if err != nil {
@@ -108,6 +158,32 @@ func CreateRequire(filename *jsvalue.JSValue) *jsvalue.JSValue {
 		}
 		return jsvalue.NewUndefined()
 	})
+
+	requireFn.Set("resolve", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		id := ""
+		if len(args) > 0 && args[0] != nil {
+			id = args[0].String()
+		}
+		id = strings.TrimPrefix(id, "node:")
+
+		if IsBuiltin(id) {
+			return jsvalue.NewString("node:" + id)
+		}
+		resolved := id
+		if strings.HasPrefix(id, ".") || strings.HasPrefix(id, "/") {
+			resolved = filepath.Join(base, id)
+		} else {
+			resolved = filepath.Join(base, "node_modules", id)
+		}
+		if abs, err := filepath.Abs(resolved); err == nil {
+			return jsvalue.NewString(abs)
+		}
+		return jsvalue.NewString(resolved)
+	}))
+	requireFn.Set("cache", jsvalue.NewObject())
+	requireFn.Set("main", jsvalue.NewUndefined())
+
+	return requireFn
 }
 
 // AsJSValue returns a JSValue object representing the 'module' module.

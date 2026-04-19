@@ -89,7 +89,18 @@ func (b *Builder) buildTopLevel(mod *Module, node *sitter.Node) {
 			mod.Declarations = append(mod.Declarations, d)
 		}
 	case "lexical_declaration", "variable_declaration":
-		if d := b.buildVarDecl(node, false); d != nil {
+		skip := map[uintptr]bool{}
+		for i := uint(0); i < node.NamedChildCount(); i++ {
+			child := node.NamedChild(i)
+			if child.Kind() != "variable_declarator" {
+				continue
+			}
+			if imp := b.tryBuildRequireAsImport(child); imp != nil {
+				mod.Imports = append(mod.Imports, imp)
+				skip[child.Id()] = true
+			}
+		}
+		if d := b.buildVarDeclSkipping(node, false, skip); d != nil {
 			mod.Declarations = append(mod.Declarations, d)
 		}
 	case "class_declaration":
@@ -115,6 +126,11 @@ func (b *Builder) buildTopLevel(mod *Module, node *sitter.Node) {
 			mod.Imports = append(mod.Imports, d)
 		}
 	case "expression_statement":
+		// Detect bare require("module") → side-effect import.
+		if imp := b.tryBuildBareRequireImport(node); imp != nil {
+			mod.Imports = append(mod.Imports, imp)
+			return
+		}
 		// Detect module.exports = expr → treat as export default
 		if b.isModuleExportsAssign(node) {
 			expr := b.extractModuleExportsValue(node)
@@ -197,40 +213,7 @@ func (b *Builder) buildFuncDecl(node *sitter.Node, exported bool) *FuncDecl {
 }
 
 func (b *Builder) buildVarDecl(node *sitter.Node, exported bool) *VarDecl {
-	kind := VarLet
-	if node.Kind() == "variable_declaration" {
-		kind = VarVar
-	} else {
-		// lexical_declaration: check for const vs let
-		for i := uint(0); i < node.ChildCount(); i++ {
-			child := node.Child(i)
-			if child.Kind() == "const" {
-				kind = VarConst
-				break
-			}
-		}
-	}
-
-	var declarators []*Declarator
-	for i := uint(0); i < node.NamedChildCount(); i++ {
-		child := node.NamedChild(i)
-		if child.Kind() != "variable_declarator" {
-			continue
-		}
-		d := b.buildDeclarator(child, exported)
-		if d != nil {
-			declarators = append(declarators, d)
-		}
-	}
-
-	if len(declarators) == 0 {
-		return nil
-	}
-	return &VarDecl{
-		Declarators: declarators,
-		Kind:        kind,
-		Exported:    exported,
-	}
+	return b.buildVarDeclSkipping(node, exported, nil)
 }
 
 func (b *Builder) buildDeclarator(node *sitter.Node, exported bool) *Declarator {
@@ -1333,4 +1316,206 @@ func (b *Builder) extractComputedPropertyName(node *sitter.Node) (sideEffects []
 		}
 	}
 	return sideEffects, name
+}
+
+// --------------------------------------------------------------------
+// require() → ImportDecl desugaring
+// --------------------------------------------------------------------
+
+// tryBuildRequireAsImport desugars `const x = require("mod")` or
+// `const { a, b: c } = require("mod")` in a single variable_declarator
+// into an ImportDecl. Returns nil to fall through to runtime handling for
+// shadowed require, dynamic args, .json specifiers, or unsupported patterns.
+func (b *Builder) tryBuildRequireAsImport(declNode *sitter.Node) *ImportDecl {
+	if declNode == nil || declNode.Kind() != "variable_declarator" {
+		return nil
+	}
+	if b.symtab.LookupLocal("require") != nil {
+		return nil
+	}
+
+	nameNode := declNode.ChildByFieldName("name")
+	valueNode := declNode.ChildByFieldName("value")
+	if nameNode == nil || valueNode == nil {
+		return nil
+	}
+	modulePath, ok := b.requireCallStringArg(valueNode)
+	if !ok {
+		return nil
+	}
+
+	decl := &ImportDecl{ModulePath: modulePath}
+	switch nameNode.Kind() {
+	case "identifier":
+		localName := b.nodeText(nameNode)
+		sym := b.symtab.LookupLocal(localName)
+		if sym == nil {
+			sym = b.symtab.Define(localName, symbol.KindImport)
+		} else {
+			sym.Kind = symbol.KindImport
+		}
+		decl.Default = &ImportBinding{
+			LocalName:    localName,
+			OriginalName: "default",
+			Symbol:       sym,
+		}
+		return decl
+	case "object_pattern":
+		bindings := b.buildNamedImportsFromObjectPattern(nameNode)
+		if bindings == nil {
+			return nil
+		}
+		decl.Named = bindings
+		return decl
+	default:
+		return nil
+	}
+}
+
+// buildNamedImportsFromObjectPattern lowers a destructuring pattern on the
+// LHS of a require() call into []*ImportBinding. Returns nil if the pattern
+// contains constructs (nested destructuring, defaults, rest) that cannot be
+// expressed as named imports — the caller then falls back to runtime lowering.
+func (b *Builder) buildNamedImportsFromObjectPattern(patternNode *sitter.Node) []*ImportBinding {
+	var out []*ImportBinding
+	for i := uint(0); i < patternNode.NamedChildCount(); i++ {
+		child := patternNode.NamedChild(i)
+		switch child.Kind() {
+		case "shorthand_property_identifier_pattern":
+			name := b.nodeText(child)
+			sym := b.symtab.LookupLocal(name)
+			if sym == nil {
+				sym = b.symtab.Define(name, symbol.KindImport)
+			} else {
+				sym.Kind = symbol.KindImport
+			}
+			out = append(out, &ImportBinding{
+				LocalName:    name,
+				OriginalName: name,
+				Symbol:       sym,
+			})
+		case "pair_pattern":
+			keyNode := child.ChildByFieldName("key")
+			valNode := child.ChildByFieldName("value")
+			if keyNode == nil || valNode == nil {
+				return nil
+			}
+			if valNode.Kind() != "identifier" && valNode.Kind() != "shorthand_property_identifier_pattern" {
+				return nil
+			}
+			orig := b.nodeText(keyNode)
+			local := b.nodeText(valNode)
+			sym := b.symtab.LookupLocal(local)
+			if sym == nil {
+				sym = b.symtab.Define(local, symbol.KindImport)
+			} else {
+				sym.Kind = symbol.KindImport
+			}
+			out = append(out, &ImportBinding{
+				LocalName:    local,
+				OriginalName: orig,
+				Symbol:       sym,
+			})
+		case "comment", "line_comment", "block_comment":
+			// skip
+		default:
+			return nil
+		}
+	}
+	return out
+}
+
+// tryBuildBareRequireImport desugars a top-level expression_statement of the
+// form `require("mod")` into a side-effect ImportDecl (no bindings).
+func (b *Builder) tryBuildBareRequireImport(exprStmtNode *sitter.Node) *ImportDecl {
+	if exprStmtNode == nil || exprStmtNode.Kind() != "expression_statement" {
+		return nil
+	}
+	if b.symtab.LookupLocal("require") != nil {
+		return nil
+	}
+	if exprStmtNode.NamedChildCount() == 0 {
+		return nil
+	}
+	inner := exprStmtNode.NamedChild(0)
+	modulePath, ok := b.requireCallStringArg(inner)
+	if !ok {
+		return nil
+	}
+	return &ImportDecl{ModulePath: modulePath}
+}
+
+// requireCallStringArg returns (modulePath, true) when callNode is a
+// call_expression invoking the bare identifier `require` with a single
+// string-literal argument whose specifier is not `.json`. The `node:` prefix
+// is stripped. Returns ("", false) otherwise.
+func (b *Builder) requireCallStringArg(callNode *sitter.Node) (string, bool) {
+	if callNode == nil || callNode.Kind() != "call_expression" {
+		return "", false
+	}
+	fnNode := callNode.ChildByFieldName("function")
+	argsNode := callNode.ChildByFieldName("arguments")
+	if fnNode == nil || argsNode == nil {
+		return "", false
+	}
+	if fnNode.Kind() != "identifier" || b.nodeText(fnNode) != "require" {
+		return "", false
+	}
+	if argsNode.NamedChildCount() != 1 {
+		return "", false
+	}
+	arg := argsNode.NamedChild(0)
+	if arg.Kind() != "string" {
+		return "", false
+	}
+	raw := b.nodeText(arg)
+	modulePath := strings.Trim(raw, "'\"")
+	modulePath = strings.TrimPrefix(modulePath, "node:")
+	if strings.HasSuffix(modulePath, ".json") {
+		return "", false
+	}
+	return modulePath, true
+}
+
+// buildVarDeclSkipping mirrors buildVarDecl but omits declarators that were
+// already consumed as require-import desugarings. The skip set uses sitter
+// Node IDs because sitter.NamedChild may return freshly-allocated wrappers
+// each call — pointer identity is not stable.
+func (b *Builder) buildVarDeclSkipping(node *sitter.Node, exported bool, skip map[uintptr]bool) *VarDecl {
+	kind := VarLet
+	if node.Kind() == "variable_declaration" {
+		kind = VarVar
+	} else {
+		for i := uint(0); i < node.ChildCount(); i++ {
+			child := node.Child(i)
+			if child.Kind() == "const" {
+				kind = VarConst
+				break
+			}
+		}
+	}
+
+	var declarators []*Declarator
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if child.Kind() != "variable_declarator" {
+			continue
+		}
+		if skip[child.Id()] {
+			continue
+		}
+		d := b.buildDeclarator(child, exported)
+		if d != nil {
+			declarators = append(declarators, d)
+		}
+	}
+
+	if len(declarators) == 0 {
+		return nil
+	}
+	return &VarDecl{
+		Declarators: declarators,
+		Kind:        kind,
+		Exported:    exported,
+	}
 }

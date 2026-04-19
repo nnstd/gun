@@ -458,6 +458,11 @@ func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose b
 
 	fileDir := filepath.Dir(tsFile)
 	imports := findRelativeImports(source)
+	for _, imp := range findRequireImports(source) {
+		if strings.HasPrefix(imp, ".") {
+			imports = append(imports, imp)
+		}
+	}
 
 	for _, imp := range imports {
 		resolved, err := resolveImportFile(imp, fileDir)
@@ -501,6 +506,64 @@ func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose b
 		}
 	}
 	return nil
+}
+
+// findRequireImports scans TS/JS source for string literal arguments to
+// require("..."). It is line-based like findRelativeImports: skips comments,
+// accepts single and double quotes, strips the "node:" prefix, and omits
+// ".json" specifiers (JSON data files are read at runtime, not transpiled).
+// Returned specifiers may be relative (./…, ../…) or bare; callers are
+// responsible for classification.
+func findRequireImports(source []byte) []string {
+	var imports []string
+	seen := map[string]bool{}
+	lines := strings.Split(string(source), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") || strings.HasPrefix(line, "*") || strings.HasPrefix(line, "*/") {
+			continue
+		}
+		rest := line
+		for {
+			idx := strings.Index(rest, "require(")
+			if idx < 0 {
+				break
+			}
+			// Ensure require is a standalone identifier (not .require or $require).
+			if idx > 0 {
+				prev := rest[idx-1]
+				if prev == '.' || prev == '_' || prev == '$' || (prev >= 'A' && prev <= 'Z') || (prev >= 'a' && prev <= 'z') || (prev >= '0' && prev <= '9') {
+					rest = rest[idx+len("require("):]
+					continue
+				}
+			}
+			after := strings.TrimSpace(rest[idx+len("require("):])
+			if len(after) < 2 {
+				break
+			}
+			quote := after[0]
+			if quote != '\'' && quote != '"' {
+				rest = rest[idx+len("require("):]
+				continue
+			}
+			end := strings.IndexByte(after[1:], quote)
+			if end < 0 {
+				break
+			}
+			modPath := after[1 : end+1]
+			modPath = strings.TrimPrefix(modPath, "node:")
+			if strings.HasSuffix(modPath, ".json") {
+				rest = after[end+2:]
+				continue
+			}
+			if !seen[modPath] {
+				seen[modPath] = true
+				imports = append(imports, modPath)
+			}
+			rest = after[end+2:]
+		}
+	}
+	return imports
 }
 
 // findNodeModuleImports scans TS/JS source for non-relative, non-known imports.
@@ -777,6 +840,15 @@ func collectAllSourceFiles(entryFile string) []string {
 				walk(resolved)
 			}
 		}
+		for _, imp := range findRequireImports(source) {
+			if !strings.HasPrefix(imp, ".") {
+				continue
+			}
+			resolved, err := resolveImportFile(imp, filepath.Dir(tsFile))
+			if err == nil {
+				walk(resolved)
+			}
+		}
 	}
 	walk(entryFile)
 	return files
@@ -791,6 +863,15 @@ func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName
 			continue
 		}
 		nodeImports := findNodeModuleImports(source)
+		for _, imp := range findRequireImports(source) {
+			if strings.HasPrefix(imp, ".") {
+				continue
+			}
+			if compiler.IsKnownModule(imp) {
+				continue
+			}
+			nodeImports = append(nodeImports, imp)
+		}
 		for _, pkgName := range nodeImports {
 			if visited[pkgName] {
 				continue
@@ -858,7 +939,13 @@ func transpileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string,
 		if err != nil {
 			return err
 		}
-		for _, imp := range findRelativeImports(src) {
+		relImports := findRelativeImports(src)
+		for _, imp := range findRequireImports(src) {
+			if strings.HasPrefix(imp, ".") {
+				relImports = append(relImports, imp)
+			}
+		}
+		for _, imp := range relImports {
 			resolved, err := resolveImportFile(imp, filepath.Dir(tsFile))
 			if err != nil {
 				return err

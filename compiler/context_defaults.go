@@ -652,7 +652,31 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		Name: "require",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "NewObject"))
+			imp.AddImport("github.com/nnstd/gun/runtime/module")
+			imp.AddImport("github.com/nnstd/gun/runtime/process")
+			return callExpr(selectorExpr(ident("module"), "CreateRequire"),
+				callExpr(selectorExpr(ident("jsvalue"), "NewString"),
+					callExpr(selectorExpr(ident("process"), "GetEntryScript"))))
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "__filename",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			imp.AddImport("github.com/nnstd/gun/runtime/process")
+			return callExpr(selectorExpr(ident("jsvalue"), "NewString"),
+				callExpr(selectorExpr(ident("process"), "GetEntryScript")))
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "__dirname",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			imp.AddImport("github.com/nnstd/gun/runtime/process")
+			return callExpr(selectorExpr(ident("jsvalue"), "NewString"),
+				callExpr(selectorExpr(ident("process"), "GetEntryDir")))
 		},
 	})
 
@@ -911,12 +935,25 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 			"default": {GoSymbol: "PromisesAsJSValue"},
 		},
 	})
+	ctx.RegisterModule("timers", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/timers",
+		GoPkgName:    "timers",
+		UseAsJSValue: true,
+	})
 	ctx.RegisterModule("timers/promises", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/timers",
 		GoPkgName:    "timers",
 		UseAsJSValue: true,
 		SymbolOverrides: map[string]tcontext.SymbolOverride{
 			"default": {GoSymbol: "PromisesAsJSValue"},
+		},
+	})
+	ctx.RegisterModule("process", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/process",
+		GoPkgName:    "process",
+		UseAsJSValue: true,
+		SymbolOverrides: map[string]tcontext.SymbolOverride{
+			"default": {GoSymbol: "AsJSValueCached"},
 		},
 	})
 	ctx.RegisterModule("dns", &tcontext.ModuleMapping{
@@ -974,6 +1011,8 @@ func registerKnownGlobals(ctx *tcontext.TranspilerContext) {
 	ctx.MarkKnownGlobal("Symbol")
 	ctx.MarkKnownGlobal("module")
 	ctx.MarkKnownGlobal("require")
+	ctx.MarkKnownGlobal("__filename")
+	ctx.MarkKnownGlobal("__dirname")
 	ctx.MarkKnownGlobal("globalThis")
 	ctx.MarkKnownGlobal("decodeURI")
 	ctx.MarkKnownGlobal("decodeURIComponent")
