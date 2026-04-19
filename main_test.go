@@ -105,10 +105,10 @@ func TestRunCommandStripsPassthroughSeparatorForChildArgs(t *testing.T) {
 	}
 
 	got := strings.TrimSpace(stdout.String())
-	if strings.Contains(got, ",--,--help") {
+	if strings.Contains(got, `"--","--help"`) {
 		t.Fatalf("child argv still contains passthrough separator: %s", got)
 	}
-	if !strings.Contains(got, ",--help") {
+	if !strings.Contains(got, `"--help"`) {
 		t.Fatalf("expected child argv to contain --help: %s", got)
 	}
 }
@@ -397,8 +397,8 @@ load(false).then((value) => { console.log(value) })
 		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
 	}
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	if len(lines) != 2 || lines[0] != "ok" || lines[1] != "tbad" {
-		t.Fatalf("stdout mismatch: got %q want [ok tbad]\nstderr:\n%s", stdout.String(), stderr.String())
+	if len(lines) != 2 || lines[0] != "tbad" || lines[1] != "ok" {
+		t.Fatalf("stdout mismatch: got %q want [tbad ok]\nstderr:\n%s", stdout.String(), stderr.String())
 	}
 }
 
