@@ -35,6 +35,14 @@ func (v *JSValue) Get(name string) *JSValue {
 	if v == nil {
 		return NewUndefined()
 	}
+	if v.isBoxedPrimitive() {
+		if desc, ok := v.properties.Get(name); ok {
+			if desc.Get != nil {
+				return desc.Get(v)
+			}
+			return desc.Value
+		}
+	}
 	if name == "__proto__" {
 		return v.GetPrototype()
 	}
@@ -130,8 +138,11 @@ func (v *JSValue) Set(name string, value *JSValue) {
 	if v == nil || v.typ == TypeUndefined || v.typ == TypeNull {
 		return
 	}
+	if v.isPrimitiveValue() {
+		panicPrimitivePropertySet()
+	}
 	if v.frozen {
-		return
+		panicPrimitivePropertySet()
 	}
 	v.lock()
 	v.gen.Add(1)
@@ -194,8 +205,11 @@ func (v *JSValue) DefineProperty(name string, desc *PropertyDescriptor) {
 	if v == nil || v.typ == TypeUndefined || v.typ == TypeNull {
 		return
 	}
+	if v.isPrimitiveValue() {
+		panicPrimitiveDefineProperty()
+	}
 	if v.frozen {
-		return
+		panicPrimitiveDefineProperty()
 	}
 	v.lock()
 	defer v.unlock()
@@ -205,6 +219,14 @@ func (v *JSValue) DefineProperty(name string, desc *PropertyDescriptor) {
 
 // HasOwnProperty returns true if the value has the named own property.
 func (v *JSValue) HasOwnProperty(name string) bool {
+	if v == nil {
+		return false
+	}
+	if v.isBoxedPrimitive() {
+		if _, ok := v.properties.Get(name); ok {
+			return true
+		}
+	}
 	v.rlock()
 	ok := v.properties.Has(name)
 	v.runlock()
@@ -213,6 +235,12 @@ func (v *JSValue) HasOwnProperty(name string) bool {
 
 // OwnKeys returns the names of all own properties.
 func (v *JSValue) OwnKeys() []string {
+	if v == nil {
+		return nil
+	}
+	if v.isPrimitiveValue() {
+		v = boxedPrimitiveOf(v)
+	}
 	v.rlock()
 	keys := v.properties.Keys()
 	v.runlock()
@@ -221,6 +249,12 @@ func (v *JSValue) OwnKeys() []string {
 
 // EnumerableOwnKeys returns the names of enumerable own properties only.
 func (v *JSValue) EnumerableOwnKeys() []string {
+	if v == nil {
+		return nil
+	}
+	if v.isPrimitiveValue() {
+		v = boxedPrimitiveOf(v)
+	}
 	v.rlock()
 	keys := make([]string, 0, v.properties.Len())
 	v.properties.ForEach(func(k string, desc *PropertyDescriptor) {

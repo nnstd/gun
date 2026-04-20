@@ -1042,6 +1042,11 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 			if result := l.ctx.TransformGlobalCall(name, args, l); result != nil {
 				return result
 			}
+			if l.ctx.IsKnownGlobal(name) && l.ctx.LookupIdentifier(name) != nil {
+				fn := l.lowerIdentifier(id)
+				wrappedArgs, hasSpread := l.lowerCallArgs(e.Args, true)
+				return buildCallWithSpread(selectorExpr(fn, "Call"), wrappedArgs, hasSpread)
+			}
 		}
 
 		// JSValue function call: fn(args) → fn.Call(wrappedArgs...)

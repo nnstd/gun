@@ -6,9 +6,22 @@ import (
 	"time"
 )
 
+func newTypeErrorJSValue(message string) *JSValue {
+	if ctor, ok := Globals()["TypeError"]; ok && ctor != nil {
+		return ctor.Call(NewString(message))
+	}
+	err := NewObject()
+	err.Set("name", NewString("TypeError"))
+	err.Set("message", NewString(message))
+	return err
+}
+
 var Object *JSValue
 var Array *JSValue
+var String *JSValue
+var Boolean *JSValue
 var Number *JSValue
+var BigIntCtor *JSValue
 var Symbol_ *JSValue
 var Reflect *JSValue
 var DateCtor *JSValue
@@ -29,7 +42,10 @@ func init() {
 		if len(args) == 0 || args[0] == nil || args[0].typ == TypeUndefined || args[0].typ == TypeNull {
 			return NewObject()
 		}
-		return args[0]
+		if args[0].typ == TypeObject || args[0].typ == TypeFunction {
+			return args[0]
+		}
+		return boxedPrimitiveOf(args[0])
 	})
 	Object.Set("prototype", ObjectPrototype)
 	Object.Set("create", NewFunction(func(args ...*JSValue) *JSValue {
@@ -86,7 +102,7 @@ func init() {
 	}))
 	Object.Set("getOwnPropertyNames", NewFunction(func(args ...*JSValue) *JSValue {
 		if len(args) > 0 {
-			return Keys(args[0])
+			return OwnPropertyNames(args[0])
 		}
 		return NewArray()
 	}))
@@ -98,6 +114,12 @@ func init() {
 	}))
 	Object.Set("setPrototypeOf", NewFunction(func(args ...*JSValue) *JSValue {
 		if len(args) >= 2 {
+			if args[0] == nil || args[0].typ == TypeUndefined || args[0].typ == TypeNull {
+				panic(newTypeErrorJSValue("Object.setPrototypeOf called on non-object"))
+			}
+			if args[0].isPrimitiveValue() {
+				return args[0]
+			}
 			args[0].SetPrototype(args[1])
 			return args[0]
 		}
@@ -165,6 +187,28 @@ func init() {
 		return NewNumber(0)
 	}))
 
+	BigIntCtor = NewFunction(func(args ...*JSValue) *JSValue {
+		return BigInt(args...)
+	})
+	BigIntCtor.Set("prototype", BigIntPrototype)
+
+	String = NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) == 0 {
+			return NewString("")
+		}
+		if args[0] != nil && args[0].isBoxedPrimitive() && args[0].boxedValue != nil && args[0].boxedValue.Type() == TypeSymbol {
+			panic(newTypeErrorJSValue("Cannot convert a symbol to a string"))
+		}
+		return NewString(args[0].String())
+	})
+
+	Boolean = NewFunction(func(args ...*JSValue) *JSValue {
+		if len(args) == 0 {
+			return NewBool(false)
+		}
+		return NewBool(args[0].Bool())
+	})
+
 	Symbol_ = NewFunction(func(args ...*JSValue) *JSValue {
 		desc := ""
 		if len(args) > 0 && args[0] != nil {
@@ -172,6 +216,7 @@ func init() {
 		}
 		return NewSymbol(desc)
 	})
+	Symbol_.Set("prototype", SymbolPrototype)
 	Symbol_.Set("hasInstance", NewSymbol("Symbol.hasInstance"))
 	Symbol_.Set("iterator", NewSymbol("Symbol.iterator"))
 	Symbol_.Set("toPrimitive", NewSymbol("Symbol.toPrimitive"))
@@ -199,6 +244,9 @@ func init() {
 	}))
 	Reflect.Set("set", NewFunction(func(args ...*JSValue) *JSValue {
 		if len(args) >= 3 {
+			if args[0] == nil || args[0].typ == TypeUndefined || args[0].typ == TypeNull || args[0].isPrimitiveValue() {
+				panic(newTypeErrorJSValue("Reflect.set requires the first argument be an object"))
+			}
 			args[0].Set(PropertyKey(args[1]), args[2])
 			return NewBool(true)
 		}
@@ -302,6 +350,7 @@ func init() {
 	RegisterGlobal("Object", Object)
 	RegisterGlobal("Array", Array)
 	RegisterGlobal("Number", Number)
+	RegisterGlobal("BigInt", BigIntCtor)
 	RegisterGlobal("Symbol", Symbol_)
 	RegisterGlobal("Reflect", Reflect)
 	RegisterGlobal("Date", DateCtor)
@@ -343,18 +392,8 @@ func init() {
 		n := args[0].Number()
 		return NewBool(!gomath.IsInf(n, 0) && !gomath.IsNaN(n))
 	}))
-	RegisterGlobal("String", NewFunction(func(args ...*JSValue) *JSValue {
-		if len(args) == 0 {
-			return NewString("")
-		}
-		return NewString(args[0].String())
-	}))
-	RegisterGlobal("Boolean", NewFunction(func(args ...*JSValue) *JSValue {
-		if len(args) == 0 {
-			return NewBool(false)
-		}
-		return NewBool(args[0].Bool())
-	}))
+	RegisterGlobal("String", String)
+	RegisterGlobal("Boolean", Boolean)
 
 	// Global constants
 	RegisterGlobal("undefined", NewUndefined())

@@ -46,6 +46,9 @@ func Keys(obj *JSValue) *JSValue {
 	if obj == nil {
 		return NewArray()
 	}
+	if obj.isPrimitiveValue() {
+		obj = boxedPrimitiveOf(obj)
+	}
 	keys := obj.EnumerableOwnKeys()
 	result := make([]*JSValue, len(keys))
 	for i, key := range keys {
@@ -60,10 +63,29 @@ func Values(obj *JSValue) *JSValue {
 	if obj == nil {
 		return NewArray()
 	}
+	if obj.isPrimitiveValue() {
+		obj = boxedPrimitiveOf(obj)
+	}
 	keys := obj.EnumerableOwnKeys()
 	result := make([]*JSValue, 0, len(keys))
 	for _, key := range keys {
 		result = append(result, obj.Get(key))
+	}
+	return NewArray(result...)
+}
+
+// OwnPropertyNames returns all own property names, including non-enumerable ones.
+func OwnPropertyNames(obj *JSValue) *JSValue {
+	if obj == nil {
+		return NewArray()
+	}
+	if obj.isPrimitiveValue() {
+		obj = boxedPrimitiveOf(obj)
+	}
+	keys := obj.OwnKeys()
+	result := make([]*JSValue, len(keys))
+	for i, key := range keys {
+		result[i] = NewString(key)
 	}
 	return NewArray(result...)
 }
@@ -73,6 +95,9 @@ func Values(obj *JSValue) *JSValue {
 func Entries(obj *JSValue) *JSValue {
 	if obj == nil {
 		return NewArray()
+	}
+	if obj.isPrimitiveValue() {
+		obj = boxedPrimitiveOf(obj)
 	}
 	keys := obj.EnumerableOwnKeys()
 	result := make([]*JSValue, 0, len(keys))
@@ -106,10 +131,16 @@ func FromEntries(entries *JSValue) *JSValue {
 // Implements Object.assign() semantics.
 func Assign(target any, sources ...any) *JSValue {
 	t := toJSValue(target)
+	if t != nil && t.isPrimitiveValue() {
+		t = boxedPrimitiveOf(t)
+	}
 	for _, src := range sources {
 		s := toJSValue(src)
 		if s == nil {
 			continue
+		}
+		if s.isPrimitiveValue() {
+			s = boxedPrimitiveOf(s)
 		}
 		for _, key := range s.OwnKeys() {
 			t.Set(key, s.Get(key))

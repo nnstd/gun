@@ -414,7 +414,8 @@ func initNumberPrototype() {
 		if len(args) < 1 || args[0] == nil {
 			return NewString("0")
 		}
-		n := args[0].numVal
+		recv := args[0].unboxed()
+		n := recv.numVal
 		if math.IsNaN(n) {
 			return NewString("NaN")
 		}
@@ -429,7 +430,7 @@ func initNumberPrototype() {
 			radix = int(args[1].numVal)
 		}
 		if radix == 10 {
-			return NewString(args[0].String())
+			return NewString(recv.String())
 		}
 		neg := n < 0
 		if neg {
@@ -446,13 +447,13 @@ func initNumberPrototype() {
 		if len(args) < 1 || args[0] == nil {
 			return NewNumber(0)
 		}
-		return NewNumber(args[0].numVal)
+		return NewNumber(args[0].unboxed().numVal)
 	})
 	defMethod(NumberPrototype, "toFixed", func(args ...*JSValue) *JSValue {
 		if len(args) < 1 || args[0] == nil {
 			return NewString("0")
 		}
-		n := args[0].numVal
+		n := args[0].unboxed().numVal
 		if math.IsNaN(n) {
 			return NewString("NaN")
 		}
@@ -466,7 +467,8 @@ func initNumberPrototype() {
 		if len(args) < 1 || args[0] == nil {
 			return NewString("0")
 		}
-		n := args[0].numVal
+		recv := args[0].unboxed()
+		n := recv.numVal
 		if math.IsNaN(n) {
 			return NewString("NaN")
 		}
@@ -474,7 +476,7 @@ func initNumberPrototype() {
 			return NewString(args[0].String())
 		}
 		if len(args) < 2 || args[1] == nil {
-			return NewString(args[0].String())
+			return NewString(recv.String())
 		}
 		prec := int(args[1].numVal)
 		return NewString(strconv.FormatFloat(n, 'g', prec, 64))
@@ -483,12 +485,13 @@ func initNumberPrototype() {
 		if len(args) < 1 || args[0] == nil {
 			return NewString("0")
 		}
-		n := args[0].numVal
+		recv := args[0].unboxed()
+		n := recv.numVal
 		if math.IsNaN(n) {
 			return NewString("NaN")
 		}
 		if math.IsInf(n, 0) {
-			return NewString(args[0].String())
+			return NewString(recv.String())
 		}
 		digits := -1
 		if len(args) > 1 && args[1] != nil {
@@ -503,6 +506,6 @@ func initNumberPrototype() {
 		if len(args) < 1 || args[0] == nil {
 			return NewString("0")
 		}
-		return NewString(args[0].String())
+		return NewString(args[0].unboxed().String())
 	})
 }

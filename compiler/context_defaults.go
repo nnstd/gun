@@ -203,13 +203,11 @@ func registerGlobalFunctions(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
 		Name: "String",
 		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
-			imp.AddImport("fmt")
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			if len(args) > 0 {
-				return callExpr(selectorExpr(ident("jsvalue"), "NewString"),
-					callExpr(selectorExpr(ident("fmt"), "Sprint"), args[0]))
+			for i, arg := range args {
+				args[i] = jsvalueWrapLit(arg)
 			}
-			return callExpr(selectorExpr(ident("jsvalue"), "NewString"), stringLit(""))
+			return callExpr(selectorExpr(selectorExpr(ident("jsvalue"), "String"), "Call"), args...)
 		},
 	})
 
@@ -220,7 +218,7 @@ func registerGlobalFunctions(ctx *tcontext.TranspilerContext) {
 			for i, arg := range args {
 				args[i] = jsvalueWrapLit(arg)
 			}
-			return callExpr(selectorExpr(ident("jsvalue"), "BigInt"), args...)
+			return callExpr(selectorExpr(selectorExpr(ident("jsvalue"), "BigIntCtor"), "Call"), args...)
 		},
 	})
 
@@ -545,14 +543,7 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		Name: "String",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			imp.AddImport("fmt")
-			return callExpr(selectorExpr(ident("jsvalue"), "NewFunction"), &ast.FuncLit{
-				Type: &ast.FuncType{
-					Params:  fieldList(&ast.Field{Names: []*ast.Ident{ident("_a")}, Type: &ast.Ellipsis{Elt: ptrType(selectorExpr(ident("jsvalue"), "JSValue"))}}),
-					Results: fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue")))),
-				},
-				Body: blockStmt(returnStmt(callExpr(selectorExpr(ident("jsvalue"), "NewString"), callExpr(selectorExpr(ident("fmt"), "Sprint"), &ast.IndexExpr{X: ident("_a"), Index: intLit("0")})))),
-			})
+			return selectorExpr(ident("jsvalue"), "String")
 		},
 	})
 
@@ -575,18 +566,8 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "Boolean",
 		Transform: func(imp tcontext.Imports) ast.Expr {
-			// Boolean(x) → jsvalue.NewBool(jsvalue.Truthy(x))
-			// Wrap as a NewFunction so it's callable as JSValue
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "NewFunction"),
-				&ast.FuncLit{
-					Type: &ast.FuncType{
-						Params:  fieldList(&ast.Field{Names: []*ast.Ident{ident("_a")}, Type: &ast.Ellipsis{Elt: ptrType(selectorExpr(ident("jsvalue"), "JSValue"))}}),
-						Results: fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue")))),
-					},
-					Body: blockStmt(returnStmt(callExpr(selectorExpr(ident("jsvalue"), "NewBool"),
-						callExpr(selectorExpr(ident("jsvalue"), "Truthy"), &ast.IndexExpr{X: ident("_a"), Index: intLit("0")})))),
-				})
+			return selectorExpr(ident("jsvalue"), "Boolean")
 		},
 	})
 
@@ -603,6 +584,14 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			return callExpr(selectorExpr(ident("jsvalue"), "NewObject"))
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "BigInt",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return selectorExpr(ident("jsvalue"), "BigIntCtor")
 		},
 	})
 

@@ -49,6 +49,7 @@ type JSValue struct {
 	strVal     string
 	intVal     int
 	bigIntVal  int64
+	boxedValue *JSValue
 	symbolDesc string
 	symbolID   uint64
 	properties SmallPropMap
@@ -65,6 +66,104 @@ type JSValue struct {
 	gen        atomic.Uint64                                  // incremented on every mutation for cache invalidation
 	cache      [4]cacheEntry                                  // fixed inline cache for Get() optimization
 	frozen     bool                                           // true for interned singletons; Set/DefineProperty no-op
+}
+
+func (v *JSValue) isBoxedPrimitive() bool {
+	return v != nil && v.typ == TypeObject && v.boxedValue != nil
+}
+
+func (v *JSValue) unboxed() *JSValue {
+	if v != nil && v.boxedValue != nil {
+		return v.boxedValue
+	}
+	return v
+}
+
+func (v *JSValue) isPrimitiveValue() bool {
+	if v == nil {
+		return false
+	}
+	switch v.typ {
+	case TypeBoolean, TypeNumber, TypeString, TypeSymbol, TypeBigInt:
+		return true
+	default:
+		return false
+	}
+}
+
+func primitiveTypeName(v *JSValue) string {
+	if v == nil {
+		return "undefined"
+	}
+	switch v.unboxed().typ {
+	case TypeBoolean:
+		return "boolean"
+	case TypeNumber:
+		return "number"
+	case TypeString:
+		return "string"
+	case TypeSymbol:
+		return "symbol"
+	case TypeBigInt:
+		return "bigint"
+	default:
+		return v.TypeString()
+	}
+}
+
+func panicPrimitivePropertySet() {
+	panic(newTypeErrorJSValue("Attempted to assign to readonly property."))
+}
+
+func panicPrimitiveDefineProperty() {
+	panic(newTypeErrorJSValue("Properties can only be defined on Objects."))
+}
+
+func boxedPrimitiveOf(v *JSValue) *JSValue {
+	if v == nil {
+		return NewObject()
+	}
+	if v.boxedValue != nil {
+		return v
+	}
+	base := v.unboxed()
+	if base == nil || base.typ == TypeUndefined || base.typ == TypeNull {
+		return NewObject()
+	}
+	if !base.isPrimitiveValue() {
+		return base
+	}
+	boxed := NewObject()
+	boxed.boxedValue = base
+	switch base.typ {
+	case TypeBoolean:
+		boxed.prototype = BooleanPrototype
+	case TypeNumber:
+		boxed.prototype = NumberPrototype
+	case TypeString:
+		boxed.prototype = StringPrototype
+		for i, r := range []rune(base.strVal) {
+			boxed.DefineProperty(strconv.Itoa(i), &PropertyDescriptor{
+				Value:        NewString(string(r)),
+				Writable:     false,
+				Enumerable:   true,
+				Configurable: false,
+			})
+		}
+		boxed.DefineProperty("length", &PropertyDescriptor{
+			Value:        NewNumber(float64(base.Len())),
+			Writable:     false,
+			Enumerable:   false,
+			Configurable: false,
+		})
+	case TypeBigInt:
+		boxed.prototype = BigIntPrototype
+	case TypeSymbol:
+		boxed.prototype = SymbolPrototype
+	default:
+		return base
+	}
+	return boxed
 }
 
 // MarkAsMethod marks this function as a class method that expects 'this'
@@ -184,6 +283,10 @@ func (v *JSValue) TypeString() string {
 
 // String returns the string value (or a string representation).
 func (v *JSValue) String() string {
+	if v != nil && v.isBoxedPrimitive() && v.boxedValue != nil && v.boxedValue.typ == TypeSymbol {
+		panic(newTypeErrorJSValue("Cannot convert a symbol to a string"))
+	}
+	v = v.unboxed()
 	switch v.typ {
 	case TypeString:
 		return v.strVal
@@ -253,6 +356,7 @@ func (v *JSValue) Number() float64 {
 	if v == nil {
 		return 0
 	}
+	v = v.unboxed()
 	switch v.typ {
 	case TypeNumber:
 		return v.numVal
@@ -302,6 +406,7 @@ func (v *JSValue) Bool() bool {
 	if v == nil {
 		return false
 	}
+	v = v.unboxed()
 	switch v.typ {
 	case TypeBoolean:
 		return v.boolVal
@@ -327,17 +432,18 @@ func (v *JSValue) Int() int {
 	if v == nil {
 		return 0
 	}
+	v = v.unboxed()
 	return v.intVal
 }
 
 // BigInt returns the bigint value.
 func (v *JSValue) BigInt() int64 {
-	return v.bigIntVal
+	return v.unboxed().bigIntVal
 }
 
 // SymbolDesc returns the symbol description.
 func (v *JSValue) SymbolDesc() string {
-	return v.symbolDesc
+	return v.unboxed().symbolDesc
 }
 
 // SetPrototype sets the [[Prototype]] internal slot.
@@ -375,6 +481,7 @@ func (v *JSValue) Array() []*JSValue {
 // For strings: returns a single-character string (matching JS "str"[i] semantics).
 // Returns undefined if out of bounds or not an array/string.
 func (v *JSValue) Index(i int) *JSValue {
+	v = v.unboxed()
 	if v.isArr && i >= 0 && i < v.arrayVal.Len() {
 		return v.arrayVal.Get(i)
 	}
@@ -401,6 +508,7 @@ func (v *JSValue) Len() int {
 	if v == nil {
 		return 0
 	}
+	v = v.unboxed()
 	switch v.typ {
 	case TypeString:
 		// JavaScript .length on strings returns character count (UTF-16 code units)

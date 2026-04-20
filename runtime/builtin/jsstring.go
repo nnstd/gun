@@ -197,7 +197,17 @@ func initStringPrototype() {
 	StringPrototype.DefineProperty("toString", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
 			if len(args) > 0 && args[0] != nil {
-				return NewString(args[0].String())
+				return NewString(args[0].unboxed().String())
+			}
+			return NewString("")
+		}).MarkAsMethod(),
+		Writable: true, Enumerable: false, Configurable: true,
+	})
+
+	StringPrototype.DefineProperty("valueOf", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) > 0 && args[0] != nil {
+				return NewString(args[0].unboxed().String())
 			}
 			return NewString("")
 		}).MarkAsMethod(),
@@ -208,7 +218,7 @@ func initStringPrototype() {
 	StringPrototype.DefineProperty("normalize", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
 			if len(args) > 0 && args[0] != nil {
-				return args[0]
+				return args[0].unboxed()
 			}
 			return NewString("")
 		}).MarkAsMethod(),

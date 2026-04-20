@@ -65,6 +65,8 @@ func init() {
 
 	// --- BooleanPrototype methods ---
 	initBooleanPrototype()
+	initBigIntPrototype()
+	initSymbolPrototype()
 
 	// --- Per-type prototype methods (in corresponding files) ---
 	initStringPrototype()
@@ -86,14 +88,32 @@ func init() {
 	// Global constructor objects are initialized in a separate init and may run
 	// before this one. Patch their prototype properties here so constructor
 	// property access is stable regardless of package init order.
+	if Boolean != nil {
+		Boolean.Set("prototype", BooleanPrototype)
+		BooleanPrototype.DefineProperty("constructor", &PropertyDescriptor{Value: Boolean, Writable: true, Enumerable: false, Configurable: true})
+	}
+	if String != nil {
+		String.Set("prototype", StringPrototype)
+		StringPrototype.DefineProperty("constructor", &PropertyDescriptor{Value: String, Writable: true, Enumerable: false, Configurable: true})
+	}
 	if Object != nil {
 		Object.Set("prototype", ObjectPrototype)
 	}
 	if Array != nil {
 		Array.Set("prototype", ArrayPrototype)
+		ArrayPrototype.DefineProperty("constructor", &PropertyDescriptor{Value: Array, Writable: true, Enumerable: false, Configurable: true})
 	}
 	if Number != nil {
 		Number.Set("prototype", NumberPrototype)
+		NumberPrototype.DefineProperty("constructor", &PropertyDescriptor{Value: Number, Writable: true, Enumerable: false, Configurable: true})
+	}
+	if BigIntCtor != nil {
+		BigIntCtor.Set("prototype", BigIntPrototype)
+		BigIntPrototype.DefineProperty("constructor", &PropertyDescriptor{Value: BigIntCtor, Writable: true, Enumerable: false, Configurable: true})
+	}
+	if Symbol_ != nil {
+		Symbol_.Set("prototype", SymbolPrototype)
+		SymbolPrototype.DefineProperty("constructor", &PropertyDescriptor{Value: Symbol_, Writable: true, Enumerable: false, Configurable: true})
 	}
 }
 
@@ -165,8 +185,22 @@ func initFunctionPrototype() {
 func initObjectPrototype() {
 	ObjectPrototype.DefineProperty("toString", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) > 0 && args[0] != nil {
+				switch args[0].unboxed().typ {
+				case TypeBoolean:
+					return NewString("[object Boolean]")
+				case TypeNumber:
+					return NewString("[object Number]")
+				case TypeString:
+					return NewString("[object String]")
+				case TypeBigInt:
+					return NewString("[object BigInt]")
+				case TypeSymbol:
+					return NewString("[object Symbol]")
+				}
+			}
 			return NewString("[object Object]")
-		}),
+		}).MarkAsMethod(),
 		Writable: true, Enumerable: false, Configurable: true,
 	})
 	ObjectPrototype.DefineProperty("hasOwnProperty", &PropertyDescriptor{
@@ -179,7 +213,15 @@ func initObjectPrototype() {
 		Writable: true, Enumerable: false, Configurable: true,
 	})
 	ObjectPrototype.DefineProperty("valueOf", &PropertyDescriptor{
-		Value:    NewFunction(func(args ...*JSValue) *JSValue { return NewUndefined() }),
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) > 0 && args[0] != nil {
+				if args[0].boxedValue != nil {
+					return args[0].boxedValue
+				}
+				return args[0]
+			}
+			return NewUndefined()
+		}).MarkAsMethod(),
 		Writable: true, Enumerable: false, Configurable: true,
 	})
 }
@@ -188,9 +230,60 @@ func initBooleanPrototype() {
 	BooleanPrototype.DefineProperty("toString", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
 			if len(args) > 0 && args[0] != nil {
-				return NewString(args[0].String())
+				return NewString(args[0].unboxed().String())
 			}
 			return NewString("false")
+		}).MarkAsMethod(),
+		Writable: true, Enumerable: false, Configurable: true,
+	})
+	BooleanPrototype.DefineProperty("valueOf", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) > 0 && args[0] != nil {
+				return NewBool(args[0].unboxed().Bool())
+			}
+			return NewBool(false)
+		}).MarkAsMethod(),
+		Writable: true, Enumerable: false, Configurable: true,
+	})
+}
+
+func initBigIntPrototype() {
+	BigIntPrototype.DefineProperty("toString", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) > 0 && args[0] != nil {
+				return NewString(args[0].unboxed().String())
+			}
+			return NewString("0")
+		}).MarkAsMethod(),
+		Writable: true, Enumerable: false, Configurable: true,
+	})
+	BigIntPrototype.DefineProperty("valueOf", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) > 0 && args[0] != nil {
+				return NewBigInt(args[0].unboxed().bigIntVal)
+			}
+			return NewBigInt(0)
+		}).MarkAsMethod(),
+		Writable: true, Enumerable: false, Configurable: true,
+	})
+}
+
+func initSymbolPrototype() {
+	SymbolPrototype.DefineProperty("toString", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) > 0 && args[0] != nil {
+				return NewString(args[0].unboxed().String())
+			}
+			return NewString("Symbol()")
+		}).MarkAsMethod(),
+		Writable: true, Enumerable: false, Configurable: true,
+	})
+	SymbolPrototype.DefineProperty("valueOf", &PropertyDescriptor{
+		Value: NewFunction(func(args ...*JSValue) *JSValue {
+			if len(args) > 0 && args[0] != nil {
+				return args[0].unboxed()
+			}
+			return NewUndefined()
 		}).MarkAsMethod(),
 		Writable: true, Enumerable: false, Configurable: true,
 	})

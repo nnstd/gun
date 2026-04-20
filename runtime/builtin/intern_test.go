@@ -50,30 +50,35 @@ func TestEmptyStringInterning(t *testing.T) {
 }
 
 func TestCachedValueImmutability(t *testing.T) {
-	t1 := NewBool(true)
-	t1.Set("foo", NewNumber(42))
-	got := t1.Get("foo")
-	if got != nil && got.typ == TypeNumber && got.Number() == 42 {
-		t.Fatal("frozen NewBool(true) should ignore .Set(); got Number(42) back")
+	assertTypeError := func(name string, fn func()) {
+		t.Helper()
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatalf("%s: expected panic", name)
+			}
+			err, ok := r.(*JSValue)
+			if !ok {
+				t.Fatalf("%s: expected *JSValue panic, got %T", name, r)
+			}
+			if got := err.Get("name").String(); got != "TypeError" {
+				t.Fatalf("%s: panic name = %q, want TypeError", name, got)
+			}
+		}()
+		fn()
 	}
-	// Shared singleton must be unchanged
+
+	t1 := NewBool(true)
+	assertTypeError("bool", func() { t1.Set("foo", NewNumber(42)) })
 	if NewBool(true) != t1 {
 		t.Fatal("singleton identity must not change after rejected mutation")
 	}
 
 	n := NewNumber(5)
-	n.Set("x", NewNumber(1))
-	got2 := n.Get("x")
-	if got2 != nil && got2.typ == TypeNumber && got2.Number() == 1 {
-		t.Fatal("frozen NewNumber(5) should ignore .Set()")
-	}
+	assertTypeError("number", func() { n.Set("x", NewNumber(1)) })
 
 	s := NewString("")
-	s.Set("y", NewNumber(2))
-	got3 := s.Get("y")
-	if got3 != nil && got3.typ == TypeNumber && got3.Number() == 2 {
-		t.Fatal("frozen NewString(\"\") should ignore .Set()")
-	}
+	assertTypeError("string", func() { s.Set("y", NewNumber(2)) })
 }
 
 func TestCachedNumberArithmetic(t *testing.T) {

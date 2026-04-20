@@ -55,6 +55,23 @@ func jsvalToNative(v *jsvalue.JSValue) any {
 	if v == nil {
 		return nil
 	}
+	if v.Type() == jsvalue.TypeObject {
+		if raw := v.MethodCall("valueOf"); raw != nil && raw != v && raw.Type() != jsvalue.TypeObject && raw.Type() != jsvalue.TypeFunction {
+			if raw.Type() == jsvalue.TypeBigInt {
+				if ctor, ok := jsvalue.Globals()["TypeError"]; ok && ctor != nil {
+					panic(ctor.Call(jsvalue.NewString("JSON.stringify cannot serialize BigInt.")))
+				}
+				err := jsvalue.NewObject()
+				err.Set("name", jsvalue.NewString("TypeError"))
+				err.Set("message", jsvalue.NewString("JSON.stringify cannot serialize BigInt."))
+				panic(err)
+			}
+			if raw.Type() == jsvalue.TypeSymbol {
+				return map[string]any{}
+			}
+			return jsvalToNative(raw)
+		}
+	}
 	switch v.TypeString() {
 	case "string":
 		return v.String()
