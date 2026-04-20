@@ -128,7 +128,7 @@ bootstrap() {
   log "Bootstrapping in $BENCH_DIR ..."
 
   rm -rf "$BENCH_DIR"
-  mkdir -p "$BENCH_DIR/bun"
+  mkdir -p "$BENCH_DIR/bun" "$BENCH_DIR/logs"
 
   write_server_ts
 
@@ -187,13 +187,15 @@ run_k6() {
   local label=$1
   local port=$2
   local jsonfile=$3
+  local logfile=$4
   local base="http://127.0.0.1:${port}"
 
   echo ""
   log "=== $label ==="
   echo ""
 
-  env -u K6_DURATION -u K6_RATE -u K6_VUS k6 run --out json="$jsonfile" - <<K6SCRIPT
+  : > "$logfile"
+  env -u K6_DURATION -u K6_RATE -u K6_VUS k6 run --out json="$jsonfile" - >"$logfile" 2>&1 <<K6SCRIPT
 import http from 'k6/http';
 import { check } from 'k6';
 
@@ -376,7 +378,10 @@ main() {
     kill_servers
     local label="Gun -O${level}"
     log "Starting ${label} server on :${port} ..."
-    PORT=$port "$BENCH_DIR/gun-o${level}/bench-server" &
+    local server_log="$BENCH_DIR/logs/gun-o${level}.server.log"
+    local k6_log="$BENCH_DIR/logs/gun-o${level}.k6.log"
+    : > "$server_log"
+    PORT=$port "$BENCH_DIR/gun-o${level}/bench-server" >"$server_log" 2>&1 &
     local pid=$!
     if ! wait_for_server "$pid" "$port" 5; then
       warn "${label} server did not become ready on :${port}, skipping"
@@ -391,7 +396,7 @@ main() {
       sample_resources "$pid" "$BENCH_DIR/gun-o${level}-res.txt" "$stopfile" &
       local sampler_pid=$!
 
-      run_k6 "$label" $port "$BENCH_DIR/gun-o${level}-results.json"
+      run_k6 "$label" $port "$BENCH_DIR/gun-o${level}-results.json" "$k6_log"
       touch "$stopfile"
       wait $sampler_pid 2>/dev/null || true
 
@@ -400,7 +405,7 @@ main() {
       local r=$(parse_resources "$BENCH_DIR/gun-o${level}-res.txt")
       extract_metrics "gun_o${level}" "$r"
     else
-      warn "${label} server verification failed, skipping"
+      warn "${label} server verification failed, skipping (see $server_log)"
     fi
 
     kill $pid 2>/dev/null || true
@@ -412,10 +417,13 @@ main() {
   # ── Bun benchmark ──
   local bun_port=3090
   log "Starting Bun server on :${bun_port} ..."
-  PORT=$bun_port $BUN_BIN run "$BENCH_DIR/bun/server.ts" &
+  local bun_server_log="$BENCH_DIR/logs/bun.server.log"
+  local bun_k6_log="$BENCH_DIR/logs/bun.k6.log"
+  : > "$bun_server_log"
+  PORT=$bun_port $BUN_BIN run "$BENCH_DIR/bun/server.ts" >"$bun_server_log" 2>&1 &
   local bun_pid=$!
   if ! wait_for_server "$bun_pid" "$bun_port" 5; then
-    warn "Bun server did not become ready on :${bun_port}, skipping"
+    warn "Bun server did not become ready on :${bun_port}, skipping (see $bun_server_log)"
     kill $bun_pid 2>/dev/null || true
     kill_servers
     return
@@ -427,7 +435,7 @@ main() {
     sample_resources "$bun_pid" "$BENCH_DIR/bun-res.txt" "$bun_stopfile" &
     local bun_sampler_pid=$!
 
-    run_k6 "Bun" $bun_port "$BENCH_DIR/bun-results.json"
+    run_k6 "Bun" $bun_port "$BENCH_DIR/bun-results.json" "$bun_k6_log"
     touch "$bun_stopfile"
     wait $bun_sampler_pid 2>/dev/null || true
 
@@ -436,7 +444,7 @@ main() {
     local r=$(parse_resources "$BENCH_DIR/bun-res.txt")
     extract_metrics "bun" "$r"
   else
-    warn "Bun server verification failed, skipping"
+    warn "Bun server verification failed, skipping (see $bun_server_log)"
   fi
 
   kill $bun_pid 2>/dev/null || true
