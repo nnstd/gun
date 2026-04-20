@@ -1630,7 +1630,7 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 
 	var stmts []ast.Stmt
 
-	if l.arenaEnabled {
+	if l.arenaEnabled && !hirBodyContainsNestedClosure(body) {
 		l.jsvalueImport()
 		l.hasArenaVar++
 		defer func() { l.hasArenaVar-- }()
@@ -1638,6 +1638,7 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 		stmts = append(stmts, assignStmt([]ast.Expr{goIdent("_arena")}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "GetArena"))}))
 		stmts = append(stmts, exprStmt(callExpr(selectorExpr(goIdent("_arena"), "PushScope"))))
 		stmts = append(stmts, &ast.DeferStmt{Call: callExpr(selectorExpr(goIdent("_arena"), "PopScope"))})
+		stmts = append(stmts, &ast.DeferStmt{Call: callExpr(selectorExpr(goIdent("jsvalue"), "ReleaseArena"), goIdent("_arena"))})
 	}
 
 	// Unpack _args into named parameters
@@ -1797,13 +1798,14 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 	}
 	var stmts []ast.Stmt
 	l.jsvalueImport()
-	if l.arenaEnabled {
+	if l.arenaEnabled && !hirBodyContainsNestedClosure(body) {
 		l.hasArenaVar++
 		defer func() { l.hasArenaVar-- }()
 		stmts = append(stmts, &ast.DeclStmt{Decl: varDecl("_arena", ptrType(selectorExpr(goIdent("jsvalue"), "Arena")), nil)})
 		stmts = append(stmts, assignStmt([]ast.Expr{goIdent("_arena")}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "GetArena"))}))
 		stmts = append(stmts, exprStmt(callExpr(selectorExpr(goIdent("_arena"), "PushScope"))))
 		stmts = append(stmts, &ast.DeferStmt{Call: callExpr(selectorExpr(goIdent("_arena"), "PopScope"))})
+		stmts = append(stmts, &ast.DeferStmt{Call: callExpr(selectorExpr(goIdent("jsvalue"), "ReleaseArena"), goIdent("_arena"))})
 	}
 
 	// Only declare `this` if the method body references it
@@ -2460,6 +2462,174 @@ func stmtReferencesIdent(s ast.Stmt, name string) bool {
 	return found
 }
 
+func hirBodyContainsNestedClosure(body *hir.BlockStmt) bool {
+	if body == nil {
+		return false
+	}
+	found := false
+	var walk func(e hir.Expr)
+	var walkStmt func(s hir.Stmt)
+	walk = func(e hir.Expr) {
+		if found || e == nil {
+			return
+		}
+		switch e := e.(type) {
+		case *hir.ArrowFunc, *hir.FuncExpr:
+			found = true
+			return
+		case *hir.BinaryExpr:
+			walk(e.Left)
+			walk(e.Right)
+		case *hir.UnaryExpr:
+			walk(e.Operand)
+		case *hir.CallExpr:
+			walk(e.Func)
+			for _, a := range e.Args {
+				walk(a)
+			}
+		case *hir.MemberExpr:
+			walk(e.Object)
+		case *hir.ComputedMemberExpr:
+			walk(e.Object)
+			walk(e.Property)
+		case *hir.AssignExpr:
+			walk(e.Left)
+			walk(e.Right)
+		case *hir.TernaryExpr:
+			walk(e.Cond)
+			walk(e.Then)
+			walk(e.Else)
+		case *hir.ArrayLiteral:
+			for _, el := range e.Elements {
+				walk(el)
+			}
+		case *hir.ObjectLiteral:
+			for _, p := range e.Properties {
+				if p.Computed {
+					walk(p.Key)
+				}
+				walk(p.Value)
+			}
+		case *hir.SpreadExpr:
+			walk(e.Value)
+		case *hir.NewExpr:
+			walk(e.Callee)
+			for _, a := range e.Args {
+				walk(a)
+			}
+		case *hir.UpdateExpr:
+			walk(e.Operand)
+		case *hir.AwaitExpr:
+			walk(e.Value)
+		case *hir.TemplateLiteral:
+			for _, p := range e.Parts {
+				walk(p)
+			}
+		case *hir.SequenceExpr:
+			for _, ex := range e.Exprs {
+				walk(ex)
+			}
+		case *hir.ParenExpr:
+			walk(e.Expr)
+		case *hir.TypeAssertExpr:
+			walk(e.Expr)
+		case *hir.NonNullExpr:
+			walk(e.Expr)
+		case *hir.TaggedTemplateLiteral:
+			walk(e.Tag)
+			if e.Template != nil {
+				for _, p := range e.Template.Parts {
+					walk(p)
+				}
+			}
+		}
+	}
+	walkStmt = func(s hir.Stmt) {
+		if found || s == nil {
+			return
+		}
+		switch s := s.(type) {
+		case *hir.ExprStmt:
+			walk(s.Expr)
+		case *hir.ReturnStmt:
+			walk(s.Value)
+		case *hir.IfStmt:
+			walk(s.Cond)
+			for _, st := range s.Then.Stmts {
+				walkStmt(st)
+			}
+			walkStmt(s.Else)
+		case *hir.ForStmt:
+			walkStmt(s.Init)
+			walk(s.Cond)
+			walk(s.Post)
+			for _, st := range s.Body.Stmts {
+				walkStmt(st)
+			}
+		case *hir.ForOfStmt:
+			walk(s.Value)
+			for _, st := range s.Body.Stmts {
+				walkStmt(st)
+			}
+		case *hir.ForInStmt:
+			walk(s.Value)
+			for _, st := range s.Body.Stmts {
+				walkStmt(st)
+			}
+		case *hir.WhileStmt:
+			walk(s.Cond)
+			for _, st := range s.Body.Stmts {
+				walkStmt(st)
+			}
+		case *hir.DoWhileStmt:
+			for _, st := range s.Body.Stmts {
+				walkStmt(st)
+			}
+			walk(s.Cond)
+		case *hir.SwitchStmt:
+			walk(s.Tag)
+			for _, c := range s.Cases {
+				walk(c.Value)
+				for _, st := range c.Body {
+					walkStmt(st)
+				}
+			}
+		case *hir.TryCatchStmt:
+			if s.Try != nil {
+				for _, st := range s.Try.Stmts {
+					walkStmt(st)
+				}
+			}
+			if s.Catch != nil && s.Catch.Body != nil {
+				for _, st := range s.Catch.Body.Stmts {
+					walkStmt(st)
+				}
+			}
+			if s.Finally != nil {
+				for _, st := range s.Finally.Stmts {
+					walkStmt(st)
+				}
+			}
+		case *hir.BlockStmt:
+			for _, st := range s.Stmts {
+				walkStmt(st)
+			}
+		case *hir.VarDecl:
+			for _, d := range s.Declarators {
+				walk(d.Init)
+			}
+		case *hir.ThrowStmt:
+			walk(s.Value)
+		case *hir.LabeledStmt:
+			walkStmt(s.Stmt)
+		}
+	}
+	for _, st := range body.Stmts {
+		walkStmt(st)
+	}
+	return found
+}
+
 // hirBodyUsesThis checks if an HIR block references `this`.
 func hirBodyUsesThis(body *hir.BlockStmt) bool {
 	if body == nil {
@@ -2830,7 +3000,7 @@ func (l *Lowerer) wrapAsJSValueFunc(params []*hir.Param, body *ast.BlockStmt) *a
 }
 
 func (l *Lowerer) generatedFunctionCtorName() string {
-	if l.arenaEnabled && l.hasArenaVar > 0 && l.disableArenaCount == 0 {
+	if l.arenaEnabled && l.disableArenaCount == 0 {
 		return "NewArenaFunction"
 	}
 	return "NewFunction"

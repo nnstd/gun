@@ -1,6 +1,9 @@
 package jsvalue
 
-import "os"
+import (
+	"os"
+	"sync"
+)
 
 const arenaChunkSize = 4096
 
@@ -23,6 +26,24 @@ type Arena struct {
 
 func NewArena() *Arena {
 	return &Arena{current: &arenaChunk{}}
+}
+
+func (a *Arena) reset() {
+	if a == nil {
+		return
+	}
+	if a.current == nil {
+		a.current = &arenaChunk{}
+	}
+	a.pos = 0
+	a.marks = a.marks[:0]
+	for ch := a.current.next; ch != nil; {
+		next := ch.next
+		ch.next = a.spare
+		a.spare = ch
+		ch = next
+	}
+	a.current.next = nil
 }
 
 func (a *Arena) Destroy() {}
@@ -124,14 +145,24 @@ func (a *Arena) NewString(s string) *JSValue {
 	return v
 }
 
-var globalArena = NewArena()
 var arenaDisabled = os.Getenv("GUN_DISABLE_ARENA") == "1"
+var arenaPool = sync.Pool{New: func() any { return NewArena() }}
 
 func GetArena() *Arena {
 	if arenaDisabled {
 		return nil
 	}
-	return globalArena
+	a := arenaPool.Get().(*Arena)
+	a.reset()
+	return a
+}
+
+func ReleaseArena(a *Arena) {
+	if arenaDisabled || a == nil {
+		return
+	}
+	a.reset()
+	arenaPool.Put(a)
 }
 
 func heapEscape(v *JSValue) *JSValue {
