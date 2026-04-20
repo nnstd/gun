@@ -5,8 +5,15 @@ import (
 	"strings"
 )
 
-// NewString creates a string JSValue.
+// _emptyString is the interned "" singleton. Prototype is patched in
+// prototype.init() to avoid init-order dependency.
+var _emptyString = &JSValue{typ: TypeString, strVal: "", frozen: true}
+
+// NewString creates a string JSValue. Returns the singleton for "".
 func NewString(s string) *JSValue {
+	if s == "" {
+		return _emptyString
+	}
 	return &JSValue{typ: TypeString, strVal: s, prototype: StringPrototype}
 }
 

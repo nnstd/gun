@@ -130,6 +130,9 @@ func (v *JSValue) Set(name string, value *JSValue) {
 	if v == nil || v.typ == TypeUndefined || v.typ == TypeNull {
 		return
 	}
+	if v.frozen {
+		return
+	}
 	v.lock()
 	v.gen.Add(1)
 	// Fast path: own-property exists as data descriptor
@@ -189,6 +192,9 @@ func (v *JSValue) GetOwnProperty(name string) *PropertyDescriptor {
 // Type guard: no-op for undefined/null receivers (protects singletons).
 func (v *JSValue) DefineProperty(name string, desc *PropertyDescriptor) {
 	if v == nil || v.typ == TypeUndefined || v.typ == TypeNull {
+		return
+	}
+	if v.frozen {
 		return
 	}
 	v.lock()

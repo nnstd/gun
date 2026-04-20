@@ -7,13 +7,52 @@ import (
 	"strings"
 )
 
-// NewNumber creates a number JSValue.
+// Number interning cache for integers in [numCacheMin, numCacheMax].
+// Populated by initNumCache(), invoked from prototype.init() so NumberPrototype
+// is available when slots are created.
+const (
+	numCacheMin = -128
+	numCacheMax = 255
+)
+
+var numCache [numCacheMax - numCacheMin + 1]*JSValue
+
+// initNumCache populates numCache with frozen singletons. Idempotent: slot 0
+// holds the singleton for numCacheMin (-128), so a non-nil check guards reentry.
+func initNumCache() {
+	if numCache[0] != nil {
+		return
+	}
+	for i := numCacheMin; i <= numCacheMax; i++ {
+		numCache[i-numCacheMin] = &JSValue{
+			typ:       TypeNumber,
+			numVal:    float64(i),
+			intVal:    i,
+			prototype: NumberPrototype,
+			frozen:    true,
+		}
+	}
+}
+
+// NewNumber creates a number JSValue. Returns a cached singleton for integer
+// values in [-128, 255]. NaN and -0 are explicitly excluded: NaN's int
+// conversion is implementation-defined in Go, and -0 must preserve its sign
+// bit to produce -Infinity on reciprocation (1/-0 === -Infinity in JS).
 func NewNumber(f float64) *JSValue {
+	if !math.IsNaN(f) && !(f == 0 && math.Signbit(f)) {
+		if i := int(f); float64(i) == f && i >= numCacheMin && i <= numCacheMax {
+			return numCache[i-numCacheMin]
+		}
+	}
 	return &JSValue{typ: TypeNumber, numVal: f, prototype: NumberPrototype}
 }
 
-// NewInt creates a number JSValue from an int.
+// NewInt creates a number JSValue from an int. Returns a cached singleton for
+// values in [-128, 255].
 func NewInt(i int) *JSValue {
+	if i >= numCacheMin && i <= numCacheMax {
+		return numCache[i-numCacheMin]
+	}
 	return &JSValue{typ: TypeNumber, numVal: float64(i), intVal: i, prototype: NumberPrototype}
 }
 

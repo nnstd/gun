@@ -73,6 +73,16 @@ func init() {
 	initMapPrototype()
 	initSetPrototype()
 
+	// Patch prototypes onto interned singletons. Direct field writes (not .Set())
+	// are intentional: they bypass the frozen guard that protects user-facing
+	// mutation paths. This is runtime-internal initialization.
+	_true.prototype = BooleanPrototype
+	_false.prototype = BooleanPrototype
+	_emptyString.prototype = StringPrototype
+
+	// Populate numCache now that NumberPrototype is available.
+	initNumCache()
+
 	// Global constructor objects are initialized in a separate init and may run
 	// before this one. Patch their prototype properties here so constructor
 	// property access is stable regardless of package init order.

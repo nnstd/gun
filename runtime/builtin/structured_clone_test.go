@@ -5,9 +5,8 @@ import (
 )
 
 func TestStructuredClonePrimitives(t *testing.T) {
-	// Singletons (undefined, null) are returned as-is; all others get new allocations.
-	singletons := map[*JSValue]bool{NewUndefined(): true, NewNull(): true}
-
+	// Frozen singletons (undefined, null, booleans, small ints, empty string) are
+	// returned as-is by design; all non-frozen primitives get new allocations.
 	cases := []*JSValue{
 		NewUndefined(),
 		NewNull(),
@@ -24,7 +23,7 @@ func TestStructuredClonePrimitives(t *testing.T) {
 		if clone.typ != v.typ {
 			t.Errorf("type mismatch: got %v want %v", clone.typ, v.typ)
 		}
-		if !singletons[v] && clone == v {
+		if !v.frozen && clone == v {
 			t.Errorf("clone should be a new pointer for type %v", v.typ)
 		}
 	}

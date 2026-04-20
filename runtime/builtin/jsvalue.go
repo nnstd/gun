@@ -64,6 +64,7 @@ type JSValue struct {
 	mu         sync.RWMutex                                   // per-object RWMutex for concurrent access
 	gen        atomic.Uint64                                  // incremented on every mutation for cache invalidation
 	cache      [4]cacheEntry                                  // fixed inline cache for Get() optimization
+	frozen     bool                                           // true for interned singletons; Set/DefineProperty no-op
 }
 
 // MarkAsMethod marks this function as a class method that expects 'this'
@@ -85,9 +86,21 @@ func (v *JSValue) runlock() { v.mu.RUnlock() }
 
 var symbolCounter uint64
 
-// NewBool creates a boolean JSValue.
+// Interned boolean singletons. Declared without prototype; BooleanPrototype
+// is patched in during prototype.init() to avoid init-order dependency.
+// frozen=true makes .Set()/.DefineProperty() a no-op on these values, matching
+// JS sloppy-mode semantics for primitive mutation.
+var (
+	_true  = &JSValue{typ: TypeBoolean, boolVal: true, frozen: true}
+	_false = &JSValue{typ: TypeBoolean, boolVal: false, frozen: true}
+)
+
+// NewBool returns the cached singleton for the given boolean value.
 func NewBool(b bool) *JSValue {
-	return &JSValue{typ: TypeBoolean, boolVal: b, prototype: BooleanPrototype}
+	if b {
+		return _true
+	}
+	return _false
 }
 
 // NewSymbol creates a symbol JSValue with a unique ID.
@@ -111,8 +124,8 @@ func PropertyKey(v any) string {
 // correct JS semantics — type guards in Set()/DefineProperty() prevent
 // accidental mutation of the singleton's (nil) properties map.
 var (
-	_undefined = &JSValue{typ: TypeUndefined}
-	_null      = &JSValue{typ: TypeNull}
+	_undefined = &JSValue{typ: TypeUndefined, frozen: true}
+	_null      = &JSValue{typ: TypeNull, frozen: true}
 )
 
 // NewNull returns a singleton null JSValue (zero allocation).
