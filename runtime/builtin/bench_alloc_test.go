@@ -73,3 +73,23 @@ func BenchmarkBooleanHeavy(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkObjectFromFlat(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_ = ObjectFrom(
+			"hello", NewString("world"),
+			"count", NewNumber(1),
+			"ok", NewBool(true),
+		)
+	}
+}
+
+func BenchmarkObjectFromMap(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_ = ObjectFrom(map[string]any{
+			"hello": NewString("world"),
+			"count": NewNumber(1),
+			"ok":    NewBool(true),
+		})
+	}
+}

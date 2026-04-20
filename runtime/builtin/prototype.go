@@ -29,9 +29,7 @@ var (
 // defMethod defines a prototype method using the MarkAsMethod convention.
 // Package-level so initXxxPrototype functions in other files can use it.
 func defMethod(proto *JSValue, name string, fn func(args ...*JSValue) *JSValue) {
-	proto.DefineProperty(name, &PropertyDescriptor{
-		Value: NewFunction(fn).MarkAsMethod(), Writable: true, Enumerable: false, Configurable: true,
-	})
+	proto.DefineProperty(name, newDataDescriptor(NewFunction(fn).MarkAsMethod(), true, false, true))
 }
 
 // defGetter defines a prototype getter property.
@@ -90,30 +88,30 @@ func init() {
 	// property access is stable regardless of package init order.
 	if Boolean != nil {
 		Boolean.Set("prototype", BooleanPrototype)
-		BooleanPrototype.DefineProperty("constructor", &PropertyDescriptor{Value: Boolean, Writable: true, Enumerable: false, Configurable: true})
+		BooleanPrototype.DefineProperty("constructor", newDataDescriptor(Boolean, true, false, true))
 	}
 	if String != nil {
 		String.Set("prototype", StringPrototype)
-		StringPrototype.DefineProperty("constructor", &PropertyDescriptor{Value: String, Writable: true, Enumerable: false, Configurable: true})
+		StringPrototype.DefineProperty("constructor", newDataDescriptor(String, true, false, true))
 	}
 	if Object != nil {
 		Object.Set("prototype", ObjectPrototype)
 	}
 	if Array != nil {
 		Array.Set("prototype", ArrayPrototype)
-		ArrayPrototype.DefineProperty("constructor", &PropertyDescriptor{Value: Array, Writable: true, Enumerable: false, Configurable: true})
+		ArrayPrototype.DefineProperty("constructor", newDataDescriptor(Array, true, false, true))
 	}
 	if Number != nil {
 		Number.Set("prototype", NumberPrototype)
-		NumberPrototype.DefineProperty("constructor", &PropertyDescriptor{Value: Number, Writable: true, Enumerable: false, Configurable: true})
+		NumberPrototype.DefineProperty("constructor", newDataDescriptor(Number, true, false, true))
 	}
 	if BigIntCtor != nil {
 		BigIntCtor.Set("prototype", BigIntPrototype)
-		BigIntPrototype.DefineProperty("constructor", &PropertyDescriptor{Value: BigIntCtor, Writable: true, Enumerable: false, Configurable: true})
+		BigIntPrototype.DefineProperty("constructor", newDataDescriptor(BigIntCtor, true, false, true))
 	}
 	if Symbol_ != nil {
 		Symbol_.Set("prototype", SymbolPrototype)
-		SymbolPrototype.DefineProperty("constructor", &PropertyDescriptor{Value: Symbol_, Writable: true, Enumerable: false, Configurable: true})
+		SymbolPrototype.DefineProperty("constructor", newDataDescriptor(Symbol_, true, false, true))
 	}
 }
 
@@ -140,9 +138,7 @@ func initFunctionPrototype() {
 		})
 	})
 	bindFn.MarkAsMethod()
-	FunctionPrototype.DefineProperty("bind", &PropertyDescriptor{
-		Value: bindFn, Writable: true, Enumerable: false, Configurable: true,
-	})
+	FunctionPrototype.DefineProperty("bind", newDataDescriptor(bindFn, true, false, true))
 
 	callFn := NewFunction(func(args ...*JSValue) *JSValue {
 		if len(args) < 1 {
@@ -155,9 +151,7 @@ func initFunctionPrototype() {
 		return origFn.funcVal(args[1:]...)
 	})
 	callFn.MarkAsMethod()
-	FunctionPrototype.DefineProperty("call", &PropertyDescriptor{
-		Value: callFn, Writable: true, Enumerable: false, Configurable: true,
-	})
+	FunctionPrototype.DefineProperty("call", newDataDescriptor(callFn, true, false, true))
 
 	applyFn := NewFunction(func(args ...*JSValue) *JSValue {
 		if len(args) < 1 {
@@ -177,9 +171,7 @@ func initFunctionPrototype() {
 		return origFn.funcVal(callArgs...)
 	})
 	applyFn.MarkAsMethod()
-	FunctionPrototype.DefineProperty("apply", &PropertyDescriptor{
-		Value: applyFn, Writable: true, Enumerable: false, Configurable: true,
-	})
+	FunctionPrototype.DefineProperty("apply", newDataDescriptor(applyFn, true, false, true))
 }
 
 func initObjectPrototype() {

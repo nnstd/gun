@@ -32,8 +32,7 @@ func responseInternalOf(v *jsvalue.JSValue) *responseInternal {
 // newServerResponse builds a JSValue ServerResponse and the done channel that
 // the fasthttp handler should wait on before returning.
 func newServerResponse(ctx *fasthttp.RequestCtx) (*jsvalue.JSValue, chan struct{}) {
-	this := jsvalue.NewObject()
-	this.SetPrototype(responseCls.Get("prototype"))
+	this := jsvalue.NewObjectWithPrototype(responseCls.Get("prototype"))
 	initEvents(this)
 	this.Set("statusCode", jsvalue.NewNumber(200))
 	this.Set("statusMessage", jsvalue.NewString(""))

@@ -63,8 +63,7 @@ func agentInternalOf(v *jsvalue.JSValue) *agentInternal {
 }
 
 func newAgentInstance(opts *jsvalue.JSValue) *jsvalue.JSValue {
-	this := jsvalue.NewObject()
-	this.SetPrototype(agentClass.Get("prototype"))
+	this := jsvalue.NewObjectWithPrototype(agentClass.Get("prototype"))
 	a := agentInternalOf(this)
 	if opts != nil && opts.TypeString() == "object" {
 		if v := opts.Get("keepAlive"); v.TypeString() == "boolean" {

@@ -20,6 +20,30 @@ var Headers = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSVa
 	return nil
 }, nil)
 
+func newResponseValue(proto, body, status, statusText, headers *jsvalue.JSValue) *jsvalue.JSValue {
+	if status == nil {
+		status = jsvalue.NewNumber(200)
+	}
+	if statusText == nil {
+		statusText = jsvalue.NewString("OK")
+	}
+	if headers == nil {
+		headers = Headers.Call()
+	}
+	if body == nil {
+		body = jsvalue.NewString("")
+	}
+
+	res := jsvalue.NewObjectWithPrototype(proto)
+	res.Set("status", status)
+	res.Set("statusText", statusText)
+	res.Set("headers", headers)
+	res.Set("body", body)
+	res.Set("_bodyInit", body)
+	res.Set("ok", jsvalue.NewBool(status.Number() >= 200 && status.Number() < 300))
+	return res
+}
+
 var Request = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSValue) *jsvalue.JSValue {
 	var input *jsvalue.JSValue
 	if len(args) > 0 {
@@ -58,12 +82,7 @@ var Request = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSVa
 		}
 	}
 
-	this.Set("url", jsvalue.NewString(url))
-	this.Set("method", method)
-	this.Set("headers", headers)
-	this.Set("body", body)
-	this.Set("raw", this)
-	return nil
+	return newRequestValueWithPrototype(this.GetPrototype(), url, method.String(), headers, body.String())
 }, nil)
 
 var Response = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSValue) *jsvalue.JSValue {
@@ -92,17 +111,7 @@ var Response = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSV
 		}
 	}
 
-	if body == nil {
-		body = jsvalue.NewString("")
-	}
-
-	this.Set("status", status)
-	this.Set("statusText", statusText)
-	this.Set("headers", headers)
-	this.Set("body", body)
-	this.Set("_bodyInit", body)
-	this.Set("ok", jsvalue.NewBool(status.Number() >= 200 && status.Number() < 300))
-	return nil
+	return newResponseValue(this.GetPrototype(), body, status, statusText, headers)
 }, nil)
 
 var File = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSValue) *jsvalue.JSValue {
@@ -145,6 +154,26 @@ var URL = jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 	}
 	return ParseURL(jsvalue.NewString(""))
 })
+
+func newRequestValueWithPrototype(proto *jsvalue.JSValue, url, method string, headers *jsvalue.JSValue, body string) *jsvalue.JSValue {
+	if url == "" {
+		url = "http://127.0.0.1/"
+	}
+	if method == "" {
+		method = "GET"
+	}
+	if headers == nil {
+		headers = Headers.Call()
+	}
+
+	req := jsvalue.NewObjectWithPrototype(proto)
+	req.Set("url", jsvalue.NewString(url))
+	req.Set("method", jsvalue.NewString(method))
+	req.Set("headers", headers)
+	req.Set("body", jsvalue.NewString(body))
+	req.Set("raw", req)
+	return req
+}
 
 func init() {
 	Headers.Get("prototype").Set("get", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
@@ -260,16 +289,7 @@ func RequestFromHTTP(r *http.Request) *jsvalue.JSValue {
 		url = scheme + "://" + host + target
 	}
 
-	req := Request.Call(
-		jsvalue.NewString(url),
-		jsvalue.ObjectFrom(
-			"method", jsvalue.NewString(r.Method),
-			"headers", HeadersFromHTTP(r.Header),
-			"body", jsvalue.NewString(body),
-		),
-	)
-	req.Set("raw", req)
-	return req
+	return newRequestValueWithPrototype(Request.Get("prototype"), url, r.Method, HeadersFromHTTP(r.Header), body)
 }
 
 func WriteResponse(w http.ResponseWriter, value *jsvalue.JSValue) {
@@ -316,16 +336,7 @@ func RequestFromFastHTTP(ctx *fasthttp.RequestCtx) *jsvalue.JSValue {
 
 	method := string(ctx.Method())
 
-	req := Request.Call(
-		jsvalue.NewString(url),
-		jsvalue.ObjectFrom(
-			"method", jsvalue.NewString(method),
-			"headers", Headers.Call(),
-			"body", jsvalue.NewString(body),
-		),
-	)
-	req.Set("raw", req)
-	return req
+	return newRequestValueWithPrototype(Request.Get("prototype"), url, method, Headers.Call(), body)
 }
 
 func WriteResponseFastHTTP(ctx *fasthttp.RequestCtx, value *jsvalue.JSValue) {

@@ -1,17 +1,28 @@
 package jsvalue
 
-import "strconv"
-
 // parseArrayIndex checks if a property name is a valid non-negative integer
 // index (like "0", "1", "42") and returns the index. This enables JS-style
 // arr["0"] === arr[0] semantics.
 func parseArrayIndex(name string) (int, bool) {
-	if len(name) == 0 || (name[0] == '0' && len(name) > 1) {
-		return 0, name == "0" // "0" is valid, "01" is not
-	}
-	n, err := strconv.Atoi(name)
-	if err != nil || n < 0 {
+	if len(name) == 0 {
 		return 0, false
+	}
+	if name[0] == '0' {
+		return 0, len(name) == 1 // "0" is valid, "01" is not
+	}
+
+	const maxInt = int(^uint(0) >> 1)
+	n := 0
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		digit := int(c - '0')
+		if n > maxInt/10 || (n == maxInt/10 && digit > maxInt%10) {
+			return 0, false
+		}
+		n = n*10 + digit
 	}
 	return n, true
 }
@@ -26,6 +37,19 @@ type PropertyDescriptor struct {
 	Set          func(*JSValue, *JSValue)
 }
 
+func newDataDescriptor(value *JSValue, writable, enumerable, configurable bool) *PropertyDescriptor {
+	return &PropertyDescriptor{
+		Value:        value,
+		Writable:     writable,
+		Enumerable:   enumerable,
+		Configurable: configurable,
+	}
+}
+
+func newWritableEnumerableDataDescriptor(value *JSValue) *PropertyDescriptor {
+	return newDataDescriptor(value, true, true, true)
+}
+
 // Get retrieves a property by name, walking the prototype chain.
 // Uses double-checked locking: RLock for cache hits, Lock for cache misses.
 // Prototype chain walk uses RLock per object with next-pointer pattern to prevent races.
@@ -36,23 +60,27 @@ func (v *JSValue) Get(name string) *JSValue {
 		return NewUndefined()
 	}
 	if v.isBoxedPrimitive() {
-		if desc, ok := v.propertiesOrZero().Get(name); ok {
-			if desc.Get != nil {
-				return desc.Get(v)
+		if props := v.propertiesOrNil(); props != nil {
+			if desc, ok := props.Get(name); ok {
+				if desc.Get != nil {
+					return desc.Get(v)
+				}
+				return desc.Value
 			}
-			return desc.Value
 		}
 	}
 	if name == "__proto__" {
 		return v.GetPrototype()
 	}
+	if !v.isArr && v.typ != TypeString && v.extOrNil() == nil && v.prototype == nil {
+		return NewUndefined()
+	}
 
 	// Phase 1: RLock receiver — check cache + array/string fast paths
 	v.rlock()
 	if v.isArr {
-		arr := v.arrayListOrZero()
 		if idx, ok := parseArrayIndex(name); ok {
-			if idx < arr.Len() {
+			if arr := v.arrayListOrNil(); arr != nil && idx < arr.Len() {
 				val := arr.Get(idx)
 				v.runlock()
 				return val
@@ -67,8 +95,40 @@ func (v *JSValue) Get(name string) *JSValue {
 			return v.Index(idx)
 		}
 	}
-	recvGen := v.genLoad()
-	cache := v.cacheEntries()
+
+	ext := v.extOrNil()
+	if ext == nil {
+		v.runlock()
+		var next *JSValue
+		for cur := v; cur != nil; cur = next {
+			curExt := cur.extOrNil()
+			next = cur.prototype
+			if curExt == nil {
+				continue
+			}
+			meta := curExt.meta
+			if meta == nil {
+				meta = cur.ensureMeta()
+			}
+			meta.mu.RLock()
+			desc, ok := curExt.properties.Get(name)
+			meta.mu.RUnlock()
+			if ok {
+				if desc.Get != nil {
+					return desc.Get(v)
+				}
+				return desc.Value
+			}
+		}
+		return NewUndefined()
+	}
+
+	meta := ext.meta
+	if meta == nil {
+		meta = v.ensureMeta()
+	}
+	recvGen := meta.gen.Load()
+	cache := &meta.cache
 	for i := range cache {
 		e := &cache[i]
 		if e.key == name && e.source != nil && e.recvGen == recvGen && e.gen == e.source.genLoad() {
@@ -105,7 +165,14 @@ func (v *JSValue) Get(name string) *JSValue {
 			cur.rlock()
 		}
 		next = cur.prototype
-		if desc, ok := cur.propertiesOrZero().Get(name); ok {
+		props := cur.propertiesOrNil()
+		if props == nil {
+			if cur != v {
+				cur.runlock()
+			}
+			continue
+		}
+		if desc, ok := props.Get(name); ok {
 			copy(cache[1:], cache[:3])
 			cache[0] = cacheEntry{
 				key:     name,
@@ -186,19 +253,18 @@ func (v *JSValue) Set(name string, value *JSValue) {
 		}
 	}
 	// Create new data descriptor
-	v.propertiesOrZero().Set(name, &PropertyDescriptor{
-		Value:        value,
-		Writable:     true,
-		Enumerable:   true,
-		Configurable: true,
-	})
+	v.propertiesOrZero().Set(name, newWritableEnumerableDataDescriptor(value))
 	v.unlock()
 }
 
 // GetOwnProperty returns the property descriptor for an own property, or nil.
 func (v *JSValue) GetOwnProperty(name string) *PropertyDescriptor {
+	props := v.propertiesOrNil()
+	if props == nil {
+		return nil
+	}
 	v.rlock()
-	desc, _ := v.propertiesOrZero().Get(name)
+	desc, _ := props.Get(name)
 	v.runlock()
 	return desc
 }
@@ -227,11 +293,16 @@ func (v *JSValue) HasOwnProperty(name string) bool {
 		return false
 	}
 	if v.isBoxedPrimitive() {
-		if _, ok := v.propertiesOrZero().Get(name); ok {
-			return true
+		if props := v.propertiesOrNil(); props != nil {
+			if _, ok := props.Get(name); ok {
+				return true
+			}
 		}
 	}
-	props := v.propertiesOrZero()
+	props := v.propertiesOrNil()
+	if props == nil {
+		return false
+	}
 	v.rlock()
 	ok := props.Has(name)
 	v.runlock()
@@ -246,7 +317,10 @@ func (v *JSValue) OwnKeys() []string {
 	if v.isPrimitiveValue() {
 		v = boxedPrimitiveOf(v)
 	}
-	props := v.propertiesOrZero()
+	props := v.propertiesOrNil()
+	if props == nil {
+		return nil
+	}
 	v.rlock()
 	keys := props.Keys()
 	v.runlock()
@@ -261,7 +335,10 @@ func (v *JSValue) EnumerableOwnKeys() []string {
 	if v.isPrimitiveValue() {
 		v = boxedPrimitiveOf(v)
 	}
-	props := v.propertiesOrZero()
+	props := v.propertiesOrNil()
+	if props == nil {
+		return nil
+	}
 	v.rlock()
 	keys := make([]string, 0, props.Len())
 	props.ForEach(func(k string, desc *PropertyDescriptor) {

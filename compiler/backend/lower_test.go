@@ -785,6 +785,7 @@ func TestObjectLiteralSpread(t *testing.T) {
 		const b = {...a, y: 2};
 	`)
 	assertContains(t, out, "Assign")
+	assertNotContains(t, out, "map[string]interface")
 }
 
 func TestObjectLiteralComputedKey(t *testing.T) {
@@ -795,6 +796,39 @@ func TestObjectLiteralComputedKey(t *testing.T) {
 	assertContains(t, out, "fmt.Sprint")
 	assertContains(t, out, "NewObject")
 	assertNotContains(t, out, `"[KEY]"`)
+}
+
+func TestObjectLiteralUsesFlatObjectFromArgs(t *testing.T) {
+	out := lowerTS(t, `
+		const obj = { hello: "world", count: 1 };
+	`)
+	assertContains(t, out, `jsvalue.ObjectFrom("hello", jsvalue.NewString("world"), "count", jsvalue.NewNumber(float64(1)))`)
+	assertNotContains(t, out, "map[string]interface")
+}
+
+func TestObjectLiteralAccessorsUseFlatDescriptorObjectFromArgs(t *testing.T) {
+	out := lowerTS(t, `
+		const obj = {
+			get name() { return "x"; },
+			set name(v) {}
+		};
+	`)
+	assertContains(t, out, `jsvalue.ObjectFrom("get",`)
+	assertContains(t, out, `"set",`)
+	assertNotContains(t, out, "map[string]interface")
+}
+
+func TestClassHiddenPropertyDescriptorUsesFlatObjectFromArgs(t *testing.T) {
+	out := lowerTS(t, `
+		class Box {
+			value = 1;
+		}
+	`)
+	assertContains(t, out, `jsvalue.ObjectFrom("value",`)
+	assertContains(t, out, `"writable",`)
+	assertContains(t, out, `"enumerable",`)
+	assertContains(t, out, `"configurable",`)
+	assertNotContains(t, out, "map[string]interface")
 }
 
 // --- Unused variable elimination tests ---

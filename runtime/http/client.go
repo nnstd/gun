@@ -61,8 +61,7 @@ func registerClient(v *jsvalue.JSValue, ci *clientInternal) {
 // ClientRequest implements http.request / http.get / https.request / https.get.
 // isTLS=true → https; autoEnd=true → wrap as .get() (auto-finalize).
 func ClientRequest(isTLS, autoEnd bool, args ...*jsvalue.JSValue) *jsvalue.JSValue {
-	this := jsvalue.NewObject()
-	this.SetPrototype(clientReqCls.Get("prototype"))
+	this := jsvalue.NewObjectWithPrototype(clientReqCls.Get("prototype"))
 	initEvents(this)
 
 	ci := &clientInternal{

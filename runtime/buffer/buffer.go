@@ -12,8 +12,7 @@ var Buffer *jsvalue.JSValue
 var Blob *jsvalue.JSValue
 
 func newBufferInstance(data string) *jsvalue.JSValue {
-	obj := jsvalue.NewObject()
-	obj.SetPrototype(Buffer.Get("prototype"))
+	obj := jsvalue.NewObjectWithPrototype(Buffer.Get("prototype"))
 	obj.Set("_data", jsvalue.NewString(data))
 	obj.Set("length", jsvalue.NewNumber(float64(len([]byte(data)))))
 	return obj

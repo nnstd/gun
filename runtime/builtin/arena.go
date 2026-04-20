@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-const arenaChunkSize = 4096
+const arenaChunkSize = 1024
 
 type arenaChunk struct {
 	slots [arenaChunkSize]JSValue
@@ -25,18 +25,18 @@ type Arena struct {
 }
 
 func NewArena() *Arena {
-	return &Arena{current: &arenaChunk{}}
+	return &Arena{}
 }
 
 func (a *Arena) reset() {
 	if a == nil {
 		return
 	}
-	if a.current == nil {
-		a.current = &arenaChunk{}
-	}
 	a.pos = 0
 	a.marks = a.marks[:0]
+	if a.current == nil {
+		return
+	}
 	for ch := a.current.next; ch != nil; {
 		next := ch.next
 		ch.next = a.spare
@@ -82,6 +82,11 @@ func (a *Arena) PushScope() {
 	}
 	if a.current == nil {
 		a.current = a.nextChunk()
+	}
+	if n := len(a.marks); n < cap(a.marks) {
+		a.marks = a.marks[:n+1]
+		a.marks[n] = arenaMark{chunk: a.current, pos: a.pos}
+		return
 	}
 	a.marks = append(a.marks, arenaMark{chunk: a.current, pos: a.pos})
 }

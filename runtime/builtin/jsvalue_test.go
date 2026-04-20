@@ -862,6 +862,16 @@ func TestObjectFromMapWithNestedJSValue(t *testing.T) {
 	}
 }
 
+func TestObjectFromFlatPairs(t *testing.T) {
+	obj := ObjectFrom("name", NewString("Alice"), "age", NewNumber(30))
+	if obj.Get("name").String() != "Alice" {
+		t.Errorf("ObjectFrom flat: name = %v", obj.Get("name"))
+	}
+	if obj.Get("age").Number() != 30 {
+		t.Errorf("ObjectFrom flat: age = %v", obj.Get("age"))
+	}
+}
+
 // --- DefineProperty with getter ---
 
 func TestDefinePropertyGetter(t *testing.T) {

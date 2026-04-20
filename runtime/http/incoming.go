@@ -10,8 +10,7 @@ import (
 
 // newIncomingMessage builds a server-side IncomingMessage JSValue from a fasthttp request context.
 func newIncomingMessage(ctx *fasthttp.RequestCtx) *jsvalue.JSValue {
-	this := jsvalue.NewObject()
-	this.SetPrototype(incomingCls.Get("prototype"))
+	this := jsvalue.NewObjectWithPrototype(incomingCls.Get("prototype"))
 	initEvents(this)
 
 	headers := jsvalue.NewObject()
@@ -42,8 +41,7 @@ func newIncomingMessage(ctx *fasthttp.RequestCtx) *jsvalue.JSValue {
 
 // newClientResponseMessage builds a client-side IncomingMessage from a fasthttp.Response.
 func newClientResponseMessage(resp *fasthttp.Response) *jsvalue.JSValue {
-	this := jsvalue.NewObject()
-	this.SetPrototype(incomingCls.Get("prototype"))
+	this := jsvalue.NewObjectWithPrototype(incomingCls.Get("prototype"))
 	initEvents(this)
 
 	headers := jsvalue.NewObject()

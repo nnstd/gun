@@ -59,6 +59,23 @@ cleanup() {
 }
 trap cleanup EXIT
 
+wait_for_server() {
+  local pid=$1
+  local port=$2
+  local timeout_s=${3:-5}
+  local deadline=$((SECONDS + timeout_s))
+  while [ $SECONDS -lt $deadline ]; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      return 1
+    fi
+    if curl -sf "http://127.0.0.1:${port}/plaintext" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
 # ── Generate server source ──────────────────────────────────
 
 write_server_ts() {
@@ -176,7 +193,7 @@ run_k6() {
   log "=== $label ==="
   echo ""
 
-  k6 run --out json="$jsonfile" - <<K6SCRIPT
+  env -u K6_DURATION -u K6_RATE -u K6_VUS k6 run --out json="$jsonfile" - <<K6SCRIPT
 import http from 'k6/http';
 import { check } from 'k6';
 
@@ -361,7 +378,12 @@ main() {
     log "Starting ${label} server on :${port} ..."
     PORT=$port "$BENCH_DIR/gun-o${level}/bench-server" &
     local pid=$!
-    sleep 1
+    if ! wait_for_server "$pid" "$port" 5; then
+      warn "${label} server did not become ready on :${port}, skipping"
+      kill $pid 2>/dev/null || true
+      port=$((port + 1))
+      continue
+    fi
 
     if verify_server "$label" $port; then
       local stopfile="$BENCH_DIR/gun-o${level}-res.stop"
@@ -392,7 +414,12 @@ main() {
   log "Starting Bun server on :${bun_port} ..."
   PORT=$bun_port $BUN_BIN run "$BENCH_DIR/bun/server.ts" &
   local bun_pid=$!
-  sleep 1
+  if ! wait_for_server "$bun_pid" "$bun_port" 5; then
+    warn "Bun server did not become ready on :${bun_port}, skipping"
+    kill $bun_pid 2>/dev/null || true
+    kill_servers
+    return
+  fi
 
   if verify_server "Bun" $bun_port; then
     local bun_stopfile="$BENCH_DIR/bun-res.stop"

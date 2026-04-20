@@ -445,19 +445,12 @@ func (l *Lowerer) lowerObjectLiteral(e *hir.ObjectLiteral) ast.Expr {
 		return l.lowerObjectWithAccessors(e)
 	}
 
-	// jsvalue.ObjectFrom(map[string]any{...})
-	var elts []ast.Expr
+	// jsvalue.ObjectFrom("key1", value1, "key2", value2, ...)
+	var args []ast.Expr
 	for _, prop := range e.Properties {
-		key := stringLit(prop.KeyName)
-		value := l.lowerObjectPropertyValue(prop)
-		elts = append(elts, &ast.KeyValueExpr{Key: key, Value: value})
+		args = append(args, stringLit(prop.KeyName), l.lowerObjectPropertyValue(prop))
 	}
-	mapType := &ast.MapType{
-		Key:   goIdent("string"),
-		Value: &ast.InterfaceType{Methods: &ast.FieldList{}},
-	}
-	mapLit := &ast.CompositeLit{Type: mapType, Elts: elts}
-	return callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), mapLit)
+	return callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), args...)
 }
 
 // lowerObjectWithAccessors handles object literals with getter/setter properties.
@@ -465,41 +458,29 @@ func (l *Lowerer) lowerObjectLiteral(e *hir.ObjectLiteral) ast.Expr {
 func (l *Lowerer) lowerObjectWithAccessors(e *hir.ObjectLiteral) ast.Expr {
 	l.jsvalueImport()
 	// Start with non-accessor properties in ObjectFrom
-	var regularElts []ast.Expr
+	var regularArgs []ast.Expr
 	for _, prop := range e.Properties {
 		if !prop.IsGetter && !prop.IsSetter {
-			key := stringLit(prop.KeyName)
-			value := l.lowerObjectPropertyValue(prop)
-			regularElts = append(regularElts, &ast.KeyValueExpr{Key: key, Value: value})
+			regularArgs = append(regularArgs, stringLit(prop.KeyName), l.lowerObjectPropertyValue(prop))
 		}
 	}
-	mapType := &ast.MapType{
-		Key:   goIdent("string"),
-		Value: &ast.InterfaceType{Methods: &ast.FieldList{}},
-	}
-	mapLit := &ast.CompositeLit{Type: mapType, Elts: regularElts}
-	result := callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), mapLit)
+	result := callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), regularArgs...)
 	// Apply accessor properties via DefineProperty
 	for _, prop := range e.Properties {
 		if prop.IsGetter || prop.IsSetter {
-			var descElts []ast.Expr
+			var descArgs []ast.Expr
 			fnExpr := l.lowerExpr(prop.Value)
 			if prop.IsGetter {
-				descElts = append(descElts, &ast.KeyValueExpr{Key: stringLit("get"), Value: fnExpr})
+				descArgs = append(descArgs, stringLit("get"), fnExpr)
 			}
 			if prop.IsSetter {
-				descElts = append(descElts, &ast.KeyValueExpr{Key: stringLit("set"), Value: fnExpr})
+				descArgs = append(descArgs, stringLit("set"), fnExpr)
 			}
-			descMapType := &ast.MapType{
-				Key:   goIdent("string"),
-				Value: &ast.InterfaceType{Methods: &ast.FieldList{}},
-			}
-			descMapLit := &ast.CompositeLit{Type: descMapType, Elts: descElts}
 			result = callExpr(
 				selectorExpr(goIdent("jsvalue"), "DefineProperty"),
 				result,
 				stringLit(prop.KeyName),
-				callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), descMapLit),
+				callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), descArgs...),
 			)
 		}
 	}
@@ -541,20 +522,15 @@ func (l *Lowerer) lowerObjectWithComputed(e *hir.ObjectLiteral) ast.Expr {
 }
 
 // lowerObjectWithSpreads handles object literals with spread properties:
-// {a: 1, ...obj, b: 2} → jsvalue.Assign(jsvalue.ObjectFrom({a:1}), obj, jsvalue.ObjectFrom({b:2}))
+// {a: 1, ...obj, b: 2} → jsvalue.Assign(jsvalue.ObjectFrom("a", 1), obj, jsvalue.ObjectFrom("b", 2))
 func (l *Lowerer) lowerObjectWithSpreads(e *hir.ObjectLiteral) ast.Expr {
 	var args []ast.Expr
-	var currentElts []ast.Expr
+	var currentArgs []ast.Expr
 
 	flush := func() {
-		if len(currentElts) > 0 {
-			mapType := &ast.MapType{
-				Key:   goIdent("string"),
-				Value: &ast.InterfaceType{Methods: &ast.FieldList{}},
-			}
-			mapLit := &ast.CompositeLit{Type: mapType, Elts: currentElts}
-			args = append(args, callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), mapLit))
-			currentElts = nil
+		if len(currentArgs) > 0 {
+			args = append(args, callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), currentArgs...))
+			currentArgs = nil
 		}
 	}
 
@@ -563,9 +539,7 @@ func (l *Lowerer) lowerObjectWithSpreads(e *hir.ObjectLiteral) ast.Expr {
 			flush()
 			args = append(args, l.lowerExpr(spread.Value))
 		} else {
-			key := stringLit(prop.KeyName)
-			value := l.lowerObjectPropertyValue(prop)
-			currentElts = append(currentElts, &ast.KeyValueExpr{Key: key, Value: value})
+			currentArgs = append(currentArgs, stringLit(prop.KeyName), l.lowerObjectPropertyValue(prop))
 		}
 	}
 	flush()

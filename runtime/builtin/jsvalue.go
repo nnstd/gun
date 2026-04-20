@@ -48,9 +48,14 @@ type jsValueExt struct {
 	mapVal     *jsMap
 	setVal     *jsSet
 	classInit  func(this *JSValue, args ...*JSValue) *JSValue
-	mu         sync.RWMutex
-	gen        atomic.Uint64
-	cache      [4]cacheEntry
+	meta       *jsValueMeta
+	metaInit   sync.Mutex
+}
+
+type jsValueMeta struct {
+	mu    sync.RWMutex
+	gen   atomic.Uint64
+	cache [4]cacheEntry
 }
 
 // JSValue models a JavaScript value with typed storage and prototype chain.
@@ -71,6 +76,8 @@ type JSValue struct {
 	isArenaAllocated bool
 	ext              *jsValueExt
 }
+
+var jsValueExtInitMu sync.Mutex
 
 func (v *JSValue) isBoxedPrimitive() bool {
 	return v != nil && v.typ == TypeObject && v.boxedValue != nil
@@ -187,18 +194,50 @@ func (v *JSValue) extOrNil() *jsValueExt {
 }
 
 func (v *JSValue) ensureExt() *jsValueExt {
+	if v.ext != nil {
+		return v.ext
+	}
+	jsValueExtInitMu.Lock()
+	defer jsValueExtInitMu.Unlock()
 	if v.ext == nil {
 		v.ext = &jsValueExt{}
 	}
 	return v.ext
 }
 
+func (v *JSValue) ensureMeta() *jsValueMeta {
+	ext := v.ensureExt()
+	if ext.meta != nil {
+		return ext.meta
+	}
+	ext.metaInit.Lock()
+	defer ext.metaInit.Unlock()
+	if ext.meta == nil {
+		ext.meta = &jsValueMeta{}
+	}
+	return ext.meta
+}
+
 func (v *JSValue) propertiesOrZero() *SmallPropMap {
 	return &v.ensureExt().properties
 }
 
+func (v *JSValue) propertiesOrNil() *SmallPropMap {
+	if ext := v.extOrNil(); ext != nil {
+		return &ext.properties
+	}
+	return nil
+}
+
 func (v *JSValue) arrayListOrZero() *SmallValueList {
 	return &v.ensureExt().arrayVal
+}
+
+func (v *JSValue) arrayListOrNil() *SmallValueList {
+	if ext := v.extOrNil(); ext != nil {
+		return &ext.arrayVal
+	}
+	return nil
 }
 
 func (v *JSValue) regexValue() any {
@@ -246,27 +285,27 @@ func (v *JSValue) setClassInitializer(fn func(this *JSValue, args ...*JSValue) *
 }
 
 func (v *JSValue) cacheEntries() *[4]cacheEntry {
-	return &v.ensureExt().cache
+	return &v.ensureMeta().cache
 }
 
 func (v *JSValue) genLoad() uint64 {
-	if ext := v.extOrNil(); ext != nil {
-		return ext.gen.Load()
+	if ext := v.extOrNil(); ext != nil && ext.meta != nil {
+		return ext.meta.gen.Load()
 	}
 	return 0
 }
 
 func (v *JSValue) genAdd(delta uint64) {
-	v.ensureExt().gen.Add(delta)
+	v.ensureMeta().gen.Add(delta)
 }
 
 // lock acquires a write lock on the JSValue's RWMutex.
-func (v *JSValue) lock()   { v.ensureExt().mu.Lock() }
-func (v *JSValue) unlock() { v.ensureExt().mu.Unlock() }
+func (v *JSValue) lock()   { v.ensureMeta().mu.Lock() }
+func (v *JSValue) unlock() { v.ensureMeta().mu.Unlock() }
 
 // rlock acquires a read lock on the JSValue's RWMutex.
-func (v *JSValue) rlock()   { v.ensureExt().mu.RLock() }
-func (v *JSValue) runlock() { v.ensureExt().mu.RUnlock() }
+func (v *JSValue) rlock()   { v.ensureMeta().mu.RLock() }
+func (v *JSValue) runlock() { v.ensureMeta().mu.RUnlock() }
 
 var symbolCounter uint64
 

@@ -1,8 +1,37 @@
 package jsvalue
 
 import (
+	"strconv"
 	"testing"
 )
+
+func TestParseArrayIndex(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	overflow := strconv.FormatUint(uint64(maxInt)+1, 10)
+
+	tests := []struct {
+		name string
+		want int
+		ok   bool
+	}{
+		{name: "", want: 0, ok: false},
+		{name: "0", want: 0, ok: true},
+		{name: "7", want: 7, ok: true},
+		{name: "42", want: 42, ok: true},
+		{name: "01", want: 0, ok: false},
+		{name: "-1", want: 0, ok: false},
+		{name: "name", want: 0, ok: false},
+		{name: "12px", want: 0, ok: false},
+		{name: overflow, want: 0, ok: false},
+	}
+
+	for _, tt := range tests {
+		got, ok := parseArrayIndex(tt.name)
+		if got != tt.want || ok != tt.ok {
+			t.Fatalf("parseArrayIndex(%q) = (%d, %v), want (%d, %v)", tt.name, got, ok, tt.want, tt.ok)
+		}
+	}
+}
 
 // BenchmarkGetOwn benchmarks Get() for an own property (no prototype walk).
 func BenchmarkGetOwn(b *testing.B) {
@@ -52,6 +81,22 @@ func BenchmarkGetMiss(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = obj.Get("nonexistent")
+	}
+}
+
+func BenchmarkGetMissCold(b *testing.B) {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		obj := NewObject()
+		_ = obj.Get("nonexistent")
+	}
+}
+
+func BenchmarkGetStringIndex(b *testing.B) {
+	s := NewString("hello")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = s.Get("1")
 	}
 }
 

@@ -141,19 +141,16 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 
 	if l.namespaceAlias != "" {
 		l.jsvalueImport()
-		props := make([]ast.Expr, 0, len(l.namespaceEntries))
+		props := make([]ast.Expr, 0, len(l.namespaceEntries)*2)
 		for exportName, alias := range l.namespaceEntries {
-			props = append(props, &ast.KeyValueExpr{Key: stringLit(exportName), Value: goIdent(alias)})
+			props = append(props, stringLit(exportName), goIdent(alias))
 		}
 		// Declare namespace var, but initialize in init() so all referenced vars
 		// (which may themselves be set in init()) are available.
 		l.decls = append(l.decls, varDecl(l.namespaceAlias, jsValuePtrType(), nil))
 		l.initStmts = append(l.initStmts, assignStmt(
 			[]ast.Expr{goIdent(l.namespaceAlias)},
-			[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), &ast.CompositeLit{
-				Type: &ast.MapType{Key: goIdent("string"), Value: &ast.InterfaceType{Methods: &ast.FieldList{}}},
-				Elts: props,
-			})},
+			[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), props...)},
 		))
 	}
 
@@ -674,15 +671,10 @@ func (l *Lowerer) lowerClassMethodValue(m *hir.ClassMethod) ast.Expr {
 func (l *Lowerer) defineHiddenProperty(target, key, value ast.Expr) ast.Stmt {
 	l.jsvalueImport()
 	desc := callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"),
-		&ast.CompositeLit{
-			Type: &ast.MapType{Key: goIdent("string"), Value: &ast.InterfaceType{Methods: &ast.FieldList{}}},
-			Elts: []ast.Expr{
-				&ast.KeyValueExpr{Key: stringLit("value"), Value: value},
-				&ast.KeyValueExpr{Key: stringLit("writable"), Value: callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"), goIdent("true"))},
-				&ast.KeyValueExpr{Key: stringLit("enumerable"), Value: callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"), goIdent("false"))},
-				&ast.KeyValueExpr{Key: stringLit("configurable"), Value: callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"), goIdent("true"))},
-			},
-		},
+		stringLit("value"), value,
+		stringLit("writable"), callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"), goIdent("true")),
+		stringLit("enumerable"), callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"), goIdent("false")),
+		stringLit("configurable"), callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"), goIdent("true")),
 	)
 	return exprStmt(callExpr(selectorExpr(goIdent("jsvalue"), "DefineProperty"), target, key, desc))
 }
@@ -3000,7 +2992,7 @@ func (l *Lowerer) wrapAsJSValueFunc(params []*hir.Param, body *ast.BlockStmt) *a
 }
 
 func (l *Lowerer) generatedFunctionCtorName() string {
-	if l.arenaEnabled && l.disableArenaCount == 0 {
+	if l.arenaEnabled && l.disableArenaCount == 0 && l.hasArenaVar > 0 {
 		return "NewArenaFunction"
 	}
 	return "NewFunction"
