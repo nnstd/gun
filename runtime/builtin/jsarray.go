@@ -14,7 +14,7 @@ func NewArray(elems ...*JSValue) *JSValue {
 		isArr:     true,
 	}
 	for _, e := range elems {
-		v.arrayVal.Push(e)
+		v.arrayListOrZero().Push(e)
 	}
 	return v
 }
@@ -50,7 +50,7 @@ func SpreadIntoArray(v *JSValue) []*JSValue {
 		return nil
 	}
 	if v.isArr {
-		return append([]*JSValue{}, v.arrayVal.Slice()...)
+		return append([]*JSValue{}, v.arrayListOrZero().Slice()...)
 	}
 	if v.typ == TypeString {
 		runes := []rune(v.strVal)
@@ -107,7 +107,7 @@ func Slice(arr *JSValue, args ...*JSValue) *JSValue {
 	if !arr.isArr {
 		return NewArray()
 	}
-	length := arr.arrayVal.Len()
+	length := arr.arrayListOrZero().Len()
 	start, end := 0, length
 	if len(args) >= 1 && args[0] != nil {
 		start = normalizeIndex(int(args[0].Number()), length)
@@ -133,7 +133,7 @@ func Slice(arr *JSValue, args ...*JSValue) *JSValue {
 	// Build result slice from range.
 	result := make([]*JSValue, end-start)
 	for i := start; i < end; i++ {
-		result[i-start] = arr.arrayVal.Get(i)
+		result[i-start] = arr.arrayListOrZero().Get(i)
 	}
 	return NewArray(result...)
 }
@@ -142,15 +142,15 @@ func Slice(arr *JSValue, args ...*JSValue) *JSValue {
 func Concat(arr *JSValue, items ...*JSValue) *JSValue {
 	var result []*JSValue
 	if arr != nil && arr.isArr {
-		n := arr.arrayVal.Len()
+		n := arr.arrayListOrZero().Len()
 		result = make([]*JSValue, n)
 		for i := 0; i < n; i++ {
-			result[i] = arr.arrayVal.Get(i)
+			result[i] = arr.arrayListOrZero().Get(i)
 		}
 	}
 	for _, item := range items {
 		if item != nil && item.isArr {
-			result = append(result, item.arrayVal.Slice()...)
+			result = append(result, item.arrayListOrZero().Slice()...)
 		} else {
 			result = append(result, item)
 		}
@@ -167,10 +167,10 @@ func Join(arr *JSValue, sep *JSValue) *JSValue {
 	if sep != nil {
 		s = sep.String()
 	}
-	n := arr.arrayVal.Len()
+	n := arr.arrayListOrZero().Len()
 	strs := make([]string, n)
 	for i := 0; i < n; i++ {
-		strs[i] = fmt.Sprint(arr.arrayVal.Get(i))
+		strs[i] = fmt.Sprint(arr.arrayListOrZero().Get(i))
 	}
 	return NewString(strings.Join(strs, s))
 }
@@ -189,9 +189,9 @@ func Includes(arr *JSValue, val *JSValue) *JSValue {
 	if !arr.isArr {
 		return NewBool(false)
 	}
-	n := arr.arrayVal.Len()
+	n := arr.arrayListOrZero().Len()
 	for i := 0; i < n; i++ {
-		elem := arr.arrayVal.Get(i)
+		elem := arr.arrayListOrZero().Get(i)
 		if elem == val {
 			return NewBool(true)
 		}
@@ -280,14 +280,14 @@ func initArrayPrototype() {
 			}
 			args[0].lock()
 			defer args[0].unlock()
-			n := args[0].arrayVal.Len()
+			n := args[0].arrayListOrZero().Len()
 			for i, j := 0, n-1; i < j; i, j = i+1, j-1 {
-				a := args[0].arrayVal.Get(i)
-				b := args[0].arrayVal.Get(j)
-				args[0].arrayVal.Set(i, b)
-				args[0].arrayVal.Set(j, a)
+				a := args[0].arrayListOrZero().Get(i)
+				b := args[0].arrayListOrZero().Get(j)
+				args[0].arrayListOrZero().Set(i, b)
+				args[0].arrayListOrZero().Set(j, a)
 			}
-			args[0].gen.Add(1)
+			args[0].genAdd(1)
 			return args[0]
 		}).MarkAsMethod(),
 		Writable: true, Enumerable: false, Configurable: true,
@@ -303,11 +303,11 @@ func initArrayPrototype() {
 			}
 			this.lock()
 			defer this.unlock()
-			n := this.arrayVal.Len()
+			n := this.arrayListOrZero().Len()
 			for i := 0; i < n; i++ {
-				this.arrayVal.Set(i, args[1])
+				this.arrayListOrZero().Set(i, args[1])
 			}
-			this.gen.Add(1)
+			this.genAdd(1)
 			return this
 		}).MarkAsMethod(),
 		Writable: true, Enumerable: false, Configurable: true,
@@ -322,14 +322,14 @@ func initArrayPrototype() {
 			if this == nil || !this.isArr {
 				return NewUndefined()
 			}
-			n := this.arrayVal.Len()
+			n := this.arrayListOrZero().Len()
 			if idx < 0 {
 				idx = n + idx
 			}
 			if idx < 0 || idx >= n {
 				return NewUndefined()
 			}
-			return this.arrayVal.Get(idx)
+			return this.arrayListOrZero().Get(idx)
 		}).MarkAsMethod(),
 		Writable: true, Enumerable: false, Configurable: true,
 	})
@@ -346,10 +346,10 @@ func initArrayPrototype() {
 				compareFn = args[1]
 			}
 			// Materialise to a plain slice for sort.SliceStable, then replace.
-			n := this.arrayVal.Len()
+			n := this.arrayListOrZero().Len()
 			slice := make([]*JSValue, n)
 			for i := 0; i < n; i++ {
-				slice[i] = this.arrayVal.Get(i)
+				slice[i] = this.arrayListOrZero().Get(i)
 			}
 			sort.SliceStable(slice, func(i, j int) bool {
 				a, b := slice[i], slice[j]
@@ -358,8 +358,8 @@ func initArrayPrototype() {
 				}
 				return a.String() < b.String()
 			})
-			this.arrayVal.ReplaceAll(slice)
-			this.gen.Add(1)
+			this.arrayListOrZero().ReplaceAll(slice)
+			this.genAdd(1)
 			return this
 		}).MarkAsMethod(),
 		Writable: true, Enumerable: false, Configurable: true,
@@ -370,10 +370,10 @@ func initArrayPrototype() {
 				return NewArray()
 			}
 			this := args[0]
-			n := this.arrayVal.Len()
+			n := this.arrayListOrZero().Len()
 			entries := make([]*JSValue, n)
 			for i := 0; i < n; i++ {
-				entries[i] = NewArray(NewNumber(float64(i)), this.arrayVal.Get(i))
+				entries[i] = NewArray(NewNumber(float64(i)), this.arrayListOrZero().Get(i))
 			}
 			return NewArray(entries...)
 		}).MarkAsMethod(),
@@ -388,33 +388,33 @@ func initArrayPrototype() {
 		this.lock()
 		defer this.unlock()
 		for _, a := range args[1:] {
-			this.arrayVal.Push(a)
+			this.arrayListOrZero().Push(a)
 		}
-		this.gen.Add(1)
-		return NewNumber(float64(this.arrayVal.Len()))
+		this.genAdd(1)
+		return NewNumber(float64(this.arrayListOrZero().Len()))
 	})
 	defMethod(ArrayPrototype, "pop", func(args ...*JSValue) *JSValue {
-		if len(args) < 1 || args[0] == nil || !args[0].isArr || args[0].arrayVal.Len() == 0 {
+		if len(args) < 1 || args[0] == nil || !args[0].isArr || args[0].arrayListOrZero().Len() == 0 {
 			return NewUndefined()
 		}
 		this := args[0]
 		this.lock()
 		defer this.unlock()
-		last := this.arrayVal.Get(this.arrayVal.Len() - 1)
-		this.arrayVal.Truncate()
-		this.gen.Add(1)
+		last := this.arrayListOrZero().Get(this.arrayListOrZero().Len() - 1)
+		this.arrayListOrZero().Truncate()
+		this.genAdd(1)
 		return last
 	})
 	defMethod(ArrayPrototype, "shift", func(args ...*JSValue) *JSValue {
-		if len(args) < 1 || args[0] == nil || !args[0].isArr || args[0].arrayVal.Len() == 0 {
+		if len(args) < 1 || args[0] == nil || !args[0].isArr || args[0].arrayListOrZero().Len() == 0 {
 			return NewUndefined()
 		}
 		this := args[0]
 		this.lock()
 		defer this.unlock()
-		first := this.arrayVal.Get(0)
-		this.arrayVal.RemoveFirst()
-		this.gen.Add(1)
+		first := this.arrayListOrZero().Get(0)
+		this.arrayListOrZero().RemoveFirst()
+		this.genAdd(1)
 		return first
 	})
 	defMethod(ArrayPrototype, "unshift", func(args ...*JSValue) *JSValue {
@@ -424,9 +424,9 @@ func initArrayPrototype() {
 		this := args[0]
 		this.lock()
 		defer this.unlock()
-		this.arrayVal.Prepend(args[1:]...)
-		this.gen.Add(1)
-		return NewNumber(float64(this.arrayVal.Len()))
+		this.arrayListOrZero().Prepend(args[1:]...)
+		this.genAdd(1)
+		return NewNumber(float64(this.arrayListOrZero().Len()))
 	})
 	defMethod(ArrayPrototype, "splice", func(args ...*JSValue) *JSValue {
 		if len(args) < 1 || args[0] == nil || !args[0].isArr {
@@ -436,7 +436,7 @@ func initArrayPrototype() {
 		this.lock()
 		defer this.unlock()
 		rest := args[1:]
-		length := this.arrayVal.Len()
+		length := this.arrayListOrZero().Len()
 		start := 0
 		if len(rest) >= 1 && rest[0] != nil {
 			start = int(rest[0].Number())
@@ -463,7 +463,7 @@ func initArrayPrototype() {
 		// Collect removed elements.
 		removed := make([]*JSValue, deleteCount)
 		for i := 0; i < deleteCount; i++ {
-			removed[i] = this.arrayVal.Get(start + i)
+			removed[i] = this.arrayListOrZero().Get(start + i)
 		}
 		// Collect new items.
 		var newItems []*JSValue
@@ -473,23 +473,23 @@ func initArrayPrototype() {
 		// Build result slice.
 		result := make([]*JSValue, 0, length-deleteCount+len(newItems))
 		for i := 0; i < start; i++ {
-			result = append(result, this.arrayVal.Get(i))
+			result = append(result, this.arrayListOrZero().Get(i))
 		}
 		result = append(result, newItems...)
 		for i := start + deleteCount; i < length; i++ {
-			result = append(result, this.arrayVal.Get(i))
+			result = append(result, this.arrayListOrZero().Get(i))
 		}
-		this.arrayVal.ReplaceAll(result)
-		this.gen.Add(1)
+		this.arrayListOrZero().ReplaceAll(result)
+		this.genAdd(1)
 		return NewArray(removed...)
 	})
 	defMethod(ArrayPrototype, "indexOf", func(args ...*JSValue) *JSValue {
 		if len(args) < 2 || args[0] == nil || !args[0].isArr {
 			return NewNumber(-1)
 		}
-		n := args[0].arrayVal.Len()
+		n := args[0].arrayListOrZero().Len()
 		for i := 0; i < n; i++ {
-			if jsValueEqual(args[0].arrayVal.Get(i), args[1]) {
+			if jsValueEqual(args[0].arrayListOrZero().Get(i), args[1]) {
 				return NewNumber(float64(i))
 			}
 		}
@@ -503,9 +503,9 @@ func initArrayPrototype() {
 		if fn == nil || fn.funcVal == nil {
 			return NewNumber(-1)
 		}
-		n := args[0].arrayVal.Len()
+		n := args[0].arrayListOrZero().Len()
 		for i := 0; i < n; i++ {
-			if Truthy(fn.funcVal(args[0].arrayVal.Get(i), NewNumber(float64(i)))) {
+			if Truthy(fn.funcVal(args[0].arrayListOrZero().Get(i), NewNumber(float64(i)))) {
 				return NewNumber(float64(i))
 			}
 		}
@@ -520,10 +520,10 @@ func initArrayPrototype() {
 		if fn == nil || fn.funcVal == nil {
 			return NewArray()
 		}
-		n := this.arrayVal.Len()
+		n := this.arrayListOrZero().Len()
 		results := make([]*JSValue, n)
 		for i := 0; i < n; i++ {
-			results[i] = fn.funcVal(this.arrayVal.Get(i), NewNumber(float64(i)), this)
+			results[i] = fn.funcVal(this.arrayListOrZero().Get(i), NewNumber(float64(i)), this)
 		}
 		return NewArray(results...)
 	})
@@ -537,9 +537,9 @@ func initArrayPrototype() {
 			return NewArray()
 		}
 		var results []*JSValue
-		n := this.arrayVal.Len()
+		n := this.arrayListOrZero().Len()
 		for i := 0; i < n; i++ {
-			elem := this.arrayVal.Get(i)
+			elem := this.arrayListOrZero().Get(i)
 			r := fn.funcVal(elem, NewNumber(float64(i)), this)
 			if r != nil && r.Bool() {
 				results = append(results, elem)
@@ -556,9 +556,9 @@ func initArrayPrototype() {
 		if fn == nil || fn.funcVal == nil {
 			return NewUndefined()
 		}
-		n := this.arrayVal.Len()
+		n := this.arrayListOrZero().Len()
 		for i := 0; i < n; i++ {
-			fn.funcVal(this.arrayVal.Get(i), NewNumber(float64(i)), this)
+			fn.funcVal(this.arrayListOrZero().Get(i), NewNumber(float64(i)), this)
 		}
 		return NewUndefined()
 	})
@@ -570,9 +570,9 @@ func initArrayPrototype() {
 		if fn == nil || fn.funcVal == nil {
 			return NewUndefined()
 		}
-		n := args[0].arrayVal.Len()
+		n := args[0].arrayListOrZero().Len()
 		for i := 0; i < n; i++ {
-			elem := args[0].arrayVal.Get(i)
+			elem := args[0].arrayListOrZero().Get(i)
 			if Truthy(fn.funcVal(elem)) {
 				return elem
 			}
@@ -587,9 +587,9 @@ func initArrayPrototype() {
 		if fn == nil || fn.funcVal == nil {
 			return NewBool(false)
 		}
-		n := args[0].arrayVal.Len()
+		n := args[0].arrayListOrZero().Len()
 		for i := 0; i < n; i++ {
-			if Truthy(fn.funcVal(args[0].arrayVal.Get(i))) {
+			if Truthy(fn.funcVal(args[0].arrayListOrZero().Get(i))) {
 				return NewBool(true)
 			}
 		}
@@ -603,9 +603,9 @@ func initArrayPrototype() {
 		if fn == nil || fn.funcVal == nil {
 			return NewBool(true)
 		}
-		n := args[0].arrayVal.Len()
+		n := args[0].arrayListOrZero().Len()
 		for i := 0; i < n; i++ {
-			if !Truthy(fn.funcVal(args[0].arrayVal.Get(i))) {
+			if !Truthy(fn.funcVal(args[0].arrayListOrZero().Get(i))) {
 				return NewBool(false)
 			}
 		}
@@ -622,19 +622,19 @@ func initArrayPrototype() {
 		if fn == nil || fn.funcVal == nil {
 			return NewUndefined()
 		}
-		n := args[0].arrayVal.Len()
+		n := args[0].arrayListOrZero().Len()
 		var acc *JSValue
 		startIdx := 0
 		if len(args) >= 3 {
 			acc = args[2]
 		} else if n > 0 {
-			acc = args[0].arrayVal.Get(0)
+			acc = args[0].arrayListOrZero().Get(0)
 			startIdx = 1
 		} else {
 			return NewUndefined()
 		}
 		for i := startIdx; i < n; i++ {
-			acc = fn.funcVal(acc, args[0].arrayVal.Get(i))
+			acc = fn.funcVal(acc, args[0].arrayListOrZero().Get(i))
 		}
 		return acc
 	})
@@ -643,11 +643,11 @@ func initArrayPrototype() {
 			return NewArray()
 		}
 		var result []*JSValue
-		n := args[0].arrayVal.Len()
+		n := args[0].arrayListOrZero().Len()
 		for i := 0; i < n; i++ {
-			elem := args[0].arrayVal.Get(i)
+			elem := args[0].arrayListOrZero().Get(i)
 			if elem != nil && elem.isArr {
-				result = append(result, elem.arrayVal.Slice()...)
+				result = append(result, elem.arrayListOrZero().Slice()...)
 			} else {
 				result = append(result, elem)
 			}
@@ -663,11 +663,11 @@ func initArrayPrototype() {
 			return NewArray()
 		}
 		var result []*JSValue
-		n := args[0].arrayVal.Len()
+		n := args[0].arrayListOrZero().Len()
 		for i := 0; i < n; i++ {
-			r := fn.funcVal(args[0].arrayVal.Get(i), NewNumber(float64(i)))
+			r := fn.funcVal(args[0].arrayListOrZero().Get(i), NewNumber(float64(i)))
 			if r != nil && r.isArr {
-				result = append(result, r.arrayVal.Slice()...)
+				result = append(result, r.arrayListOrZero().Slice()...)
 			} else {
 				result = append(result, r)
 			}

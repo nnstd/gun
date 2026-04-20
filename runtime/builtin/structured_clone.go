@@ -16,9 +16,9 @@ func StructuredClone(v *JSValue, options ...*JSValue) *JSValue {
 	if len(options) > 0 && options[0] != nil {
 		transfer := options[0].Get("transfer")
 		if transfer != nil && transfer.isArr {
-			n := transfer.arrayVal.Len()
+			n := transfer.arrayListOrZero().Len()
 			for i := 0; i < n; i++ {
-				orig := transfer.arrayVal.Get(i)
+				orig := transfer.arrayListOrZero().Get(i)
 				if orig == nil {
 					continue
 				}
@@ -43,21 +43,21 @@ func detach(v *JSValue) {
 	switch v.typ {
 	case TypeObject:
 		if v.isArr {
-			v.arrayVal.ReplaceAll(nil)
+			v.arrayListOrZero().ReplaceAll(nil)
 		} else {
-			v.properties = SmallPropMap{}
+			v.ensureExt().properties = SmallPropMap{}
 		}
 	case TypeMap:
-		if v.mapVal != nil {
-			v.mapVal.entries = nil
+		if v.mapState() != nil {
+			v.mapState().entries = nil
 		}
 	case TypeSet:
-		if v.setVal != nil {
-			v.setVal.items = nil
+		if v.setState() != nil {
+			v.setState().items = nil
 		}
 	}
 	// Bump gen so any cached Gets are invalidated.
-	v.gen.Add(1)
+	v.genAdd(1)
 }
 
 func structuredCloneInner(v *JSValue, seen map[*JSValue]*JSValue) *JSValue {
@@ -83,18 +83,20 @@ func structuredCloneInner(v *JSValue, seen map[*JSValue]*JSValue) *JSValue {
 		panic("DataCloneError: function cannot be cloned")
 	case TypeRegex:
 		// Regex is treated as a cloneable object in the spec.
-		return &JSValue{typ: TypeRegex, regexVal: v.regexVal, prototype: RegexpPrototype}
+		clone := &JSValue{typ: TypeRegex, prototype: RegexpPrototype}
+		clone.setRegexValue(v.regexValue())
+		return clone
 	case TypeMap:
 		if existing, ok := seen[v]; ok {
 			return existing
 		}
 		clone := NewMap()
 		seen[v] = clone
-		if v.mapVal != nil {
-			for _, e := range v.mapVal.entries {
+		if v.mapState() != nil {
+			for _, e := range v.mapState().entries {
 				clonedKey := structuredCloneInner(e.key, seen)
 				clonedVal := structuredCloneInner(e.value, seen)
-				clone.mapVal.entries = append(clone.mapVal.entries, &jsMapEntry{clonedKey, clonedVal})
+				clone.mapState().entries = append(clone.mapState().entries, &jsMapEntry{clonedKey, clonedVal})
 			}
 		}
 		return clone
@@ -104,9 +106,9 @@ func structuredCloneInner(v *JSValue, seen map[*JSValue]*JSValue) *JSValue {
 		}
 		clone := NewSet()
 		seen[v] = clone
-		if v.setVal != nil {
-			for _, item := range v.setVal.items {
-				clone.setVal.items = append(clone.setVal.items, structuredCloneInner(item, seen))
+		if v.setState() != nil {
+			for _, item := range v.setState().items {
+				clone.setState().items = append(clone.setState().items, structuredCloneInner(item, seen))
 			}
 		}
 		return clone
@@ -118,9 +120,9 @@ func structuredCloneInner(v *JSValue, seen map[*JSValue]*JSValue) *JSValue {
 		if v.isArr {
 			clone = NewArray()
 			seen[v] = clone
-			n := v.arrayVal.Len()
+			n := v.arrayListOrZero().Len()
 			for i := 0; i < n; i++ {
-				clone.arrayVal.Push(structuredCloneInner(v.arrayVal.Get(i), seen))
+				clone.arrayListOrZero().Push(structuredCloneInner(v.arrayListOrZero().Get(i), seen))
 			}
 		} else {
 			clone = NewObject()

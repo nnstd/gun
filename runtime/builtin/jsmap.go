@@ -49,72 +49,112 @@ func jsValueEqual(a, b *JSValue) bool {
 
 // NewMap creates an empty Map JSValue with methods on MapPrototype.
 func NewMap() *JSValue {
-	return &JSValue{typ: TypeMap, mapVal: &jsMap{}, prototype: MapPrototype}
+	v := &JSValue{typ: TypeMap, prototype: MapPrototype}
+	v.setMapState(&jsMap{})
+	return v
 }
 
 func initMapPrototype() {
 	MapPrototype = &JSValue{typ: TypeObject, prototype: ObjectPrototype}
 
 	defGetter(MapPrototype, "size", func(this *JSValue) *JSValue {
-		if this == nil || this.mapVal == nil { return NewNumber(0) }
-		return NewNumber(float64(len(this.mapVal.entries)))
+		if this == nil || this.mapState() == nil {
+			return NewNumber(0)
+		}
+		return NewNumber(float64(len(this.mapState().entries)))
 	})
 	defMethod(MapPrototype, "get", func(args ...*JSValue) *JSValue {
-		if len(args) < 1 || args[0] == nil || args[0].mapVal == nil { return NewUndefined() }
-		if len(args) < 2 { return NewUndefined() }
-		if i := args[0].mapVal.find(args[1]); i >= 0 { return args[0].mapVal.entries[i].value }
+		if len(args) < 1 || args[0] == nil || args[0].mapState() == nil {
+			return NewUndefined()
+		}
+		if len(args) < 2 {
+			return NewUndefined()
+		}
+		if i := args[0].mapState().find(args[1]); i >= 0 {
+			return args[0].mapState().entries[i].value
+		}
 		return NewUndefined()
 	})
 	defMethod(MapPrototype, "set", func(args ...*JSValue) *JSValue {
-		if len(args) < 3 || args[0] == nil || args[0].mapVal == nil {
-			if len(args) > 0 { return args[0] }
+		if len(args) < 3 || args[0] == nil || args[0].mapState() == nil {
+			if len(args) > 0 {
+				return args[0]
+			}
 			return NewUndefined()
 		}
 		this := args[0]
 		key, value := args[1], args[2]
-		if i := this.mapVal.find(key); i >= 0 { this.mapVal.entries[i].value = value } else { this.mapVal.entries = append(this.mapVal.entries, &jsMapEntry{key, value}) }
+		if i := this.mapState().find(key); i >= 0 {
+			this.mapState().entries[i].value = value
+		} else {
+			this.mapState().entries = append(this.mapState().entries, &jsMapEntry{key, value})
+		}
 		return this
 	})
 	defMethod(MapPrototype, "has", func(args ...*JSValue) *JSValue {
-		if len(args) < 2 || args[0] == nil || args[0].mapVal == nil { return NewBool(false) }
-		return NewBool(args[0].mapVal.find(args[1]) >= 0)
+		if len(args) < 2 || args[0] == nil || args[0].mapState() == nil {
+			return NewBool(false)
+		}
+		return NewBool(args[0].mapState().find(args[1]) >= 0)
 	})
 	defMethod(MapPrototype, "delete", func(args ...*JSValue) *JSValue {
-		if len(args) < 2 || args[0] == nil || args[0].mapVal == nil { return NewBool(false) }
+		if len(args) < 2 || args[0] == nil || args[0].mapState() == nil {
+			return NewBool(false)
+		}
 		this := args[0]
-		if i := this.mapVal.find(args[1]); i >= 0 {
-			this.mapVal.entries = append(this.mapVal.entries[:i], this.mapVal.entries[i+1:]...)
+		if i := this.mapState().find(args[1]); i >= 0 {
+			this.mapState().entries = append(this.mapState().entries[:i], this.mapState().entries[i+1:]...)
 			return NewBool(true)
 		}
 		return NewBool(false)
 	})
 	defMethod(MapPrototype, "clear", func(args ...*JSValue) *JSValue {
-		if len(args) >= 1 && args[0] != nil && args[0].mapVal != nil { args[0].mapVal.entries = nil }
+		if len(args) >= 1 && args[0] != nil && args[0].mapState() != nil {
+			args[0].mapState().entries = nil
+		}
 		return NewUndefined()
 	})
 	defMethod(MapPrototype, "keys", func(args ...*JSValue) *JSValue {
-		if len(args) < 1 || args[0] == nil || args[0].mapVal == nil { return NewArray() }
-		keys := make([]*JSValue, len(args[0].mapVal.entries))
-		for i, e := range args[0].mapVal.entries { keys[i] = e.key }
+		if len(args) < 1 || args[0] == nil || args[0].mapState() == nil {
+			return NewArray()
+		}
+		keys := make([]*JSValue, len(args[0].mapState().entries))
+		for i, e := range args[0].mapState().entries {
+			keys[i] = e.key
+		}
 		return NewArray(keys...)
 	})
 	defMethod(MapPrototype, "values", func(args ...*JSValue) *JSValue {
-		if len(args) < 1 || args[0] == nil || args[0].mapVal == nil { return NewArray() }
-		vals := make([]*JSValue, len(args[0].mapVal.entries))
-		for i, e := range args[0].mapVal.entries { vals[i] = e.value }
+		if len(args) < 1 || args[0] == nil || args[0].mapState() == nil {
+			return NewArray()
+		}
+		vals := make([]*JSValue, len(args[0].mapState().entries))
+		for i, e := range args[0].mapState().entries {
+			vals[i] = e.value
+		}
 		return NewArray(vals...)
 	})
 	defMethod(MapPrototype, "entries", func(args ...*JSValue) *JSValue {
-		if len(args) < 1 || args[0] == nil || args[0].mapVal == nil { return NewArray() }
-		pairs := make([]*JSValue, len(args[0].mapVal.entries))
-		for i, e := range args[0].mapVal.entries { pairs[i] = NewArray(e.key, e.value) }
+		if len(args) < 1 || args[0] == nil || args[0].mapState() == nil {
+			return NewArray()
+		}
+		pairs := make([]*JSValue, len(args[0].mapState().entries))
+		for i, e := range args[0].mapState().entries {
+			pairs[i] = NewArray(e.key, e.value)
+		}
 		return NewArray(pairs...)
 	})
 	defMethod(MapPrototype, "forEach", func(args ...*JSValue) *JSValue {
-		if len(args) < 2 || args[0] == nil || args[0].mapVal == nil { return NewUndefined() }
+		if len(args) < 2 || args[0] == nil || args[0].mapState() == nil {
+			return NewUndefined()
+		}
 		fn := args[1]
-		if fn == nil || fn.funcVal == nil { return NewUndefined() }
-		for _, e := range args[0].mapVal.entries { fn.funcVal(e.value, e.key) }
+		if fn == nil || fn.funcVal == nil {
+			return NewUndefined()
+		}
+		for _, e := range args[0].mapState().entries {
+			fn.funcVal(e.value, e.key)
+		}
 		return NewUndefined()
 	})
 }

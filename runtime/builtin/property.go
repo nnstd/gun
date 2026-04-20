@@ -36,7 +36,7 @@ func (v *JSValue) Get(name string) *JSValue {
 		return NewUndefined()
 	}
 	if v.isBoxedPrimitive() {
-		if desc, ok := v.properties.Get(name); ok {
+		if desc, ok := v.propertiesOrZero().Get(name); ok {
 			if desc.Get != nil {
 				return desc.Get(v)
 			}
@@ -50,9 +50,10 @@ func (v *JSValue) Get(name string) *JSValue {
 	// Phase 1: RLock receiver — check cache + array/string fast paths
 	v.rlock()
 	if v.isArr {
+		arr := v.arrayListOrZero()
 		if idx, ok := parseArrayIndex(name); ok {
-			if idx < v.arrayVal.Len() {
-				val := v.arrayVal.Get(idx)
+			if idx < arr.Len() {
+				val := arr.Get(idx)
 				v.runlock()
 				return val
 			}
@@ -66,10 +67,11 @@ func (v *JSValue) Get(name string) *JSValue {
 			return v.Index(idx)
 		}
 	}
-	recvGen := v.gen.Load()
-	for i := range v.cache {
-		e := &v.cache[i]
-		if e.key == name && e.source != nil && e.recvGen == recvGen && e.gen == e.source.gen.Load() {
+	recvGen := v.genLoad()
+	cache := v.cacheEntries()
+	for i := range cache {
+		e := &cache[i]
+		if e.key == name && e.source != nil && e.recvGen == recvGen && e.gen == e.source.genLoad() {
 			val := e.value
 			getter := e.getter
 			v.runlock()
@@ -83,10 +85,11 @@ func (v *JSValue) Get(name string) *JSValue {
 
 	// Phase 2: Cache miss — Lock receiver, recheck, walk prototype chain
 	v.lock()
-	recvGen = v.gen.Load()
-	for i := range v.cache {
-		e := &v.cache[i]
-		if e.key == name && e.source != nil && e.recvGen == recvGen && e.gen == e.source.gen.Load() {
+	recvGen = v.genLoad()
+	cache = v.cacheEntries()
+	for i := range cache {
+		e := &cache[i]
+		if e.key == name && e.source != nil && e.recvGen == recvGen && e.gen == e.source.genLoad() {
 			val := e.value
 			getter := e.getter
 			v.unlock()
@@ -102,14 +105,14 @@ func (v *JSValue) Get(name string) *JSValue {
 			cur.rlock()
 		}
 		next = cur.prototype
-		if desc, ok := cur.properties.Get(name); ok {
-			copy(v.cache[1:], v.cache[:3])
-			v.cache[0] = cacheEntry{
+		if desc, ok := cur.propertiesOrZero().Get(name); ok {
+			copy(cache[1:], cache[:3])
+			cache[0] = cacheEntry{
 				key:     name,
 				value:   desc.Value,
 				getter:  desc.Get,
 				source:  cur,
-				gen:     cur.gen.Load(),
+				gen:     cur.genLoad(),
 				recvGen: recvGen,
 			}
 			val := desc.Value
@@ -145,9 +148,9 @@ func (v *JSValue) Set(name string, value *JSValue) {
 		panicPrimitivePropertySet()
 	}
 	v.lock()
-	v.gen.Add(1)
+	v.genAdd(1)
 	// Fast path: own-property exists as data descriptor
-	if desc, ok := v.properties.Get(name); ok {
+	if desc, ok := v.propertiesOrZero().Get(name); ok {
 		if desc.Set != nil {
 			desc.Set(v, value)
 			v.unlock()
@@ -162,7 +165,7 @@ func (v *JSValue) Set(name string, value *JSValue) {
 	for proto := v.prototype; proto != nil; proto = next {
 		proto.rlock()
 		next = proto.prototype
-		if desc, ok := proto.properties.Get(name); ok && desc.Set != nil {
+		if desc, ok := proto.propertiesOrZero().Get(name); ok && desc.Set != nil {
 			proto.runlock()
 			v.unlock()
 			desc.Set(v, value)
@@ -173,16 +176,17 @@ func (v *JSValue) Set(name string, value *JSValue) {
 	// Array index fast path
 	if v.isArr {
 		if idx, ok := parseArrayIndex(name); ok {
-			for idx >= v.arrayVal.Len() {
-				v.arrayVal.Push(nil)
+			arr := v.arrayListOrZero()
+			for idx >= arr.Len() {
+				arr.Push(nil)
 			}
-			v.arrayVal.Set(idx, value)
+			arr.Set(idx, value)
 			v.unlock()
 			return
 		}
 	}
 	// Create new data descriptor
-	v.properties.Set(name, &PropertyDescriptor{
+	v.propertiesOrZero().Set(name, &PropertyDescriptor{
 		Value:        value,
 		Writable:     true,
 		Enumerable:   true,
@@ -194,7 +198,7 @@ func (v *JSValue) Set(name string, value *JSValue) {
 // GetOwnProperty returns the property descriptor for an own property, or nil.
 func (v *JSValue) GetOwnProperty(name string) *PropertyDescriptor {
 	v.rlock()
-	desc, _ := v.properties.Get(name)
+	desc, _ := v.propertiesOrZero().Get(name)
 	v.runlock()
 	return desc
 }
@@ -213,8 +217,8 @@ func (v *JSValue) DefineProperty(name string, desc *PropertyDescriptor) {
 	}
 	v.lock()
 	defer v.unlock()
-	v.gen.Add(1)
-	v.properties.Set(name, desc)
+	v.genAdd(1)
+	v.propertiesOrZero().Set(name, desc)
 }
 
 // HasOwnProperty returns true if the value has the named own property.
@@ -223,12 +227,13 @@ func (v *JSValue) HasOwnProperty(name string) bool {
 		return false
 	}
 	if v.isBoxedPrimitive() {
-		if _, ok := v.properties.Get(name); ok {
+		if _, ok := v.propertiesOrZero().Get(name); ok {
 			return true
 		}
 	}
+	props := v.propertiesOrZero()
 	v.rlock()
-	ok := v.properties.Has(name)
+	ok := props.Has(name)
 	v.runlock()
 	return ok
 }
@@ -241,8 +246,9 @@ func (v *JSValue) OwnKeys() []string {
 	if v.isPrimitiveValue() {
 		v = boxedPrimitiveOf(v)
 	}
+	props := v.propertiesOrZero()
 	v.rlock()
-	keys := v.properties.Keys()
+	keys := props.Keys()
 	v.runlock()
 	return keys
 }
@@ -255,9 +261,10 @@ func (v *JSValue) EnumerableOwnKeys() []string {
 	if v.isPrimitiveValue() {
 		v = boxedPrimitiveOf(v)
 	}
+	props := v.propertiesOrZero()
 	v.rlock()
-	keys := make([]string, 0, v.properties.Len())
-	v.properties.ForEach(func(k string, desc *PropertyDescriptor) {
+	keys := make([]string, 0, props.Len())
+	props.ForEach(func(k string, desc *PropertyDescriptor) {
 		if desc != nil && desc.Enumerable {
 			keys = append(keys, k)
 		}

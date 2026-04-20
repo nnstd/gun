@@ -172,7 +172,7 @@ func initFunctionPrototype() {
 			callArgs = append(callArgs, args[1])
 		}
 		if len(args) >= 3 && args[2] != nil && args[2].isArr {
-			callArgs = append(callArgs, args[2].arrayVal.Slice()...)
+			callArgs = append(callArgs, args[2].arrayListOrZero().Slice()...)
 		}
 		return origFn.funcVal(callArgs...)
 	})

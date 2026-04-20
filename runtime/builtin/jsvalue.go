@@ -41,31 +41,34 @@ type cacheEntry struct {
 	recvGen uint64                  // receiver's gen when cached
 }
 
+type jsValueExt struct {
+	properties SmallPropMap
+	arrayVal   SmallValueList
+	regexVal   any
+	mapVal     *jsMap
+	setVal     *jsSet
+	classInit  func(this *JSValue, args ...*JSValue) *JSValue
+	mu         sync.RWMutex
+	gen        atomic.Uint64
+	cache      [4]cacheEntry
+}
+
 // JSValue models a JavaScript value with typed storage and prototype chain.
 type JSValue struct {
 	typ        ValueType
 	boolVal    bool
 	numVal     float64
 	strVal     string
-	intVal     int
 	bigIntVal  int64
 	boxedValue *JSValue
 	symbolDesc string
 	symbolID   uint64
-	properties SmallPropMap
 	prototype  *JSValue
 	funcVal    func(...*JSValue) *JSValue
-	arrayVal   SmallValueList
 	isArr      bool // true when this JSValue has array semantics (even if empty)
-	regexVal   any  // stores GoRegex (see jsregex.go)
-	mapVal     *jsMap
-	setVal     *jsSet
-	isMethod   bool                                           // true for class methods that expect this as _args[0]
-	classInit  func(this *JSValue, args ...*JSValue) *JSValue // raw constructor for super() calls
-	mu         sync.RWMutex                                   // per-object RWMutex for concurrent access
-	gen        atomic.Uint64                                  // incremented on every mutation for cache invalidation
-	cache      [4]cacheEntry                                  // fixed inline cache for Get() optimization
-	frozen     bool                                           // true for interned singletons; Set/DefineProperty no-op
+	isMethod   bool // true for class methods that expect this as _args[0]
+	frozen     bool // true for interned singletons; Set/DefineProperty no-op
+	ext        *jsValueExt
 }
 
 func (v *JSValue) isBoxedPrimitive() bool {
@@ -175,13 +178,94 @@ func (v *JSValue) MarkAsMethod() *JSValue {
 	return v
 }
 
+func (v *JSValue) extOrNil() *jsValueExt {
+	if v == nil {
+		return nil
+	}
+	return v.ext
+}
+
+func (v *JSValue) ensureExt() *jsValueExt {
+	if v.ext == nil {
+		v.ext = &jsValueExt{}
+	}
+	return v.ext
+}
+
+func (v *JSValue) propertiesOrZero() *SmallPropMap {
+	return &v.ensureExt().properties
+}
+
+func (v *JSValue) arrayListOrZero() *SmallValueList {
+	return &v.ensureExt().arrayVal
+}
+
+func (v *JSValue) regexValue() any {
+	if ext := v.extOrNil(); ext != nil {
+		return ext.regexVal
+	}
+	return nil
+}
+
+func (v *JSValue) setRegexValue(rv any) {
+	v.ensureExt().regexVal = rv
+}
+
+func (v *JSValue) mapState() *jsMap {
+	if ext := v.extOrNil(); ext != nil {
+		return ext.mapVal
+	}
+	return nil
+}
+
+func (v *JSValue) setMapState(m *jsMap) {
+	v.ensureExt().mapVal = m
+}
+
+func (v *JSValue) setState() *jsSet {
+	if ext := v.extOrNil(); ext != nil {
+		return ext.setVal
+	}
+	return nil
+}
+
+func (v *JSValue) setSetState(s *jsSet) {
+	v.ensureExt().setVal = s
+}
+
+func (v *JSValue) classInitializer() func(this *JSValue, args ...*JSValue) *JSValue {
+	if ext := v.extOrNil(); ext != nil {
+		return ext.classInit
+	}
+	return nil
+}
+
+func (v *JSValue) setClassInitializer(fn func(this *JSValue, args ...*JSValue) *JSValue) {
+	v.ensureExt().classInit = fn
+}
+
+func (v *JSValue) cacheEntries() *[4]cacheEntry {
+	return &v.ensureExt().cache
+}
+
+func (v *JSValue) genLoad() uint64 {
+	if ext := v.extOrNil(); ext != nil {
+		return ext.gen.Load()
+	}
+	return 0
+}
+
+func (v *JSValue) genAdd(delta uint64) {
+	v.ensureExt().gen.Add(delta)
+}
+
 // lock acquires a write lock on the JSValue's RWMutex.
-func (v *JSValue) lock()   { v.mu.Lock() }
-func (v *JSValue) unlock() { v.mu.Unlock() }
+func (v *JSValue) lock()   { v.ensureExt().mu.Lock() }
+func (v *JSValue) unlock() { v.ensureExt().mu.Unlock() }
 
 // rlock acquires a read lock on the JSValue's RWMutex.
-func (v *JSValue) rlock()   { v.mu.RLock() }
-func (v *JSValue) runlock() { v.mu.RUnlock() }
+func (v *JSValue) rlock()   { v.ensureExt().mu.RLock() }
+func (v *JSValue) runlock() { v.ensureExt().mu.RUnlock() }
 
 var symbolCounter uint64
 
@@ -311,10 +395,11 @@ func (v *JSValue) String() string {
 	case TypeObject:
 		// Arrays: JS Array.toString() joins elements with commas
 		if v.isArr {
-			n := v.arrayVal.Len()
+			arr := v.arrayListOrZero()
+			n := arr.Len()
 			strs := make([]string, n)
 			for i := 0; i < n; i++ {
-				elem := v.arrayVal.Get(i)
+				elem := v.arrayListOrZero().Get(i)
 				if elem == nil || elem.typ == TypeNull || elem.typ == TypeUndefined {
 					strs[i] = ""
 				} else {
@@ -338,7 +423,7 @@ func (v *JSValue) String() string {
 	case TypeFunction:
 		return "function"
 	case TypeRegex:
-		if re, ok := v.regexVal.(interface{ String() string }); ok {
+		if re, ok := v.regexValue().(interface{ String() string }); ok {
 			return re.String()
 		}
 		return ""
@@ -433,7 +518,7 @@ func (v *JSValue) Int() int {
 		return 0
 	}
 	v = v.unboxed()
-	return v.intVal
+	return int(v.Number())
 }
 
 // BigInt returns the bigint value.
@@ -452,7 +537,7 @@ func (v *JSValue) SymbolDesc() string {
 func (v *JSValue) SetPrototype(proto *JSValue) {
 	v.lock()
 	v.prototype = proto
-	v.gen.Add(1)
+	v.genAdd(1)
 	v.unlock()
 }
 
@@ -470,10 +555,11 @@ func (v *JSValue) Array() []*JSValue {
 	if !v.isArr {
 		return nil
 	}
-	if v.arrayVal.Len() == 0 {
+	arr := v.arrayListOrZero()
+	if arr.Len() == 0 {
 		return []*JSValue{}
 	}
-	return append([]*JSValue{}, v.arrayVal.Slice()...)
+	return append([]*JSValue{}, arr.Slice()...)
 }
 
 // Index returns the element at position i in an array or string JSValue.
@@ -482,8 +568,11 @@ func (v *JSValue) Array() []*JSValue {
 // Returns undefined if out of bounds or not an array/string.
 func (v *JSValue) Index(i int) *JSValue {
 	v = v.unboxed()
-	if v.isArr && i >= 0 && i < v.arrayVal.Len() {
-		return v.arrayVal.Get(i)
+	if v.isArr {
+		arr := v.arrayListOrZero()
+		if i >= 0 && i < arr.Len() {
+			return arr.Get(i)
+		}
 	}
 	if v.typ == TypeString && i >= 0 {
 		runes := []rune(v.strVal)
@@ -516,15 +605,15 @@ func (v *JSValue) Len() int {
 		return len([]rune(v.strVal))
 	case TypeObject:
 		if v.isArr {
-			return v.arrayVal.Len()
+			return v.arrayListOrZero().Len()
 		}
 	case TypeMap:
-		if v.mapVal != nil {
-			return len(v.mapVal.entries)
+		if v.mapState() != nil {
+			return len(v.mapState().entries)
 		}
 	case TypeSet:
-		if v.setVal != nil {
-			return len(v.setVal.items)
+		if v.setState() != nil {
+			return len(v.setState().items)
 		}
 	}
 	// Check for length property on objects
@@ -556,7 +645,7 @@ func (v *JSValue) New(args ...*JSValue) *JSValue {
 		return NewUndefined()
 	}
 	// Classes already handle new semantics in their Call
-	if v.classInit != nil {
+	if v.classInitializer() != nil {
 		return v.Call(args...)
 	}
 	if v.funcVal != nil {
@@ -595,7 +684,7 @@ func (v *JSValue) MethodCall(method string, args ...*JSValue) *JSValue {
 	if v.typ == TypeFunction && method == "apply" && len(args) >= 2 {
 		argsArray := args[1]
 		if argsArray != nil && argsArray.isArr {
-			return v.Call(argsArray.arrayVal.Slice()...)
+			return v.Call(argsArray.arrayListOrZero().Slice()...)
 		}
 		return v.Call()
 	}
@@ -636,12 +725,12 @@ func (v *JSValue) CallSuper(this *JSValue, args ...*JSValue) {
 	// to avoid infinite recursion when the constructor calls super().
 	skipped := false
 	for cur := v; cur != nil; cur = cur.prototype {
-		if cur.classInit != nil {
+		if cur.classInitializer() != nil {
 			if !skipped {
 				skipped = true
 				continue
 			}
-			cur.classInit(this, args...)
+			cur.classInitializer()(this, args...)
 			return
 		}
 	}

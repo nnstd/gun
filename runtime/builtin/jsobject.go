@@ -287,7 +287,7 @@ func NewClass(constructor func(this *JSValue, args ...*JSValue) *JSValue, parent
 	})
 
 	// Store the raw constructor for super() calls via CallSuper
-	ctor.classInit = constructor
+	ctor.setClassInitializer(constructor)
 
 	// Set up Class.prototype and Class.prototype.constructor
 	ctor.Set("prototype", proto)

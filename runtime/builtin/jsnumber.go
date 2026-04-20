@@ -27,7 +27,6 @@ func initNumCache() {
 		numCache[i-numCacheMin] = &JSValue{
 			typ:       TypeNumber,
 			numVal:    float64(i),
-			intVal:    i,
 			prototype: NumberPrototype,
 			frozen:    true,
 		}
@@ -53,7 +52,7 @@ func NewInt(i int) *JSValue {
 	if i >= numCacheMin && i <= numCacheMax {
 		return numCache[i-numCacheMin]
 	}
-	return &JSValue{typ: TypeNumber, numVal: float64(i), intVal: i, prototype: NumberPrototype}
+	return &JSValue{typ: TypeNumber, numVal: float64(i), prototype: NumberPrototype}
 }
 
 // NewBigInt creates a bigint JSValue.

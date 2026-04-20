@@ -65,7 +65,7 @@ func CompileRegex(pattern string) GoRegex {
 	})
 	// Convert unsupported Unicode property names to Go equivalents
 	converted = jsUnicodePropRe.ReplaceAllStringFunc(converted, func(match string) string {
-		prefix := match[:2]  // \p or \P
+		prefix := match[:2]             // \p or \P
 		name := match[3 : len(match)-1] // extract property name
 		if goName, ok := jsUnicodePropMap[name]; ok {
 			return prefix + "{" + goName + "}"
@@ -91,9 +91,9 @@ func CompileRegex(pattern string) GoRegex {
 // exec() methods.
 func NewRegex(regex interface{}) *JSValue {
 	v := &JSValue{
-		typ:      TypeRegex,
-		regexVal: regex,
+		typ: TypeRegex,
 	}
+	v.setRegexValue(regex)
 	v.prototype = RegexpPrototype
 	// Add test() method: regex.test(str) → boolean
 	v.Set("test", NewFunction(func(args ...*JSValue) *JSValue {
@@ -104,11 +104,11 @@ func NewRegex(regex interface{}) *JSValue {
 	}))
 	// Add exec() method: regex.exec(str) → array of matches or null
 	v.Set("exec", NewFunction(func(args ...*JSValue) *JSValue {
-		if len(args) < 1 || v.regexVal == nil {
+		if len(args) < 1 || v.regexValue() == nil {
 			return NewNull()
 		}
 		str := fmt.Sprint(args[0])
-		if re, ok := v.regexVal.(interface {
+		if re, ok := v.regexValue().(interface {
 			FindStringSubmatch(string) []string
 		}); ok {
 			matches := re.FindStringSubmatch(str)
@@ -133,7 +133,7 @@ func init() {
 // The argument is coerced to string if needed.
 // Returns false if the JSValue is not a regex.
 func (v *JSValue) MatchString(s any) bool {
-	if v == nil || v.typ != TypeRegex || v.regexVal == nil {
+	if v == nil || v.typ != TypeRegex || v.regexValue() == nil {
 		return false
 	}
 
@@ -148,7 +148,7 @@ func (v *JSValue) MatchString(s any) bool {
 		str = fmt.Sprint(val)
 	}
 
-	if re, ok := v.regexVal.(interface{ MatchString(string) bool }); ok {
+	if re, ok := v.regexValue().(interface{ MatchString(string) bool }); ok {
 		return re.MatchString(str)
 	}
 	return false
@@ -162,7 +162,7 @@ func (v *JSValue) MatchString(s any) bool {
 // The value argument is coerced to string if it's a JSValue.
 // Returns false if the regex is not a valid regex JSValue.
 func MatchString(regex *JSValue, value any) bool {
-	if regex == nil || regex.typ != TypeRegex || regex.regexVal == nil {
+	if regex == nil || regex.typ != TypeRegex || regex.regexValue() == nil {
 		return false
 	}
 
@@ -183,7 +183,7 @@ func MatchString(regex *JSValue, value any) bool {
 		str = fmt.Sprint(val)
 	}
 
-	if re, ok := regex.regexVal.(interface{ MatchString(string) bool }); ok {
+	if re, ok := regex.regexValue().(interface{ MatchString(string) bool }); ok {
 		return re.MatchString(str)
 	}
 	return false
@@ -192,7 +192,7 @@ func MatchString(regex *JSValue, value any) bool {
 // RegexExec executes a regex match and returns an array of matches or null.
 // This implements JavaScript's regex.exec(s) method.
 func RegexExec(regex *JSValue, value any) *JSValue {
-	if regex == nil || regex.typ != TypeRegex || regex.regexVal == nil {
+	if regex == nil || regex.typ != TypeRegex || regex.regexValue() == nil {
 		return NewNull()
 	}
 	var str string
@@ -204,7 +204,7 @@ func RegexExec(regex *JSValue, value any) *JSValue {
 	default:
 		str = fmt.Sprint(val)
 	}
-	if re, ok := regex.regexVal.(interface {
+	if re, ok := regex.regexValue().(interface {
 		FindStringSubmatch(string) []string
 	}); ok {
 		matches := re.FindStringSubmatch(str)

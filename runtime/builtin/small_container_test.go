@@ -405,13 +405,13 @@ func TestSmallPropMapConcurrentReadWrite(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			v.rlock()
-			v.properties.Get("shared")
+			v.propertiesOrZero().Get("shared")
 			v.runlock()
 		}()
 		go func() {
 			defer wg.Done()
 			v.lock()
-			v.properties.Set("shared", desc)
+			v.propertiesOrZero().Set("shared", desc)
 			v.unlock()
 		}()
 	}
@@ -430,13 +430,13 @@ func TestSmallValueListConcurrentReadWrite(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			v.rlock()
-			v.arrayVal.Get(0)
+			v.arrayListOrZero().Get(0)
 			v.runlock()
 		}()
 		go func() {
 			defer wg.Done()
 			v.lock()
-			v.arrayVal.Push(elem)
+			v.arrayListOrZero().Push(elem)
 			v.unlock()
 		}()
 	}

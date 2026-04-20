@@ -76,7 +76,7 @@ func TestStructuredCloneArray(t *testing.T) {
 	}
 
 	// mutation isolation
-	cloneInner.arrayVal.Set(0, NewNumber(99))
+	cloneInner.arrayListOrZero().Set(0, NewNumber(99))
 	if got := inner.Index(0).Number(); got != 2 {
 		t.Errorf("original inner[0] mutated: got %v want 2", got)
 	}
@@ -86,7 +86,8 @@ func TestStructuredCloneMap(t *testing.T) {
 	m := NewMap()
 	val := NewObject()
 	val.Set("v", NewNumber(42))
-	m.mapVal.entries = append(m.mapVal.entries, &jsMapEntry{NewString("key"), val})
+	m.setMapState(&jsMap{})
+	m.mapState().entries = append(m.mapState().entries, &jsMapEntry{NewString("key"), val})
 
 	clone := StructuredClone(m)
 
@@ -96,10 +97,10 @@ func TestStructuredCloneMap(t *testing.T) {
 	if clone.typ != TypeMap {
 		t.Fatalf("clone type: got %v want TypeMap", clone.typ)
 	}
-	if len(clone.mapVal.entries) != 1 {
-		t.Fatalf("clone map entries: got %d want 1", len(clone.mapVal.entries))
+	if len(clone.mapState().entries) != 1 {
+		t.Fatalf("clone map entries: got %d want 1", len(clone.mapState().entries))
 	}
-	clonedVal := clone.mapVal.entries[0].value
+	clonedVal := clone.mapState().entries[0].value
 	if clonedVal == val {
 		t.Fatal("map value should be a new pointer")
 	}
@@ -116,7 +117,8 @@ func TestStructuredCloneMap(t *testing.T) {
 
 func TestStructuredCloneSet(t *testing.T) {
 	s := NewSet()
-	s.setVal.items = append(s.setVal.items, NewNumber(1), NewNumber(2))
+	s.setSetState(&jsSet{})
+	s.setState().items = append(s.setState().items, NewNumber(1), NewNumber(2))
 
 	clone := StructuredClone(s)
 
@@ -126,13 +128,13 @@ func TestStructuredCloneSet(t *testing.T) {
 	if clone.typ != TypeSet {
 		t.Fatalf("clone type: got %v want TypeSet", clone.typ)
 	}
-	if len(clone.setVal.items) != 2 {
-		t.Fatalf("clone set items: got %d want 2", len(clone.setVal.items))
+	if len(clone.setState().items) != 2 {
+		t.Fatalf("clone set items: got %d want 2", len(clone.setState().items))
 	}
 
 	// clear original — clone should be unaffected
-	s.setVal.items = nil
-	if len(clone.setVal.items) != 2 {
+	s.setState().items = nil
+	if len(clone.setState().items) != 2 {
 		t.Error("clone set items changed when original was cleared")
 	}
 }
@@ -165,19 +167,19 @@ func TestStructuredCloneTransfer(t *testing.T) {
 
 	// clone has the data
 	cloneData := clone.Get("data")
-	if cloneData.arrayVal.Len() != 3 {
-		t.Errorf("clone.data.length: got %d want 3", cloneData.arrayVal.Len())
+	if cloneData.arrayListOrZero().Len() != 3 {
+		t.Errorf("clone.data.length: got %d want 3", cloneData.arrayListOrZero().Len())
 	}
 
 	// original arr is detached
-	if arr.arrayVal.Len() != 0 {
-		t.Errorf("original arr.length after transfer: got %d want 0", arr.arrayVal.Len())
+	if arr.arrayListOrZero().Len() != 0 {
+		t.Errorf("original arr.length after transfer: got %d want 0", arr.arrayListOrZero().Len())
 	}
 }
 
 func TestStructuredCloneTransferMap(t *testing.T) {
 	m := NewMap()
-	m.mapVal.entries = append(m.mapVal.entries, &jsMapEntry{NewString("k"), NewNumber(1)})
+	m.mapState().entries = append(m.mapState().entries, &jsMapEntry{NewString("k"), NewNumber(1)})
 
 	opts := NewObject()
 	opts.Set("transfer", NewArray(m))
@@ -192,13 +194,13 @@ func TestStructuredCloneTransferMap(t *testing.T) {
 	if clonedMap.typ != TypeMap {
 		t.Fatalf("clone.m type: got %v want TypeMap", clonedMap.typ)
 	}
-	if len(clonedMap.mapVal.entries) != 1 {
-		t.Errorf("clone.m entries: got %d want 1", len(clonedMap.mapVal.entries))
+	if len(clonedMap.mapState().entries) != 1 {
+		t.Errorf("clone.m entries: got %d want 1", len(clonedMap.mapState().entries))
 	}
 
 	// original map is detached
-	if len(m.mapVal.entries) != 0 {
-		t.Errorf("original map entries after transfer: got %d want 0", len(m.mapVal.entries))
+	if len(m.mapState().entries) != 0 {
+		t.Errorf("original map entries after transfer: got %d want 0", len(m.mapState().entries))
 	}
 }
 

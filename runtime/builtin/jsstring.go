@@ -36,8 +36,8 @@ func Trim(val *JSValue) *JSValue {
 func Split(val *JSValue, sep *JSValue) *JSValue {
 	s := fmt.Sprint(val)
 	// Regex separator: use GoRegex.Split
-	if sep != nil && sep.typ == TypeRegex && sep.regexVal != nil {
-		if re, ok := sep.regexVal.(GoRegex); ok {
+	if sep != nil && sep.typ == TypeRegex && sep.regexValue() != nil {
+		if re, ok := sep.regexValue().(GoRegex); ok {
 			parts := re.Split(s, -1)
 			return FromStrings(parts)
 		}
@@ -59,8 +59,8 @@ func Replace(val *JSValue, pattern, replacement *JSValue) *JSValue {
 	if replacement != nil {
 		repl = replacement.String()
 	}
-	if pattern != nil && pattern.typ == TypeRegex && pattern.regexVal != nil {
-		if re, ok := pattern.regexVal.(interface {
+	if pattern != nil && pattern.typ == TypeRegex && pattern.regexValue() != nil {
+		if re, ok := pattern.regexValue().(interface {
 			ReplaceAllString(string, string) string
 		}); ok {
 			return NewString(re.ReplaceAllString(s, repl))
@@ -368,8 +368,8 @@ func initStringPrototype() {
 			return NewNumber(-1)
 		}
 		pattern := safeArg(args, 1)
-		if pattern != nil && pattern.typ == TypeRegex && pattern.regexVal != nil {
-			if re, ok := pattern.regexVal.(interface{ FindStringIndex(string) []int }); ok {
+		if pattern != nil && pattern.typ == TypeRegex && pattern.regexValue() != nil {
+			if re, ok := pattern.regexValue().(interface{ FindStringIndex(string) []int }); ok {
 				loc := re.FindStringIndex(args[0].String())
 				if loc != nil {
 					return NewNumber(float64(loc[0]))
