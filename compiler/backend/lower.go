@@ -67,6 +67,9 @@ type Lowerer struct {
 	asyncTempSymbols   []*symbol.Symbol
 	hasTopLevelAwait   bool
 	topLevelAwaitStmts []hir.Stmt
+	arenaEnabled       bool
+	disableArenaCount  int
+	hasArenaVar        int
 }
 
 // Lower converts an HIR module to a Go AST file.
@@ -108,6 +111,7 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 		varTypes:           make(map[string]string),
 		sourcePath:         mod.SourcePath,
 		hasTopLevelAwait:   mod.HasTopLevelAwait,
+		arenaEnabled:       optLevel >= context.O2,
 	}
 
 	// Reserve cross-file export names in the symbol table so local symbols
@@ -369,7 +373,7 @@ func (l *Lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 		}
 	}
 	fnLit := setFuncLitPos(l.wrapAsJSValueFunc(d.Params, body), d.Span)
-	fnVal := callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), fnLit)
+	fnVal := callExpr(selectorExpr(goIdent("jsvalue"), l.generatedFunctionCtorName()), fnLit)
 	if methodLike {
 		fnVal = callExpr(selectorExpr(fnVal, "MarkAsMethod"))
 	}
@@ -663,7 +667,7 @@ func (l *Lowerer) lowerClassMethodValue(m *hir.ClassMethod) ast.Expr {
 	}
 	methodLit := setFuncLitPos(l.wrapAsJSValueFunc(m.Params, methodBody), m.Span)
 	return callExpr(selectorExpr(
-		callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), methodLit),
+		callExpr(selectorExpr(goIdent("jsvalue"), l.generatedFunctionCtorName()), methodLit),
 		"MarkAsMethod"))
 }
 
@@ -1626,6 +1630,16 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 
 	var stmts []ast.Stmt
 
+	if l.arenaEnabled {
+		l.jsvalueImport()
+		l.hasArenaVar++
+		defer func() { l.hasArenaVar-- }()
+		stmts = append(stmts, &ast.DeclStmt{Decl: varDecl("_arena", ptrType(selectorExpr(goIdent("jsvalue"), "Arena")), nil)})
+		stmts = append(stmts, assignStmt([]ast.Expr{goIdent("_arena")}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "GetArena"))}))
+		stmts = append(stmts, exprStmt(callExpr(selectorExpr(goIdent("_arena"), "PushScope"))))
+		stmts = append(stmts, &ast.DeferStmt{Call: callExpr(selectorExpr(goIdent("_arena"), "PopScope"))})
+	}
+
 	// Unpack _args into named parameters
 	for i, p := range params {
 		// Destructuring parameter: unpack _args[i] then destructure
@@ -1783,6 +1797,14 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 	}
 	var stmts []ast.Stmt
 	l.jsvalueImport()
+	if l.arenaEnabled {
+		l.hasArenaVar++
+		defer func() { l.hasArenaVar-- }()
+		stmts = append(stmts, &ast.DeclStmt{Decl: varDecl("_arena", ptrType(selectorExpr(goIdent("jsvalue"), "Arena")), nil)})
+		stmts = append(stmts, assignStmt([]ast.Expr{goIdent("_arena")}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "GetArena"))}))
+		stmts = append(stmts, exprStmt(callExpr(selectorExpr(goIdent("_arena"), "PushScope"))))
+		stmts = append(stmts, &ast.DeferStmt{Call: callExpr(selectorExpr(goIdent("_arena"), "PopScope"))})
+	}
 
 	// Only declare `this` if the method body references it
 	if hirBodyUsesThis(body) {
@@ -2401,7 +2423,7 @@ func isFuncValuedAssign(assign *ast.AssignStmt) bool {
 	}
 	if sel, ok := fn.(*ast.SelectorExpr); ok {
 		if id, ok := sel.X.(*ast.Ident); ok {
-			return id.Name == "jsvalue" && sel.Sel.Name == "NewFunction"
+			return id.Name == "jsvalue" && (sel.Sel.Name == "NewFunction" || sel.Sel.Name == "NewArenaFunction")
 		}
 	}
 	return false
@@ -2805,4 +2827,11 @@ func (l *Lowerer) wrapAsJSValueFunc(params []*hir.Param, body *ast.BlockStmt) *a
 		},
 		Body: body,
 	}
+}
+
+func (l *Lowerer) generatedFunctionCtorName() string {
+	if l.arenaEnabled && l.hasArenaVar > 0 && l.disableArenaCount == 0 {
+		return "NewArenaFunction"
+	}
+	return "NewFunction"
 }

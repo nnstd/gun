@@ -55,20 +55,21 @@ type jsValueExt struct {
 
 // JSValue models a JavaScript value with typed storage and prototype chain.
 type JSValue struct {
-	typ        ValueType
-	boolVal    bool
-	numVal     float64
-	strVal     string
-	bigIntVal  int64
-	boxedValue *JSValue
-	symbolDesc string
-	symbolID   uint64
-	prototype  *JSValue
-	funcVal    func(...*JSValue) *JSValue
-	isArr      bool // true when this JSValue has array semantics (even if empty)
-	isMethod   bool // true for class methods that expect this as _args[0]
-	frozen     bool // true for interned singletons; Set/DefineProperty no-op
-	ext        *jsValueExt
+	typ              ValueType
+	boolVal          bool
+	numVal           float64
+	strVal           string
+	bigIntVal        int64
+	boxedValue       *JSValue
+	symbolDesc       string
+	symbolID         uint64
+	prototype        *JSValue
+	funcVal          func(...*JSValue) *JSValue
+	isArr            bool // true when this JSValue has array semantics (even if empty)
+	isMethod         bool // true for class methods that expect this as _args[0]
+	frozen           bool // true for interned singletons; Set/DefineProperty no-op
+	isArenaAllocated bool
+	ext              *jsValueExt
 }
 
 func (v *JSValue) isBoxedPrimitive() bool {
@@ -327,6 +328,22 @@ func NewFunction(fn func(...*JSValue) *JSValue) *JSValue {
 		typ:       TypeFunction,
 		prototype: FunctionPrototype,
 		funcVal:   fn,
+	}
+}
+
+// NewArenaFunction creates a function JSValue whose return value is heap-escaped
+// when arena mode is active. Use only for generated functions that bind `_arena`.
+func NewArenaFunction(fn func(...*JSValue) *JSValue) *JSValue {
+	wrapped := fn
+	if !arenaDisabled {
+		wrapped = func(args ...*JSValue) *JSValue {
+			return heapEscape(fn(args...))
+		}
+	}
+	return &JSValue{
+		typ:       TypeFunction,
+		prototype: FunctionPrototype,
+		funcVal:   wrapped,
 	}
 }
 

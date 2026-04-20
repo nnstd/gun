@@ -33,15 +33,22 @@ func initNumCache() {
 	}
 }
 
+func maybeInternNumber(f float64) *JSValue {
+	if !math.IsNaN(f) && !(f == 0 && math.Signbit(f)) {
+		if i := int(f); float64(i) == f && i >= numCacheMin && i <= numCacheMax {
+			return numCache[i-numCacheMin]
+		}
+	}
+	return nil
+}
+
 // NewNumber creates a number JSValue. Returns a cached singleton for integer
 // values in [-128, 255]. NaN and -0 are explicitly excluded: NaN's int
 // conversion is implementation-defined in Go, and -0 must preserve its sign
 // bit to produce -Infinity on reciprocation (1/-0 === -Infinity in JS).
 func NewNumber(f float64) *JSValue {
-	if !math.IsNaN(f) && !(f == 0 && math.Signbit(f)) {
-		if i := int(f); float64(i) == f && i >= numCacheMin && i <= numCacheMax {
-			return numCache[i-numCacheMin]
-		}
+	if v := maybeInternNumber(f); v != nil {
+		return v
 	}
 	return &JSValue{typ: TypeNumber, numVal: f, prototype: NumberPrototype}
 }

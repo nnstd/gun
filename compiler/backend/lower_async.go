@@ -47,6 +47,8 @@ type asyncFuncBuilder struct {
 }
 
 func (l *Lowerer) lowerAsyncFuncBody(params []*hir.Param, body *hir.BlockStmt, argOffset int, bindThis bool) *ast.BlockStmt {
+	l.disableArenaCount++
+	defer func() { l.disableArenaCount-- }()
 	l.jsvalueImport()
 	l.addImport("github.com/nnstd/gun/runtime/promise")
 	l.insideFunc++
@@ -1553,4 +1555,8 @@ func (l *Lowerer) newAsyncTempSymbol() *symbol.Symbol {
 	sym := l.symtab.Define(name, symbol.KindVariable)
 	l.asyncTempSymbols = append(l.asyncTempSymbols, sym)
 	return sym
+}
+
+func (l *Lowerer) arenaAllowedInCurrentFunc() bool {
+	return l.arenaEnabled && len(l.asyncTempSymbols) == 0
 }

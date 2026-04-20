@@ -255,9 +255,9 @@ func (l *Lowerer) lowerLiteral(e *hir.Literal) ast.Expr {
 		return callExpr(selectorExpr(goIdent("jsvalue"), "NewString"), stringLit(e.Value))
 	case hir.LitNumber:
 		if strings.Contains(e.Value, ".") {
-			return callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), floatLit(e.Value))
+			return l.arenaWrapNumber(floatLit(e.Value))
 		}
-		return callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), callExpr(goIdent("float64"), intLit(e.Value)))
+		return l.arenaWrapNumber(callExpr(goIdent("float64"), intLit(e.Value)))
 	case hir.LitBool:
 		return callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"), goIdent(e.Value))
 	case hir.LitNull:
@@ -600,7 +600,7 @@ func (l *Lowerer) lowerObjectPropertyValue(prop *hir.Property) ast.Expr {
 		}
 		methodLit := l.wrapAsJSValueFunc(fn.Params, methodBody)
 		return callExpr(selectorExpr(
-			callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), methodLit),
+			callExpr(selectorExpr(goIdent("jsvalue"), l.generatedFunctionCtorName()), methodLit),
 			"MarkAsMethod"))
 	case *hir.FuncExpr:
 		var methodBody *ast.BlockStmt
@@ -611,7 +611,7 @@ func (l *Lowerer) lowerObjectPropertyValue(prop *hir.Property) ast.Expr {
 		}
 		methodLit := l.wrapAsJSValueFunc(fn.Params, methodBody)
 		return callExpr(selectorExpr(
-			callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), methodLit),
+			callExpr(selectorExpr(goIdent("jsvalue"), l.generatedFunctionCtorName()), methodLit),
 			"MarkAsMethod"))
 	default:
 		return l.lowerExpr(prop.Value)
@@ -674,6 +674,12 @@ func (l *Lowerer) lowerBinaryExpr(e *hir.BinaryExpr) ast.Expr {
 	}
 
 	// JSValue binary operations: jsvalue.Op(left, right)
+	if l.arenaEnabled && l.insideFunc > 0 && l.disableArenaCount == 0 && l.hasArenaVar > 0 {
+		if arenaHelper := l.arenaBinaryHelperName(e.Op); arenaHelper != "" {
+			return callExpr(selectorExpr(goIdent("jsvalue"), arenaHelper), goIdent("_arena"),
+				jsvalueWrapLit(left), jsvalueWrapLit(right))
+		}
+	}
 	helperName := mapBinaryOpToJSValue(e.Op)
 	return callExpr(selectorExpr(goIdent("jsvalue"), helperName),
 		jsvalueWrapLit(left), jsvalueWrapLit(right))
@@ -802,6 +808,9 @@ func (l *Lowerer) lowerUnaryExpr(e *hir.UnaryExpr) ast.Expr {
 		return operand
 	}
 
+	if e.Op == hir.OpNeg && l.arenaEnabled && l.insideFunc > 0 && l.disableArenaCount == 0 && l.hasArenaVar > 0 {
+		return callExpr(selectorExpr(goIdent("jsvalue"), "ANeg"), goIdent("_arena"), jsvalueWrapLit(operand))
+	}
 	helperName := mapUnaryOpToJSValue(e.Op)
 	if helperName != "" {
 		return callExpr(selectorExpr(goIdent("jsvalue"), helperName), jsvalueWrapLit(operand))
@@ -815,7 +824,13 @@ func (l *Lowerer) lowerUpdateExpr(e *hir.UpdateExpr) ast.Expr {
 	operand := l.lowerExpr(e.Operand)
 
 	if e.Op == hir.OpInc {
+		if l.arenaEnabled && l.insideFunc > 0 && l.disableArenaCount == 0 && l.hasArenaVar > 0 {
+			return callExpr(selectorExpr(goIdent("jsvalue"), "AInc"), goIdent("_arena"), operand)
+		}
 		return callExpr(selectorExpr(goIdent("jsvalue"), "Inc"), operand)
+	}
+	if l.arenaEnabled && l.insideFunc > 0 && l.disableArenaCount == 0 && l.hasArenaVar > 0 {
+		return callExpr(selectorExpr(goIdent("jsvalue"), "ADec"), goIdent("_arena"), operand)
 	}
 	return callExpr(selectorExpr(goIdent("jsvalue"), "Dec"), operand)
 }
@@ -1724,7 +1739,7 @@ func (l *Lowerer) lowerArrowFunc(e *hir.ArrowFunc) ast.Expr {
 	}
 
 	fnLit := l.wrapAsJSValueFunc(e.Params, body)
-	return callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), fnLit)
+	return callExpr(selectorExpr(goIdent("jsvalue"), l.generatedFunctionCtorName()), fnLit)
 }
 
 func (l *Lowerer) lowerFuncExpr(e *hir.FuncExpr) ast.Expr {
@@ -1743,7 +1758,7 @@ func (l *Lowerer) lowerFuncExpr(e *hir.FuncExpr) ast.Expr {
 		body = l.lowerFuncBody(e.Params, e.Body)
 	}
 	fnLit := l.wrapAsJSValueFunc(e.Params, body)
-	newFunc := callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), fnLit)
+	newFunc := callExpr(selectorExpr(goIdent("jsvalue"), l.generatedFunctionCtorName()), fnLit)
 	if usesThis {
 		return callExpr(selectorExpr(newFunc, "MarkAsMethod"))
 	}
@@ -1832,4 +1847,35 @@ func parseRegexLiteral(s string) (pattern, flags string) {
 	}
 	lastSlash++
 	return s[1:lastSlash], s[lastSlash+1:]
+}
+
+func (l *Lowerer) arenaNumber(expr ast.Expr) ast.Expr {
+	if l.arenaEnabled {
+		return callExpr(selectorExpr(goIdent("_arena"), "NewNumber"), expr)
+	}
+	return callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), expr)
+}
+
+func (l *Lowerer) arenaWrapNumber(expr ast.Expr) ast.Expr {
+	if l.arenaEnabled && l.insideFunc > 0 && l.disableArenaCount == 0 && l.hasArenaVar > 0 {
+		return callExpr(selectorExpr(goIdent("_arena"), "NewNumber"), expr)
+	}
+	return callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), expr)
+}
+
+func (l *Lowerer) arenaBinaryHelperName(op hir.BinaryOp) string {
+	switch op {
+	case hir.OpAdd:
+		return "AAdd"
+	case hir.OpSub:
+		return "ASub"
+	case hir.OpMul:
+		return "AMul"
+	case hir.OpDiv:
+		return "ADiv"
+	case hir.OpMod:
+		return "AMod"
+	default:
+		return ""
+	}
 }
