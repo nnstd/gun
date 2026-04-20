@@ -16,32 +16,11 @@ func NewObjectWithPrototype(proto *JSValue) *JSValue {
 	return &JSValue{typ: TypeObject, prototype: proto}
 }
 
-func newObjectWithPrototypeAndProps(proto *JSValue, pairs ...any) *JSValue {
+func NewObjectWithPrototypeAndProps(proto *JSValue, pairs ...any) *JSValue {
 	obj := NewObjectWithPrototype(proto)
 	if len(pairs) == 0 {
 		return obj
 	}
-	var props *SmallPropMap
-	setDataProperty := func(key string, val *JSValue) {
-		if val == nil {
-			val = NewUndefined()
-		}
-		if props == nil {
-			props = obj.propertiesOrZero()
-		}
-		props.Set(key, newWritableEnumerableDataDescriptor(val))
-	}
-	for i := 0; i+1 < len(pairs); i += 2 {
-		key, _ := pairs[i].(string)
-		val, _ := pairs[i+1].(*JSValue)
-		setDataProperty(key, val)
-	}
-	return obj
-}
-
-// ObjectFrom creates an object from alternating key (string) and value (*JSValue) pairs.
-func ObjectFrom(pairs ...any) *JSValue {
-	obj := NewObject()
 	var props *SmallPropMap
 	setDataProperty := func(key string, val *JSValue) {
 		if val == nil {
@@ -65,13 +44,17 @@ func ObjectFrom(pairs ...any) *JSValue {
 			return obj
 		}
 	}
-	// Flat key-value pairs: key1, val1, key2, val2, ...
 	for i := 0; i+1 < len(pairs); i += 2 {
 		key, _ := pairs[i].(string)
 		val, _ := pairs[i+1].(*JSValue)
 		setDataProperty(key, val)
 	}
 	return obj
+}
+
+// ObjectFrom creates an object from alternating key (string) and value (*JSValue) pairs.
+func ObjectFrom(pairs ...any) *JSValue {
+	return NewObjectWithPrototypeAndProps(ObjectPrototype, pairs...)
 }
 
 // Keys returns the keys of an object as a JSValue array.

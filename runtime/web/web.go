@@ -20,6 +20,14 @@ var Headers = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSVa
 	return nil
 }, nil)
 
+func newHeadersValue(init *jsvalue.JSValue) *jsvalue.JSValue {
+	headers := jsvalue.NewObjectWithPrototype(Headers.Get("prototype"))
+	if init != nil && init.TypeString() == "object" {
+		initHeaders(headers, init)
+	}
+	return headers
+}
+
 func newResponseValue(proto, body, status, statusText, headers *jsvalue.JSValue) *jsvalue.JSValue {
 	if status == nil {
 		status = jsvalue.NewNumber(200)
@@ -34,13 +42,14 @@ func newResponseValue(proto, body, status, statusText, headers *jsvalue.JSValue)
 		body = jsvalue.NewString("")
 	}
 
-	res := jsvalue.NewObjectWithPrototype(proto)
-	res.Set("status", status)
-	res.Set("statusText", statusText)
-	res.Set("headers", headers)
-	res.Set("body", body)
-	res.Set("_bodyInit", body)
-	res.Set("ok", jsvalue.NewBool(status.Number() >= 200 && status.Number() < 300))
+	res := jsvalue.NewObjectWithPrototypeAndProps(proto,
+		"status", status,
+		"statusText", statusText,
+		"headers", headers,
+		"body", body,
+		"_bodyInit", body,
+		"ok", jsvalue.NewBool(status.Number() >= 200 && status.Number() < 300),
+	)
 	return res
 }
 
@@ -67,7 +76,7 @@ var Request = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSVa
 	}
 
 	method := jsvalue.NewString("GET")
-	headers := Headers.Call()
+	headers := newHeadersValue(nil)
 	body := jsvalue.NewString("")
 
 	if init != nil && init.TypeString() == "object" {
@@ -75,7 +84,7 @@ var Request = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSVa
 			method = jsvalue.NewString(strings.ToUpper(init.Get("method").String()))
 		}
 		if init.Get("headers").Bool() || init.Get("headers").TypeString() == "object" {
-			headers = Headers.Call(init.Get("headers"))
+			headers = newHeadersValue(init.Get("headers"))
 		}
 		if init.Get("body").Bool() || init.Get("body").TypeString() == "string" {
 			body = jsvalue.NewString(init.Get("body").String())
@@ -97,7 +106,7 @@ var Response = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSV
 
 	status := jsvalue.NewNumber(200)
 	statusText := jsvalue.NewString("OK")
-	headers := Headers.Call()
+	headers := newHeadersValue(nil)
 
 	if init != nil && init.TypeString() == "object" {
 		if init.Get("status").Bool() || init.Get("status").TypeString() == "number" {
@@ -107,7 +116,7 @@ var Response = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSV
 			statusText = jsvalue.NewString(init.Get("statusText").String())
 		}
 		if init.Get("headers").Bool() || init.Get("headers").TypeString() == "object" {
-			headers = Headers.Call(init.Get("headers"))
+			headers = newHeadersValue(init.Get("headers"))
 		}
 	}
 
@@ -166,11 +175,12 @@ func newRequestValueWithPrototype(proto *jsvalue.JSValue, url, method string, he
 		headers = Headers.Call()
 	}
 
-	req := jsvalue.NewObjectWithPrototype(proto)
-	req.Set("url", jsvalue.NewString(url))
-	req.Set("method", jsvalue.NewString(method))
-	req.Set("headers", headers)
-	req.Set("body", jsvalue.NewString(body))
+	req := jsvalue.NewObjectWithPrototypeAndProps(proto,
+		"url", jsvalue.NewString(url),
+		"method", jsvalue.NewString(method),
+		"headers", headers,
+		"body", jsvalue.NewString(body),
+	)
 	req.Set("raw", req)
 	return req
 }
@@ -254,7 +264,7 @@ func initHeaders(target *jsvalue.JSValue, init *jsvalue.JSValue) {
 }
 
 func HeadersFromHTTP(h http.Header) *jsvalue.JSValue {
-	headers := Headers.Call()
+	headers := newHeadersValue(nil)
 	for key, values := range h {
 		headers.Set(strings.ToLower(key), jsvalue.NewString(strings.Join(values, ", ")))
 	}
