@@ -242,6 +242,81 @@ func TestRunCommandRejectsCustomCPUProfInterval(t *testing.T) {
 	}
 }
 
+func TestRunCommandNodeV8Module(t *testing.T) {
+	entry := filepath.Join(t.TempDir(), "v8.ts")
+	if err := os.WriteFile(entry, []byte(`
+import v8 from 'node:v8'
+
+function burn(n) {
+  if (n < 2) return n
+  return burn(n - 1) + burn(n - 2)
+}
+
+function run() {
+  const tag1 = v8.cachedDataVersionTag()
+  const tag2 = v8.cachedDataVersionTag()
+  const obj = { hello: 'world', nums: [1, 2], undef: undefined }
+  obj.self = obj
+  obj.map = new Map()
+  obj.map.set('x', 2)
+  obj.set = new Set()
+  obj.set.add(3)
+  obj.big = BigInt('4')
+  const round = v8.deserialize(v8.serialize(obj))
+  const h = v8.startCpuProfile()
+  burn(32)
+  const prof = h.stop()
+  console.log(JSON.stringify({
+    stableTag: tag1 === tag2,
+    hello: round.hello,
+    nums1: round.nums[1],
+    hasUndef: Object.prototype.hasOwnProperty.call(round, 'undef') && typeof round.undef === 'undefined',
+    self: round.self === round,
+    map: round.map.get('x'),
+    set: round.set.has(3),
+    big: String(round.big),
+    profileText: typeof prof === 'string' && prof.includes('"nodes"'),
+    profileSamples: prof.includes('"samples"') ? 1 : 0,
+  }))
+}
+
+run()
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "gocache"))
+
+	cmd := exec.Command("go", "run", ".", "run", entry)
+	cmd.Dir = "/Users/nikita/Work/gun"
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+
+	var got struct {
+		StableTag      bool   `json:"stableTag"`
+		Hello          string `json:"hello"`
+		Nums1          int    `json:"nums1"`
+		HasUndef       bool   `json:"hasUndef"`
+		Self           bool   `json:"self"`
+		Map            int    `json:"map"`
+		Set            bool   `json:"set"`
+		Big            string `json:"big"`
+		ProfileText    bool   `json:"profileText"`
+		ProfileSamples int    `json:"profileSamples"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &got); err != nil {
+		t.Fatalf("invalid json output: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if !got.StableTag || got.Hello != "world" || got.Nums1 != 2 || !got.HasUndef || !got.Self || got.Map != 2 || !got.Set || got.Big != "4" || !got.ProfileText || got.ProfileSamples < 0 {
+		t.Fatalf("unexpected v8 result: %+v\nstderr:\n%s", got, stderr.String())
+	}
+}
+
 func buildFixture(t *testing.T, fixture string) string {
 	t.Helper()
 	outDir := t.TempDir()

@@ -17,7 +17,7 @@ func TestDefaultProfileNameMatchesNodeShape(t *testing.T) {
 }
 
 func TestProfilerBuildsJSNativeSamples(t *testing.T) {
-	s, err := startCPUProfile("", "test.cpuprofile")
+	s, err := startCPUProfile("", "test.cpuprofile", false)
 	if err != nil {
 		t.Fatalf("startCPUProfile() error = %v", err)
 	}

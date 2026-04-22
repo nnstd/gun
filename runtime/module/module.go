@@ -10,12 +10,11 @@ import (
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
 )
 
-
 // BuiltinModules is the list of known built-in module names.
 var BuiltinModules = []string{
 	"assert", "buffer", "child_process", "crypto", "dns", "events",
 	"fs", "http", "https", "module", "os", "path", "process",
-	"stream", "string_decoder", "timers", "url", "util", "zlib",
+	"stream", "string_decoder", "timers", "url", "util", "v8", "zlib",
 }
 
 // IsBuiltin reports whether the given module name is a Node.js built-in.

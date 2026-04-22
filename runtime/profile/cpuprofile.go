@@ -28,6 +28,10 @@ type ContextToken struct {
 	frames []Frame
 }
 
+type Handle struct {
+	session *session
+}
+
 type session struct {
 	startedAt time.Time
 	target    string
@@ -88,7 +92,7 @@ func init() {
 
 // StartCPUProfileOrExit starts JS-native statistical profiling and returns a stop function.
 func StartCPUProfileOrExit(dir, name string) func() {
-	s, err := startCPUProfile(dir, name)
+	s, err := startCPUProfile(dir, name, true)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: start cpu profile: %v\n", err)
 		os.Exit(1)
@@ -100,11 +104,32 @@ func StartCPUProfileOrExit(dir, name string) func() {
 	}
 }
 
-func startCPUProfile(dir, name string) (*session, error) {
-	startedAt := time.Now()
-	target, err := resolveTargetPath(dir, name, startedAt)
+// StartCPUProfile starts an in-memory JS-native CPU profile and returns a handle.
+func StartCPUProfile() (*Handle, error) {
+	s, err := startCPUProfile("", "", false)
 	if err != nil {
 		return nil, err
+	}
+	return &Handle{session: s}, nil
+}
+
+// Stop finalizes an in-memory CPU profile and returns the JSON profile text.
+func (h *Handle) Stop() (string, error) {
+	if h == nil || h.session == nil {
+		return "", fmt.Errorf("no active cpu profile")
+	}
+	return h.session.stopString()
+}
+
+func startCPUProfile(dir, name string, handleSignals bool) (*session, error) {
+	startedAt := time.Now()
+	target := ""
+	if handleSignals {
+		var err error
+		target, err = resolveTargetPath(dir, name, startedAt)
+		if err != nil {
+			return nil, err
+		}
 	}
 	s := &session{startedAt: startedAt, target: target, interval: DefaultInterval, stopCh: make(chan struct{}), doneCh: make(chan struct{})}
 
@@ -122,7 +147,9 @@ func startCPUProfile(dir, name string) (*session, error) {
 	state.mu.Unlock()
 
 	go s.runSampler()
-	go s.handleSignals()
+	if handleSignals {
+		go s.handleSignals()
+	}
 	return s, nil
 }
 
@@ -157,7 +184,21 @@ func (s *session) runSampler() {
 }
 
 func (s *session) stop() error {
+	_, err := s.stopBytes()
+	return err
+}
+
+func (s *session) stopString() (string, error) {
+	data, err := s.stopBytes()
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func (s *session) stopBytes() ([]byte, error) {
 	var stopErr error
+	var out []byte
 	s.stopOnce.Do(func() {
 		close(s.stopCh)
 		<-s.doneCh
@@ -177,9 +218,12 @@ func (s *session) stop() error {
 			stopErr = err
 			return
 		}
-		stopErr = os.WriteFile(s.target, data, 0o644)
+		out = data
+		if s.target != "" {
+			stopErr = os.WriteFile(s.target, data, 0o644)
+		}
 	})
-	return stopErr
+	return out, stopErr
 }
 
 func resolveTargetPath(dir, name string, startedAt time.Time) (string, error) {

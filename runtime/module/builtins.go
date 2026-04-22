@@ -17,6 +17,7 @@ import (
 	"github.com/nnstd/gun/runtime/timers"
 	"github.com/nnstd/gun/runtime/url"
 	"github.com/nnstd/gun/runtime/util"
+	"github.com/nnstd/gun/runtime/v8"
 	"github.com/nnstd/gun/runtime/zlib"
 )
 
@@ -54,4 +55,5 @@ func RegisterBuiltins() {
 	ModuleRegistry["string_decoder"] = string_decoder.AsJSValue
 
 	ModuleRegistry["process"] = process.AsJSValueCached
+	ModuleRegistry["v8"] = v8.AsJSValue
 }

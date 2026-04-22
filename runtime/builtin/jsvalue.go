@@ -75,6 +75,7 @@ type JSValue struct {
 	profileFrame     *profile.Frame
 	isArr            bool // true when this JSValue has array semantics (even if empty)
 	isMethod         bool // true for class methods that expect this as _args[0]
+	isAsyncFunction  bool
 	frozen           bool // true for interned singletons; Set/DefineProperty no-op
 	isArenaAllocated bool
 	ext              *jsValueExt
@@ -167,6 +168,18 @@ func (v *JSValue) MarkAsMethod() *JSValue {
 		v.isMethod = true
 	}
 	return v
+}
+
+// MarkAsAsync marks this function as originating from an async JS function.
+func (v *JSValue) MarkAsAsync() *JSValue {
+	if v != nil {
+		v.isAsyncFunction = true
+	}
+	return v
+}
+
+func (v *JSValue) IsAsyncFunction() bool {
+	return v != nil && v.isAsyncFunction
 }
 
 func (v *JSValue) extOrNil() *jsValueExt {

@@ -30,6 +30,54 @@ type promiseInternal struct {
 
 var promiseInternals sync.Map // *jsvalue.JSValue -> *promiseInternal
 
+type hookRegistry struct {
+	mu      sync.Mutex
+	nextID  int
+	init    map[int]*jsvalue.JSValue
+	before  map[int]*jsvalue.JSValue
+	after   map[int]*jsvalue.JSValue
+	settled map[int]*jsvalue.JSValue
+}
+
+var hooks = hookRegistry{
+	init:    map[int]*jsvalue.JSValue{},
+	before:  map[int]*jsvalue.JSValue{},
+	after:   map[int]*jsvalue.JSValue{},
+	settled: map[int]*jsvalue.JSValue{},
+}
+
+func registerHook(store map[int]*jsvalue.JSValue, fn *jsvalue.JSValue) func() {
+	hooks.mu.Lock()
+	defer hooks.mu.Unlock()
+	hooks.nextID++
+	id := hooks.nextID
+	store[id] = fn
+	return func() {
+		hooks.mu.Lock()
+		delete(store, id)
+		hooks.mu.Unlock()
+	}
+}
+
+func RegisterInitHook(fn *jsvalue.JSValue) func()    { return registerHook(hooks.init, fn) }
+func RegisterBeforeHook(fn *jsvalue.JSValue) func()  { return registerHook(hooks.before, fn) }
+func RegisterAfterHook(fn *jsvalue.JSValue) func()   { return registerHook(hooks.after, fn) }
+func RegisterSettledHook(fn *jsvalue.JSValue) func() { return registerHook(hooks.settled, fn) }
+
+func emitHooks(store map[int]*jsvalue.JSValue, args ...*jsvalue.JSValue) {
+	hooks.mu.Lock()
+	callbacks := make([]*jsvalue.JSValue, 0, len(store))
+	for _, fn := range store {
+		callbacks = append(callbacks, fn)
+	}
+	hooks.mu.Unlock()
+	for _, fn := range callbacks {
+		if fn != nil {
+			fn.Call(args...)
+		}
+	}
+}
+
 func newPromiseInternal(p *jsvalue.JSValue) *promiseInternal {
 	pi := &promiseInternal{
 		settled: make(chan struct{}),
@@ -64,7 +112,14 @@ func getHandlers(p *jsvalue.JSValue, key string) *jsvalue.JSValue {
 }
 
 func newPendingPromise() *jsvalue.JSValue {
-	return Promise.Call()
+	return newPendingPromiseWithParent(nil)
+}
+
+func newPendingPromiseWithParent(parent *jsvalue.JSValue) *jsvalue.JSValue {
+	if parent == nil {
+		return Promise.Call()
+	}
+	return Promise.Call(jsvalue.NewUndefined(), parent)
 }
 
 func getState(p *jsvalue.JSValue) string {
@@ -135,7 +190,9 @@ func dispatchHandlers(p *jsvalue.JSValue) {
 			val := value
 			handler := h
 			eventloop.Default.ScheduleMicrotask(func() {
+				emitHooks(hooks.before, p)
 				handler.Call(val)
+				emitHooks(hooks.after, p)
 			})
 		}
 	}
@@ -199,6 +256,7 @@ func fulfill(p *jsvalue.JSValue, value *jsvalue.JSValue) *jsvalue.JSValue {
 
 	// Dispatch handlers FIRST (increments jobCount via ScheduleMicrotask)
 	// THEN decrement for promise settlement (prevents TOCTOU race)
+	emitHooks(hooks.settled, p)
 	dispatchHandlers(p)
 	if pi != nil {
 		eventloop.Default.SettlePromise()
@@ -233,6 +291,7 @@ func reject(p *jsvalue.JSValue, reason *jsvalue.JSValue) *jsvalue.JSValue {
 	}
 
 	// Dispatch handlers FIRST, THEN settle
+	emitHooks(hooks.settled, p)
 	dispatchHandlers(p)
 	if pi != nil {
 		eventloop.Default.SettlePromise()
@@ -243,6 +302,10 @@ func reject(p *jsvalue.JSValue, reason *jsvalue.JSValue) *jsvalue.JSValue {
 
 func init() {
 	Promise = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		var parent *jsvalue.JSValue
+		if len(args) > 1 && args[1] != nil {
+			parent = args[1]
+		}
 		defineInternal(this, promiseStateKey, jsvalue.NewString(statePending))
 		defineInternal(this, promiseValueKey, jsvalue.NewUndefined())
 		defineInternal(this, promiseFulfillKey, jsvalue.NewArray())
@@ -252,6 +315,7 @@ func init() {
 		newPromiseInternal(this)
 		// Liveness: keep event loop alive while this promise is pending
 		eventloop.Default.TrackPromise()
+		emitHooks(hooks.init, this, jsvalue.Nullish(parent, jsvalue.NewUndefined()))
 
 		if len(args) > 0 && args[0] != nil && args[0].TypeString() == "function" {
 			resolve := jsvalue.NewFunction(func(inner ...*jsvalue.JSValue) *jsvalue.JSValue {
@@ -293,7 +357,7 @@ func init() {
 		if len(args) > 2 {
 			onRejected = args[2]
 		}
-		next := newPendingPromise()
+		next := newPendingPromiseWithParent(self)
 
 		fulfillHandler := jsvalue.NewFunction(func(callArgs ...*jsvalue.JSValue) *jsvalue.JSValue {
 			value := jsvalue.NewUndefined()
@@ -351,13 +415,17 @@ func init() {
 			val := self.Get(promiseValueKey)
 			h := fulfillHandler
 			eventloop.Default.ScheduleMicrotask(func() {
+				emitHooks(hooks.before, self)
 				h.Call(val)
+				emitHooks(hooks.after, self)
 			})
 		case stateRejected:
 			reason := self.Get(promiseValueKey)
 			h := rejectHandler
 			eventloop.Default.ScheduleMicrotask(func() {
+				emitHooks(hooks.before, self)
 				h.Call(reason)
+				emitHooks(hooks.after, self)
 			})
 		}
 		if pi != nil {
@@ -387,7 +455,7 @@ func init() {
 		if len(args) > 1 {
 			callback = args[1]
 		}
-		next := newPendingPromise()
+		next := newPendingPromiseWithParent(self)
 
 		fulfillHandler := jsvalue.NewFunction(func(callArgs ...*jsvalue.JSValue) *jsvalue.JSValue {
 			value := jsvalue.NewUndefined()
@@ -424,13 +492,17 @@ func init() {
 			val := self.Get(promiseValueKey)
 			h := fulfillHandler
 			eventloop.Default.ScheduleMicrotask(func() {
+				emitHooks(hooks.before, self)
 				h.Call(val)
+				emitHooks(hooks.after, self)
 			})
 		case stateRejected:
 			reason := self.Get(promiseValueKey)
 			h := rejectHandler
 			eventloop.Default.ScheduleMicrotask(func() {
+				emitHooks(hooks.before, self)
 				h.Call(reason)
+				emitHooks(hooks.after, self)
 			})
 		}
 		if pi != nil {

@@ -336,7 +336,7 @@ func (l *Lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 			asyncBody := l.lowerAsyncFuncBody(d.Params, d.Body, 0, false)
 			asyncBody = l.instrumentProfiledBody(asyncName, d.Span, asyncBody)
 			asyncLit := setFuncLitPos(l.wrapAsJSValueFunc(d.Params, asyncBody), d.Span)
-			asyncVal := l.generatedFunctionValue(asyncName, d.Span, asyncLit)
+			asyncVal := callExpr(selectorExpr(l.generatedFunctionValue(asyncName, d.Span, asyncLit), "MarkAsAsync"))
 			l.decls = append(l.decls, setDeclPos(varDecl(asyncName, nil, asyncVal), d.Span))
 			body = blockStmt(
 				assignDefine(
@@ -390,6 +390,9 @@ func (l *Lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 	body = l.instrumentProfiledBody(name, d.Span, body)
 	fnLit := setFuncLitPos(l.wrapAsJSValueFunc(d.Params, body), d.Span)
 	fnVal := l.generatedFunctionValue(name, d.Span, fnLit)
+	if d.IsAsync {
+		fnVal = callExpr(selectorExpr(fnVal, "MarkAsAsync"))
+	}
 	if methodLike {
 		fnVal = callExpr(selectorExpr(fnVal, "MarkAsMethod"))
 	}
@@ -684,7 +687,11 @@ func (l *Lowerer) lowerClassMethodValue(m *hir.ClassMethod) ast.Expr {
 	}
 	methodBody = l.instrumentProfiledBody(m.Name, m.Span, methodBody)
 	methodLit := setFuncLitPos(l.wrapAsJSValueFunc(m.Params, methodBody), m.Span)
-	return callExpr(selectorExpr(l.generatedFunctionValue(m.Name, m.Span, methodLit), "MarkAsMethod"))
+	methodVal := l.generatedFunctionValue(m.Name, m.Span, methodLit)
+	if m.IsAsync {
+		methodVal = callExpr(selectorExpr(methodVal, "MarkAsAsync"))
+	}
+	return callExpr(selectorExpr(methodVal, "MarkAsMethod"))
 }
 
 func (l *Lowerer) defineHiddenProperty(target, key, value ast.Expr) ast.Stmt {

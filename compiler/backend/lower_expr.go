@@ -572,7 +572,11 @@ func (l *Lowerer) lowerObjectPropertyValue(prop *hir.Property) ast.Expr {
 		}
 		methodBody = l.instrumentProfiledBody(prop.KeyName, fn.Span, methodBody)
 		methodLit := l.wrapAsJSValueFunc(fn.Params, methodBody)
-		return callExpr(selectorExpr(l.generatedFunctionValue(prop.KeyName, fn.Span, methodLit), "MarkAsMethod"))
+		methodVal := l.generatedFunctionValue(prop.KeyName, fn.Span, methodLit)
+		if fn.IsAsync {
+			methodVal = callExpr(selectorExpr(methodVal, "MarkAsAsync"))
+		}
+		return callExpr(selectorExpr(methodVal, "MarkAsMethod"))
 	case *hir.FuncExpr:
 		var methodBody *ast.BlockStmt
 		if fn.IsAsync {
@@ -582,7 +586,11 @@ func (l *Lowerer) lowerObjectPropertyValue(prop *hir.Property) ast.Expr {
 		}
 		methodBody = l.instrumentProfiledBody(prop.KeyName, fn.Span, methodBody)
 		methodLit := l.wrapAsJSValueFunc(fn.Params, methodBody)
-		return callExpr(selectorExpr(l.generatedFunctionValue(prop.KeyName, fn.Span, methodLit), "MarkAsMethod"))
+		methodVal := l.generatedFunctionValue(prop.KeyName, fn.Span, methodLit)
+		if fn.IsAsync {
+			methodVal = callExpr(selectorExpr(methodVal, "MarkAsAsync"))
+		}
+		return callExpr(selectorExpr(methodVal, "MarkAsMethod"))
 	default:
 		return l.lowerExpr(prop.Value)
 	}
@@ -1736,7 +1744,11 @@ func (l *Lowerer) lowerArrowFunc(e *hir.ArrowFunc) ast.Expr {
 	body = l.instrumentProfiledBody("(anonymous)", e.Span, body)
 
 	fnLit := l.wrapAsJSValueFunc(e.Params, body)
-	return l.generatedFunctionValue("(anonymous)", e.Span, fnLit)
+	fnVal := l.generatedFunctionValue("(anonymous)", e.Span, fnLit)
+	if e.IsAsync {
+		fnVal = callExpr(selectorExpr(fnVal, "MarkAsAsync"))
+	}
+	return fnVal
 }
 
 func (l *Lowerer) lowerFuncExpr(e *hir.FuncExpr) ast.Expr {
@@ -1757,6 +1769,9 @@ func (l *Lowerer) lowerFuncExpr(e *hir.FuncExpr) ast.Expr {
 	body = l.instrumentProfiledBody("(anonymous)", e.Span, body)
 	fnLit := l.wrapAsJSValueFunc(e.Params, body)
 	newFunc := l.generatedFunctionValue("(anonymous)", e.Span, fnLit)
+	if e.IsAsync {
+		newFunc = callExpr(selectorExpr(newFunc, "MarkAsAsync"))
+	}
 	if usesThis {
 		return callExpr(selectorExpr(newFunc, "MarkAsMethod"))
 	}

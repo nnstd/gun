@@ -968,6 +968,11 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 		GoPkgName:    "module",
 		UseAsJSValue: true,
 	})
+	ctx.RegisterModule("v8", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/v8",
+		GoPkgName:    "v8",
+		UseAsJSValue: true,
+	})
 }
 
 // registerKnownGlobals marks names as known globals that should not
