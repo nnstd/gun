@@ -6,13 +6,17 @@ import (
 )
 
 func TestBoolInterning(t *testing.T) {
-	if NewBool(true) != NewBool(true) {
+	t1 := NewBool(true)
+	t2 := NewBool(true)
+	if t1 != t2 {
 		t.Fatal("NewBool(true) must return the same pointer on repeated calls")
 	}
-	if NewBool(false) != NewBool(false) {
+	f1 := NewBool(false)
+	f2 := NewBool(false)
+	if f1 != f2 {
 		t.Fatal("NewBool(false) must return the same pointer on repeated calls")
 	}
-	if NewBool(true) == NewBool(false) {
+	if t1 == f1 {
 		t.Fatal("NewBool(true) and NewBool(false) must be distinct")
 	}
 }
@@ -35,16 +39,22 @@ func TestNumberInterning(t *testing.T) {
 		}
 	}
 	// Non-integer: must not be interned
-	if NewNumber(1.5) == NewNumber(1.5) {
+	n1 := NewNumber(1.5)
+	n2 := NewNumber(1.5)
+	if n1 == n2 {
 		t.Fatal("NewNumber(1.5) should not be interned")
 	}
 }
 
 func TestEmptyStringInterning(t *testing.T) {
-	if NewString("") != NewString("") {
+	s1 := NewString("")
+	s2 := NewString("")
+	if s1 != s2 {
 		t.Fatal(`NewString("") must return the same pointer`)
 	}
-	if NewString("a") == NewString("a") {
+	a1 := NewString("a")
+	a2 := NewString("a")
+	if a1 == a2 {
 		t.Fatal(`NewString("a") should not be interned`)
 	}
 }

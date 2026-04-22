@@ -1847,13 +1847,6 @@ func parseRegexLiteral(s string) (pattern, flags string) {
 	return s[1:lastSlash], s[lastSlash+1:]
 }
 
-func (l *Lowerer) arenaNumber(expr ast.Expr) ast.Expr {
-	if l.arenaEnabled {
-		return callExpr(selectorExpr(goIdent("_arena"), "NewNumber"), expr)
-	}
-	return callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), expr)
-}
-
 func (l *Lowerer) arenaWrapNumber(expr ast.Expr) ast.Expr {
 	if l.arenaEnabled && l.insideFunc > 0 && l.disableArenaCount == 0 && l.hasArenaVar > 0 {
 		return callExpr(selectorExpr(goIdent("_arena"), "NewNumber"), expr)

@@ -114,6 +114,35 @@ func TestRunCommandStripsPassthroughSeparatorForChildArgs(t *testing.T) {
 	}
 }
 
+func TestRunCommandPreservesTopLevelWhileStatements(t *testing.T) {
+	entry := filepath.Join(t.TempDir(), "top_level_while.ts")
+	if err := os.WriteFile(entry, []byte(`
+let i = 0;
+while (i < 3) {
+  i += 1;
+}
+console.log(i);
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "gocache"))
+
+	cmd := exec.Command("go", "run", ".", "run", entry)
+	cmd.Dir = "/Users/nikita/Work/gun"
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+
+	if got := strings.TrimSpace(stdout.String()); got != "3" {
+		t.Fatalf("stdout mismatch: got %q want %q\nstderr:\n%s", got, "3", stderr.String())
+	}
+}
+
 func TestRunCommandCPUProfWritesNodeLikeProfileAndKeepsChildArgvClean(t *testing.T) {
 	tempDir := t.TempDir()
 	entry := filepath.Join(tempDir, "argv.ts")

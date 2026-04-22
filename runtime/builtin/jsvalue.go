@@ -105,26 +105,6 @@ func (v *JSValue) isPrimitiveValue() bool {
 	}
 }
 
-func primitiveTypeName(v *JSValue) string {
-	if v == nil {
-		return "undefined"
-	}
-	switch v.unboxed().typ {
-	case TypeBoolean:
-		return "boolean"
-	case TypeNumber:
-		return "number"
-	case TypeString:
-		return "string"
-	case TypeSymbol:
-		return "symbol"
-	case TypeBigInt:
-		return "bigint"
-	default:
-		return v.TypeString()
-	}
-}
-
 func panicPrimitivePropertySet() {
 	panic(newTypeErrorJSValue("Attempted to assign to readonly property."))
 }

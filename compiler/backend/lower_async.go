@@ -1556,7 +1556,3 @@ func (l *Lowerer) newAsyncTempSymbol() *symbol.Symbol {
 	l.asyncTempSymbols = append(l.asyncTempSymbols, sym)
 	return sym
 }
-
-func (l *Lowerer) arenaAllowedInCurrentFunc() bool {
-	return l.arenaEnabled && len(l.asyncTempSymbols) == 0
-}

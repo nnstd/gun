@@ -154,6 +154,10 @@ func (b *Builder) buildTopLevel(mod *Module, node *sitter.Node) {
 		}
 	case "comment", "line_comment", "block_comment":
 		// skip
+	default:
+		if s := b.buildStmt(node); s != nil {
+			mod.Declarations = append(mod.Declarations, &TopLevelStmt{Stmt: s, Span: b.span(node)})
+		}
 	}
 }
 

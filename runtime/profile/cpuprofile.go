@@ -396,13 +396,6 @@ func currentGoroutineID() uint64 {
 	return id
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 func max64(a, b int64) int64 {
 	if a > b {
 		return a

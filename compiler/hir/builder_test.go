@@ -605,6 +605,24 @@ func TestTopLevelStatement(t *testing.T) {
 	}
 }
 
+func TestTopLevelWhileStatement(t *testing.T) {
+	mod := buildHIR(t, `let i = 0; while (i < 3) { i += 1; } console.log(i);`)
+	foundWhile := false
+	for _, d := range mod.Declarations {
+		tls, ok := d.(*TopLevelStmt)
+		if !ok {
+			continue
+		}
+		if _, ok := tls.Stmt.(*WhileStmt); ok {
+			foundWhile = true
+			break
+		}
+	}
+	if !foundWhile {
+		t.Fatal("expected TopLevelStmt wrapping WhileStmt at module top level")
+	}
+}
+
 func TestPrinterNested(t *testing.T) {
 	out := hirString(t, `
 		function outer() {

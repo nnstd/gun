@@ -1,6 +1,7 @@
 BINARY  := gun
 PKG     := ./...
 GOBIN   ?= $(shell go env GOPATH)/bin
+GOCACHE ?= /tmp/gun-gocache
 LDFLAGS := -X main.gunModuleRoot=$(CURDIR)
 
 .PHONY: build install clean test check
@@ -15,7 +16,7 @@ clean:
 	rm -f $(BINARY)
 
 test:
-	go test $(PKG)
+	mkdir -p $(GOCACHE) && GOCACHE=$(GOCACHE) go test $(PKG)
 
 check:
-	$(GOBIN)/staticcheck $(PKG)
+	mkdir -p $(GOCACHE) && GOCACHE=$(GOCACHE) $(GOBIN)/staticcheck $(PKG)

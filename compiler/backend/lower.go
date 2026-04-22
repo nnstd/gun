@@ -3234,13 +3234,6 @@ func (l *Lowerer) generatedFunctionCtorName() string {
 	return "NewFunction"
 }
 
-func (l *Lowerer) generatedProfiledFunctionCtorName() string {
-	if l.arenaEnabled && l.disableArenaCount == 0 && l.hasArenaVar > 0 {
-		return "NewProfiledArenaFunction"
-	}
-	return "NewProfiledFunction"
-}
-
 func (l *Lowerer) generatedFunctionValue(name string, span *hir.SourceSpan, fnLit *ast.FuncLit) ast.Expr {
 	return callExpr(selectorExpr(goIdent("jsvalue"), l.generatedFunctionCtorName()), fnLit)
 }
@@ -3291,25 +3284,4 @@ func (l *Lowerer) ensureProfileRuntimeAlias() string {
 		l.addAliasedImport("github.com/nnstd/gun/runtime/profile", l.profileRuntimeAlias)
 	}
 	return l.profileRuntimeAlias
-}
-
-func (l *Lowerer) profiledFunctionArgs(name string, span *hir.SourceSpan, fnLit *ast.FuncLit) []ast.Expr {
-	functionName := name
-	if functionName == "" {
-		functionName = "(anonymous)"
-	}
-	file := l.sourcePath
-	line := 0
-	column := 0
-	if span != nil {
-		line = span.StartLine
-		column = span.StartColumn
-	}
-	return []ast.Expr{
-		stringLit(functionName),
-		stringLit(file),
-		intLit(itoa(line)),
-		intLit(itoa(column)),
-		fnLit,
-	}
 }
