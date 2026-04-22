@@ -5,12 +5,14 @@ import (
 	"time"
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
+	"github.com/nnstd/gun/runtime/profile"
 )
 
 // scheduleTimeout schedules a callback after ms milliseconds on this event loop.
 func (el *EventLoop) scheduleTimeout(ms int, fn func(), id int64) {
+	ctx := profile.CaptureContext()
 	fired := &atomic.Bool{}
-	j := &activeJob{fired: fired}
+	j := &activeJob{fired: fired, context: ctx}
 	el.jobs.Store(id, j)
 	el.jobCount.Add(1)
 
@@ -18,7 +20,7 @@ func (el *EventLoop) scheduleTimeout(ms int, fn func(), id int64) {
 		if fired.CompareAndSwap(false, true) {
 			el.jobChan <- func() {
 				defer func() { recover() }()
-				fn()
+				profile.WithContext(ctx, fn)
 			}
 			el.jobCount.Add(-1)
 			el.wake()
@@ -29,11 +31,13 @@ func (el *EventLoop) scheduleTimeout(ms int, fn func(), id int64) {
 
 // scheduleInterval schedules a repeating callback every ms milliseconds on this event loop.
 func (el *EventLoop) scheduleInterval(ms int, fn func(), id int64) {
+	ctx := profile.CaptureContext()
 	fired := &atomic.Bool{}
 	stopCh := make(chan struct{})
 	j := &activeJob{
-		stopFn: func() { close(stopCh) },
-		fired:  fired,
+		stopFn:  func() { close(stopCh) },
+		fired:   fired,
+		context: ctx,
 	}
 	el.jobs.Store(id, j)
 	el.jobCount.Add(1)
@@ -48,7 +52,7 @@ func (el *EventLoop) scheduleInterval(ms int, fn func(), id int64) {
 			case <-ticker.C:
 				el.jobChan <- func() {
 					defer func() { recover() }()
-					fn()
+					profile.WithContext(ctx, fn)
 				}
 			}
 		}
@@ -57,16 +61,17 @@ func (el *EventLoop) scheduleInterval(ms int, fn func(), id int64) {
 
 // scheduleImmediate schedules a callback to fire on the next event loop tick.
 func (el *EventLoop) scheduleImmediate(fn func()) {
+	ctx := profile.CaptureContext()
 	id := el.nextJobID.Add(1)
 	fired := &atomic.Bool{}
-	j := &activeJob{fired: fired}
+	j := &activeJob{fired: fired, context: ctx}
 	el.jobs.Store(id, j)
 	el.jobCount.Add(1)
 
 	el.jobChan <- func() {
 		if fired.CompareAndSwap(false, true) {
 			defer func() { recover() }()
-			fn()
+			profile.WithContext(ctx, fn)
 			el.jobCount.Add(-1)
 			el.wake()
 		}

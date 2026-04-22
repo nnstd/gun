@@ -43,6 +43,7 @@ type compileOptions struct {
 	localAliasMap    map[symbol.ID]string
 	namespaceAlias   string
 	namespaceEntries map[string]string
+	cpuProfile       *backend.CPUProfileConfig
 }
 
 // New creates a pipeline with the given optimization level and default passes.
@@ -81,12 +82,18 @@ func (p *Pipeline) CompileTree(root *sitter.Node, source []byte, pkgName, module
 }
 
 func (p *Pipeline) CompileTreeWithPath(root *sitter.Node, source []byte, pkgName, moduleName, sourcePath string, samePackageImports bool) ([]byte, error) {
+	return p.CompileTreeWithPathOptions(root, source, pkgName, moduleName, sourcePath, samePackageImports, nil)
+}
+
+func (p *Pipeline) CompileTreeWithPathOptions(root *sitter.Node, source []byte, pkgName, moduleName, sourcePath string, samePackageImports bool, cpuProfile *backend.CPUProfileConfig) ([]byte, error) {
 	// Stage 1: Build HIR
 	hirMod := hir.BuildModuleWithPath(root, source, pkgName, sourcePath)
 	if p.OnHIR != nil {
 		p.OnHIR(hirMod)
 	}
-	return p.compileHIRModule(hirMod, moduleName, samePackageImports, compileOptions{})
+	opts := compileOptions{}
+	opts.cpuProfile = cpuProfile
+	return p.compileHIRModule(hirMod, moduleName, samePackageImports, opts)
 }
 
 // CompileHIR compiles from an already-built HIR module.
@@ -137,9 +144,9 @@ func (p *Pipeline) compileHIRModule(hirMod *hir.Module, moduleName string, sameP
 
 	var goFile *ast.File
 	if len(opts.crossFileExports) == 0 && len(opts.reservedNames) == 0 && len(opts.importNameMap) == 0 && len(opts.exportAliasMap) == 0 && len(opts.localAliasMap) == 0 && opts.namespaceAlias == "" && len(opts.namespaceEntries) == 0 {
-		goFile = backend.Lower(hirMod, p.Ctx, moduleName, samePackageImports, p.OptLevel)
+		goFile = backend.LowerWithCPUProfile(hirMod, p.Ctx, moduleName, samePackageImports, opts.cpuProfile, p.OptLevel)
 	} else {
-		goFile = backend.LowerWithExports(hirMod, p.Ctx, moduleName, samePackageImports, opts.crossFileExports, opts.reservedNames, opts.importNameMap, opts.exportAliasMap, opts.localAliasMap, opts.namespaceAlias, opts.namespaceEntries, p.OptLevel)
+		goFile = backend.LowerWithExportsAndCPUProfile(hirMod, p.Ctx, moduleName, samePackageImports, opts.crossFileExports, opts.reservedNames, opts.importNameMap, opts.exportAliasMap, opts.localAliasMap, opts.namespaceAlias, opts.namespaceEntries, opts.cpuProfile, p.OptLevel)
 	}
 	return backend.GenerateWithSource(goFile, hirMod.SourcePath, hirMod.SourceSize)
 }
@@ -147,6 +154,10 @@ func (p *Pipeline) compileHIRModule(hirMod *hir.Module, moduleName string, sameP
 // CompilePackage compiles multiple TypeScript files that belong to the same Go package.
 // It scans all files for exports first, then compiles each with cross-file knowledge.
 func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, entryFile string) (map[string][]byte, error) {
+	return p.CompilePackageWithOptions(files, pkgName, moduleName, entryFile, nil)
+}
+
+func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, moduleName, entryFile string, cpuProfile *backend.CPUProfileConfig) (map[string][]byte, error) {
 	// Phase 1: Parse all files into HIR and scan exports
 	hirModules := make(map[string]*hir.Module)
 	allExports := make(map[string][]backend.CrossFileExport)
@@ -347,7 +358,7 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 			}
 		}
 
-		goFiles[name] = backend.LowerWithExports(hirMod, p.Ctx, moduleName, true, crossExports, reservedNames, importNameMap, exportAliases[name], localAliases[name], namespaceAliases[name], exportAliases[name], p.OptLevel)
+		goFiles[name] = backend.LowerWithExportsAndCPUProfile(hirMod, p.Ctx, moduleName, true, crossExports, reservedNames, importNameMap, exportAliases[name], localAliases[name], namespaceAliases[name], exportAliases[name], cpuProfile, p.OptLevel)
 	}
 
 	backend.BreakPackageInitCycles(goFiles)
@@ -387,7 +398,6 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 
 	return results, nil
 }
-
 
 // fileDefaultName generates a file-specific name for renamed default exports.
 func fileDefaultName(fileName string) string {
@@ -540,7 +550,6 @@ func collectTopLevelAliases(mod *hir.Module, fileName, entryFile string, exportA
 	}
 	return aliases
 }
-
 
 // renameDefaultExport replaces "Default" in compiled output with a file-specific name.
 func renameDefaultExport(source []byte, fileName string) []byte {

@@ -3,13 +3,16 @@ package eventloop
 import (
 	"sync"
 	"sync/atomic"
+
+	"github.com/nnstd/gun/runtime/profile"
 )
 
 // activeJob tracks a scheduled timer/interval for cancellation.
 // Stored in EventLoop.jobs as jobID -> *activeJob.
 type activeJob struct {
-	stopFn   func()       // timer.Stop() or stop-channel close
-	fired    *atomic.Bool // shared: CAS ensures exactly one decrement path
+	stopFn  func()       // timer.Stop() or stop-channel close
+	fired   *atomic.Bool // shared: CAS ensures exactly one decrement path
+	context *profile.ContextToken
 }
 
 // EventLoop implements a Node.js-style event loop that keeps the process
@@ -75,10 +78,11 @@ func (el *EventLoop) SettlePromise() {
 // The microtask increments jobCount on schedule and decrements it on completion.
 // Used by Promise resolution to dispatch .then()/.catch() handlers asynchronously.
 func (el *EventLoop) ScheduleMicrotask(fn func()) {
+	ctx := profile.CaptureContext()
 	el.jobCount.Add(1)
 	el.jobChan <- func() {
 		defer func() { recover() }()
-		fn()
+		profile.WithContext(ctx, fn)
 		el.jobCount.Add(-1)
 		el.wake()
 	}

@@ -35,6 +35,10 @@ func CompileWithOptLevel(source []byte, pkgName, moduleName string, samePackageI
 }
 
 func CompileWithOptLevelAndPath(source []byte, pkgName, moduleName, sourcePath string, samePackageImports bool, optLevel int) ([]byte, error) {
+	return CompileWithOptLevelAndPathOptions(source, pkgName, moduleName, sourcePath, samePackageImports, optLevel, nil)
+}
+
+func CompileWithOptLevelAndPathOptions(source []byte, pkgName, moduleName, sourcePath string, samePackageImports bool, optLevel int, opts *CompileOptions) ([]byte, error) {
 	tree, err := parseTypeScript(source)
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
@@ -42,7 +46,11 @@ func CompileWithOptLevelAndPath(source []byte, pkgName, moduleName, sourcePath s
 	defer tree.Close()
 
 	p := newDefaultPipeline(optLevel)
-	return p.CompileTreeWithPath(tree.RootNode(), source, pkgName, moduleName, sourcePath, samePackageImports)
+	var cpuProfile *backend.CPUProfileConfig
+	if opts != nil {
+		cpuProfile = opts.CPUProfile
+	}
+	return p.CompileTreeWithPathOptions(tree.RootNode(), source, pkgName, moduleName, sourcePath, samePackageImports, cpuProfile)
 }
 
 // CompileWithExports transpiles TypeScript source with knowledge of cross-file exports.
@@ -75,8 +83,16 @@ func CompilePackage(files map[string][]byte, pkgName, moduleName, entryFile stri
 // CompilePackageWithOptLevel transpiles multiple TypeScript files that belong to
 // the same Go package using the multi-stage pipeline.
 func CompilePackageWithOptLevel(files map[string][]byte, pkgName, moduleName, entryFile string, optLevel int) (map[string][]byte, error) {
+	return CompilePackageWithOptLevelOptions(files, pkgName, moduleName, entryFile, optLevel, nil)
+}
+
+func CompilePackageWithOptLevelOptions(files map[string][]byte, pkgName, moduleName, entryFile string, optLevel int, opts *CompileOptions) (map[string][]byte, error) {
 	p := newDefaultPipeline(optLevel)
-	return p.CompilePackage(files, pkgName, moduleName, entryFile)
+	var cpuProfile *backend.CPUProfileConfig
+	if opts != nil {
+		cpuProfile = opts.CPUProfile
+	}
+	return p.CompilePackageWithOptions(files, pkgName, moduleName, entryFile, cpuProfile)
 }
 
 func newDefaultPipeline(optLevel int) *pipeline.Pipeline {

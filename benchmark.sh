@@ -92,6 +92,17 @@ const UserSchema = z.object({
   age: z.number().min(0).max(150),
 });
 
+function fib(n: number): number {
+  let a = 0;
+  let b = 1;
+  for (let i = 0; i < n; i++) {
+    const next = a + b;
+    a = b;
+    b = next;
+  }
+  return a;
+}
+
 app.get("/plaintext", (c) => c.text("Hello, World!"));
 
 app.get("/json", (c) => c.json({ hello: "world", ts: Date.now() }));
@@ -115,6 +126,15 @@ app.get("/items/:itemId/comments/:commentId", (c) => {
     item: c.req.param("itemId"),
     comment: c.req.param("commentId"),
   });
+});
+
+app.get("/fib/:n", (c) => {
+  const raw = c.req.param("n");
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > 78) {
+    return c.json({ error: "n must be an integer between 0 and 78" }, 400);
+  }
+  return c.json({ n, value: fib(n) });
 });
 
 Bun.serve({ port, fetch: app.fetch });
@@ -218,6 +238,7 @@ const routes = [
   { method: 'GET',  url: '${base}/json',                      name: 'GET /json' },
   { method: 'GET',  url: '${base}/users/42',                  name: 'GET /users/:id' },
   { method: 'GET',  url: '${base}/items/7/comments/99',       name: 'GET /items/:id/comments/:id' },
+  { method: 'GET',  url: '${base}/fib/32',                    name: 'GET /fib/:n' },
   { method: 'POST', url: '${base}/users',                     name: 'POST /users',
     body: '{"name":"Alice","email":"alice@example.com","age":30}',
     headers: { 'Content-Type': 'application/json' } },
@@ -320,6 +341,7 @@ verify_server() {
     "GET /json:hello" \
     "GET /users/42:User 42" \
     "GET /items/7/comments/99:item" \
+    "GET /fib/10:\"value\":55" \
     "POST /users:created"; do
     local route="${check%%:*}"
     local expect="${check#*:}"

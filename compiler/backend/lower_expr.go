@@ -570,10 +570,9 @@ func (l *Lowerer) lowerObjectPropertyValue(prop *hir.Property) ast.Expr {
 		} else {
 			methodBody = l.lowerMethodBody(fn.Params, body)
 		}
+		methodBody = l.instrumentProfiledBody(prop.KeyName, fn.Span, methodBody)
 		methodLit := l.wrapAsJSValueFunc(fn.Params, methodBody)
-		return callExpr(selectorExpr(
-			callExpr(selectorExpr(goIdent("jsvalue"), l.generatedFunctionCtorName()), methodLit),
-			"MarkAsMethod"))
+		return callExpr(selectorExpr(l.generatedFunctionValue(prop.KeyName, fn.Span, methodLit), "MarkAsMethod"))
 	case *hir.FuncExpr:
 		var methodBody *ast.BlockStmt
 		if fn.IsAsync {
@@ -581,10 +580,9 @@ func (l *Lowerer) lowerObjectPropertyValue(prop *hir.Property) ast.Expr {
 		} else {
 			methodBody = l.lowerMethodBody(fn.Params, fn.Body)
 		}
+		methodBody = l.instrumentProfiledBody(prop.KeyName, fn.Span, methodBody)
 		methodLit := l.wrapAsJSValueFunc(fn.Params, methodBody)
-		return callExpr(selectorExpr(
-			callExpr(selectorExpr(goIdent("jsvalue"), l.generatedFunctionCtorName()), methodLit),
-			"MarkAsMethod"))
+		return callExpr(selectorExpr(l.generatedFunctionValue(prop.KeyName, fn.Span, methodLit), "MarkAsMethod"))
 	default:
 		return l.lowerExpr(prop.Value)
 	}
@@ -1735,9 +1733,10 @@ func (l *Lowerer) lowerArrowFunc(e *hir.ArrowFunc) ast.Expr {
 	} else {
 		body = blockStmt()
 	}
+	body = l.instrumentProfiledBody("(anonymous)", e.Span, body)
 
 	fnLit := l.wrapAsJSValueFunc(e.Params, body)
-	return callExpr(selectorExpr(goIdent("jsvalue"), l.generatedFunctionCtorName()), fnLit)
+	return l.generatedFunctionValue("(anonymous)", e.Span, fnLit)
 }
 
 func (l *Lowerer) lowerFuncExpr(e *hir.FuncExpr) ast.Expr {
@@ -1755,8 +1754,9 @@ func (l *Lowerer) lowerFuncExpr(e *hir.FuncExpr) ast.Expr {
 	} else {
 		body = l.lowerFuncBody(e.Params, e.Body)
 	}
+	body = l.instrumentProfiledBody("(anonymous)", e.Span, body)
 	fnLit := l.wrapAsJSValueFunc(e.Params, body)
-	newFunc := callExpr(selectorExpr(goIdent("jsvalue"), l.generatedFunctionCtorName()), fnLit)
+	newFunc := l.generatedFunctionValue("(anonymous)", e.Span, fnLit)
 	if usesThis {
 		return callExpr(selectorExpr(newFunc, "MarkAsMethod"))
 	}

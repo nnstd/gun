@@ -34,52 +34,66 @@ type CrossFileExport struct {
 
 // Lowerer converts an HIR Module into a go/ast.File.
 type Lowerer struct {
-	symtab             *symbol.Table
-	ctx                *context.TranspilerContext
-	optLevel           context.OptLevel
-	imports            map[string]string // Go import path → alias
-	decls              []ast.Decl
-	importedSyms       map[*symbol.Symbol]importResolution // how each imported symbol resolves to Go
-	importedNames      map[string]importResolution         // fallback for unresolved imported identifiers
-	moduleName         string                              // Go module name for relative import resolution
-	samePackage        bool                                // treat relative imports as same-package refs
-	varTypes           map[string]string                   // variable name → module type (e.g. "hono")
-	reservedNames      map[string]bool
-	importNameMap      map[string]string
-	exportAliasMap     map[string]string
-	localAliasMap      map[symbol.ID]string
-	namespaceAlias     string
-	namespaceEntries   map[string]string
-	topLevelNames      map[string]string
-	eagerVarInits      map[symbol.ID]bool
-	emittedExportNames map[string]bool
-	crossFileExports   map[string]bool // Go names from other files (prevents .Get() dispatch)
-	initStmts          []ast.Stmt      // statements for init() function
-	pkgName            string          // Go package name
-	currentClassName   string          // set during class constructor/method lowering
-	insideFunc         int             // >0 when inside a function body
-	insideMethod       int             // >0 when inside a method body (_args[0] is this)
-	privateKeys        map[string]string
-	currentClassBrand  string
-	syntheticCounter   int
-	needsBunWait       bool
-	sourcePath         string
-	asyncTempSymbols   []*symbol.Symbol
-	hasTopLevelAwait   bool
-	topLevelAwaitStmts []hir.Stmt
-	arenaEnabled       bool
-	disableArenaCount  int
-	hasArenaVar        int
+	symtab              *symbol.Table
+	ctx                 *context.TranspilerContext
+	optLevel            context.OptLevel
+	imports             map[string]string // Go import path → alias
+	decls               []ast.Decl
+	importedSyms        map[*symbol.Symbol]importResolution // how each imported symbol resolves to Go
+	importedNames       map[string]importResolution         // fallback for unresolved imported identifiers
+	moduleName          string                              // Go module name for relative import resolution
+	samePackage         bool                                // treat relative imports as same-package refs
+	varTypes            map[string]string                   // variable name → module type (e.g. "hono")
+	reservedNames       map[string]bool
+	importNameMap       map[string]string
+	exportAliasMap      map[string]string
+	localAliasMap       map[symbol.ID]string
+	namespaceAlias      string
+	namespaceEntries    map[string]string
+	topLevelNames       map[string]string
+	eagerVarInits       map[symbol.ID]bool
+	emittedExportNames  map[string]bool
+	crossFileExports    map[string]bool // Go names from other files (prevents .Get() dispatch)
+	initStmts           []ast.Stmt      // statements for init() function
+	pkgName             string          // Go package name
+	currentClassName    string          // set during class constructor/method lowering
+	insideFunc          int             // >0 when inside a function body
+	insideMethod        int             // >0 when inside a method body (_args[0] is this)
+	privateKeys         map[string]string
+	currentClassBrand   string
+	syntheticCounter    int
+	needsBunWait        bool
+	sourcePath          string
+	asyncTempSymbols    []*symbol.Symbol
+	hasTopLevelAwait    bool
+	topLevelAwaitStmts  []hir.Stmt
+	arenaEnabled        bool
+	disableArenaCount   int
+	hasArenaVar         int
+	cpuProfile          *CPUProfileConfig
+	profileRuntimeAlias string
 }
 
 // Lower converts an HIR module to a Go AST file.
 func Lower(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, optLevel context.OptLevel) *ast.File {
-	return LowerWithExports(mod, ctx, moduleName, samePackageImports, nil, nil, nil, nil, nil, "", nil, optLevel)
+	return LowerWithCPUProfile(mod, ctx, moduleName, samePackageImports, nil, optLevel)
+}
+
+// LowerWithCPUProfile converts an HIR module to a Go AST file with optional
+// generated-main CPU profiling support.
+func LowerWithCPUProfile(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, cpuProfile *CPUProfileConfig, optLevel context.OptLevel) *ast.File {
+	return LowerWithExportsAndCPUProfile(mod, ctx, moduleName, samePackageImports, nil, nil, nil, nil, nil, "", nil, cpuProfile, optLevel)
 }
 
 // LowerWithExports converts an HIR module to a Go AST file with knowledge of
 // symbols exported from other files in the same package.
 func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string, localAliasMap map[symbol.ID]string, namespaceAlias string, namespaceEntries map[string]string, optLevel context.OptLevel) *ast.File {
+	return LowerWithExportsAndCPUProfile(mod, ctx, moduleName, samePackageImports, crossFileExports, reservedNames, importNameMap, exportAliasMap, localAliasMap, namespaceAlias, namespaceEntries, nil, optLevel)
+}
+
+// LowerWithExportsAndCPUProfile converts an HIR module to a Go AST file with
+// knowledge of same-package exports plus optional generated-main CPU profiling support.
+func LowerWithExportsAndCPUProfile(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string, localAliasMap map[symbol.ID]string, namespaceAlias string, namespaceEntries map[string]string, cpuProfile *CPUProfileConfig, optLevel context.OptLevel) *ast.File {
 	cfe := make(map[string]bool)
 	for _, exp := range crossFileExports {
 		cfe[exp.GoName] = true
@@ -112,6 +126,7 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 		sourcePath:         mod.SourcePath,
 		hasTopLevelAwait:   mod.HasTopLevelAwait,
 		arenaEnabled:       optLevel >= context.O2,
+		cpuProfile:         cpuProfile,
 	}
 
 	// Reserve cross-file export names in the symbol table so local symbols
@@ -189,6 +204,7 @@ func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleNam
 			)))
 		}
 	}
+	l.injectCPUProfileMain()
 
 	// Emit init() for collected setup statements (class methods, enum members, etc.)
 	if len(l.initStmts) > 0 {
@@ -313,12 +329,14 @@ func (l *Lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 	if origName == "main" || origName == "init" {
 		name = origName // Use the original name for Go func declaration
 		body := l.lowerBlock(d.Body)
+		body = l.instrumentProfiledBody(name, d.Span, body)
 		if d.IsAsync {
 			asyncName := l.nextSyntheticName("_" + name + "_async")
 			l.jsvalueImport()
 			asyncBody := l.lowerAsyncFuncBody(d.Params, d.Body, 0, false)
+			asyncBody = l.instrumentProfiledBody(asyncName, d.Span, asyncBody)
 			asyncLit := setFuncLitPos(l.wrapAsJSValueFunc(d.Params, asyncBody), d.Span)
-			asyncVal := callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), asyncLit)
+			asyncVal := l.generatedFunctionValue(asyncName, d.Span, asyncLit)
 			l.decls = append(l.decls, setDeclPos(varDecl(asyncName, nil, asyncVal), d.Span))
 			body = blockStmt(
 				assignDefine(
@@ -369,8 +387,9 @@ func (l *Lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 			body = l.lowerMethodBody(d.Params, d.Body)
 		}
 	}
+	body = l.instrumentProfiledBody(name, d.Span, body)
 	fnLit := setFuncLitPos(l.wrapAsJSValueFunc(d.Params, body), d.Span)
-	fnVal := callExpr(selectorExpr(goIdent("jsvalue"), l.generatedFunctionCtorName()), fnLit)
+	fnVal := l.generatedFunctionValue(name, d.Span, fnLit)
 	if methodLike {
 		fnVal = callExpr(selectorExpr(fnVal, "MarkAsMethod"))
 	}
@@ -535,6 +554,7 @@ func (l *Lowerer) lowerClassConstructor(className string, hasParent bool, ctor *
 	if ctor != nil {
 		span = ctor.Span
 	}
+	ctorBody = l.instrumentProfiledBody(className+".constructor", span, ctorBody)
 	return setFuncLitPos(&ast.FuncLit{
 		Type: &ast.FuncType{
 			Params: fieldList(
@@ -662,10 +682,9 @@ func (l *Lowerer) lowerClassMethodValue(m *hir.ClassMethod) ast.Expr {
 	} else {
 		methodBody = l.lowerFuncBody(m.Params, m.Body)
 	}
+	methodBody = l.instrumentProfiledBody(m.Name, m.Span, methodBody)
 	methodLit := setFuncLitPos(l.wrapAsJSValueFunc(m.Params, methodBody), m.Span)
-	return callExpr(selectorExpr(
-		callExpr(selectorExpr(goIdent("jsvalue"), l.generatedFunctionCtorName()), methodLit),
-		"MarkAsMethod"))
+	return callExpr(selectorExpr(l.generatedFunctionValue(m.Name, m.Span, methodLit), "MarkAsMethod"))
 }
 
 func (l *Lowerer) defineHiddenProperty(target, key, value ast.Expr) ast.Stmt {
@@ -1337,6 +1356,68 @@ func (l *Lowerer) ensureMainRecover(fd *ast.FuncDecl) {
 	fd.Body.List = append([]ast.Stmt{
 		&ast.DeferStmt{Call: callExpr(selectorExpr(goIdent("error"), "RecoverMain"))},
 	}, fd.Body.List...)
+}
+
+func (l *Lowerer) injectCPUProfileMain() {
+	if l.cpuProfile == nil || l.pkgName != "main" {
+		return
+	}
+	mainFn := l.findMainFunc()
+	if mainFn == nil || mainFn.Body == nil {
+		return
+	}
+
+	profileAlias := l.ensureProfileRuntimeAlias()
+	stopIdent := goIdent("_gunCPUProfileStop")
+	startCall := callExpr(
+		selectorExpr(goIdent(profileAlias), "StartCPUProfileOrExit"),
+		stringLit(l.cpuProfile.Dir),
+		stringLit(l.cpuProfile.Name),
+	)
+	startStmt := assignDefine([]ast.Expr{stopIdent}, []ast.Expr{startCall})
+	deferStmt := &ast.DeferStmt{Call: callExpr(stopIdent)}
+
+	insertAt := 0
+	if len(mainFn.Body.List) > 0 {
+		if deferStmtExisting, ok := mainFn.Body.List[0].(*ast.DeferStmt); ok && deferStmtExisting.Call != nil {
+			if sel, ok := deferStmtExisting.Call.Fun.(*ast.SelectorExpr); ok {
+				if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "error" && sel.Sel.Name == "RecoverMain" {
+					insertAt = 1
+				}
+			}
+		}
+	}
+
+	stmts := []ast.Stmt{startStmt, deferStmt}
+	body := append([]ast.Stmt{}, mainFn.Body.List[:insertAt]...)
+	body = append(body, stmts...)
+	mainFn.Body.List = append(body, mainFn.Body.List[insertAt:]...)
+}
+
+func (l *Lowerer) uniqueInternalImportAlias(base string) string {
+	candidate := base
+	for suffix := 1; l.internalImportAliasTaken(candidate); suffix++ {
+		candidate = fmt.Sprintf("%s_%d", base, suffix)
+	}
+	l.symtab.ReserveNameStr(candidate)
+	return candidate
+}
+
+func (l *Lowerer) internalImportAliasTaken(alias string) bool {
+	if l.crossFileExports[alias] || l.reservedNames[alias] {
+		return true
+	}
+	for _, emitted := range l.topLevelNames {
+		if emitted == alias {
+			return true
+		}
+	}
+	for _, importAlias := range l.imports {
+		if importAlias == alias {
+			return true
+		}
+	}
+	return false
 }
 
 // prescan collects metadata from HIR declarations before lowering.
@@ -3151,4 +3232,84 @@ func (l *Lowerer) generatedFunctionCtorName() string {
 		return "NewArenaFunction"
 	}
 	return "NewFunction"
+}
+
+func (l *Lowerer) generatedProfiledFunctionCtorName() string {
+	if l.arenaEnabled && l.disableArenaCount == 0 && l.hasArenaVar > 0 {
+		return "NewProfiledArenaFunction"
+	}
+	return "NewProfiledFunction"
+}
+
+func (l *Lowerer) generatedFunctionValue(name string, span *hir.SourceSpan, fnLit *ast.FuncLit) ast.Expr {
+	return callExpr(selectorExpr(goIdent("jsvalue"), l.generatedFunctionCtorName()), fnLit)
+}
+
+func (l *Lowerer) instrumentProfiledBody(name string, span *hir.SourceSpan, body *ast.BlockStmt) *ast.BlockStmt {
+	if l.cpuProfile == nil || body == nil {
+		return body
+	}
+	l.ensureProfileRuntimeAlias()
+	leaveName := l.nextSyntheticName("_gunProfileLeave")
+	frameName := name
+	if frameName == "" {
+		frameName = "(anonymous)"
+	}
+	line := 0
+	column := 0
+	if span != nil {
+		line = span.StartLine
+		column = span.StartColumn
+	}
+	enter := assignDefine(
+		[]ast.Expr{goIdent(leaveName)},
+		[]ast.Expr{callExpr(selectorExpr(goIdent(l.profileRuntimeAlias), "EnterFrame"), callExpr(selectorExpr(goIdent(l.profileRuntimeAlias), "Frame"),
+			stringLit(frameName),
+			stringLit(l.sourcePath),
+			intLit(itoa(line)),
+			intLit(itoa(column)),
+		))},
+	)
+	// Cannot construct struct literal with helper callExpr; use composite literal directly.
+	enter.Rhs[0] = callExpr(selectorExpr(goIdent(l.profileRuntimeAlias), "EnterFrame"), &ast.CompositeLit{
+		Type: selectorExpr(goIdent(l.profileRuntimeAlias), "Frame"),
+		Elts: []ast.Expr{
+			&ast.KeyValueExpr{Key: goIdent("FunctionName"), Value: stringLit(frameName)},
+			&ast.KeyValueExpr{Key: goIdent("File"), Value: stringLit(l.sourcePath)},
+			&ast.KeyValueExpr{Key: goIdent("Line"), Value: intLit(itoa(line))},
+			&ast.KeyValueExpr{Key: goIdent("Column"), Value: intLit(itoa(column))},
+		},
+	})
+	deferStmt := &ast.DeferStmt{Call: callExpr(goIdent(leaveName))}
+	body.List = append([]ast.Stmt{enter, deferStmt}, body.List...)
+	return body
+}
+
+func (l *Lowerer) ensureProfileRuntimeAlias() string {
+	if l.profileRuntimeAlias == "" {
+		l.profileRuntimeAlias = l.uniqueInternalImportAlias("_gunprofile_runtime")
+		l.addAliasedImport("github.com/nnstd/gun/runtime/profile", l.profileRuntimeAlias)
+	}
+	return l.profileRuntimeAlias
+}
+
+func (l *Lowerer) profiledFunctionArgs(name string, span *hir.SourceSpan, fnLit *ast.FuncLit) []ast.Expr {
+	functionName := name
+	if functionName == "" {
+		functionName = "(anonymous)"
+	}
+	file := l.sourcePath
+	line := 0
+	column := 0
+	if span != nil {
+		line = span.StartLine
+		column = span.StartColumn
+	}
+	return []ast.Expr{
+		stringLit(functionName),
+		stringLit(file),
+		intLit(itoa(line)),
+		intLit(itoa(column)),
+		fnLit,
+	}
 }

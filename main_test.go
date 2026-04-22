@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -39,7 +40,7 @@ func TestTranspileProject_BuiltGunTestMatchesCLIParity(t *testing.T) {
 
 	t.Setenv("GOCACHE", filepath.Join(outDir, "gocache"))
 
-	if err := transpileProject(entry, outDir, "main", false, 0); err != nil {
+	if err := transpileProject(entry, outDir, "main", false, 0, nil); err != nil {
 		maybeSkipAsyncPhase0Boundary(t, err)
 		t.Fatal(err)
 	}
@@ -113,6 +114,105 @@ func TestRunCommandStripsPassthroughSeparatorForChildArgs(t *testing.T) {
 	}
 }
 
+func TestRunCommandCPUProfWritesNodeLikeProfileAndKeepsChildArgvClean(t *testing.T) {
+	tempDir := t.TempDir()
+	entry := filepath.Join(tempDir, "argv.ts")
+	if err := os.WriteFile(entry, []byte(`
+function fib(n) {
+  if (n < 2) return n;
+  return fib(n - 1) + fib(n - 2);
+}
+let acc = 0;
+for (let i = 0; i < 5; i++) acc += fib(35);
+console.log(JSON.stringify({ argv: process.argv, acc }));
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := filepath.Join(tempDir, "gun-bin")
+	cacheDir := filepath.Join(tempDir, "gocache")
+	cmd := exec.Command("go", "build", "-ldflags", "-X main.gunModuleRoot=/Users/nikita/Work/gun", "-o", bin, ".")
+	cmd.Dir = "/Users/nikita/Work/gun"
+	cmd.Env = append(os.Environ(), "GOCACHE="+cacheDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build gun failed: %v\n%s", err, out)
+	}
+
+	run := exec.Command(bin, "run", entry, "--cpu-prof", "--cpu-prof-name=custom.cpuprofile", "--", "--help")
+	run.Dir = tempDir
+	run.Env = append(os.Environ(), "GOCACHE="+cacheDir)
+	var stdout, stderr bytes.Buffer
+	run.Stdout = &stdout
+	run.Stderr = &stderr
+	if err := run.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+
+	gotArgv := strings.TrimSpace(stdout.String())
+	if strings.Contains(gotArgv, "--cpu-prof") {
+		t.Fatalf("child argv leaked cpu-prof flag: %s", gotArgv)
+	}
+	if !strings.Contains(gotArgv, `"--help"`) {
+		t.Fatalf("child argv missing passthrough arg: %s", gotArgv)
+	}
+
+	profilePath := filepath.Join(tempDir, "custom.cpuprofile")
+	data, err := os.ReadFile(profilePath)
+	if err != nil {
+		t.Fatalf("read cpu profile %s: %v\nstderr:\n%s", profilePath, err, stderr.String())
+	}
+	var profile struct {
+		Nodes []struct {
+			CallFrame struct {
+				FunctionName string `json:"functionName"`
+				URL          string `json:"url"`
+			} `json:"callFrame"`
+		} `json:"nodes"`
+		StartTime  int64   `json:"startTime"`
+		EndTime    int64   `json:"endTime"`
+		Samples    []int   `json:"samples"`
+		TimeDeltas []int64 `json:"timeDeltas"`
+	}
+	if err := json.Unmarshal(data, &profile); err != nil {
+		t.Fatalf("invalid cpuprofile json: %v\n%s", err, data)
+	}
+	if len(profile.Nodes) == 0 {
+		t.Fatal("expected cpuprofile nodes")
+	}
+	if len(profile.Samples) != len(profile.TimeDeltas) {
+		t.Fatalf("samples/timeDeltas mismatch: %d vs %d", len(profile.Samples), len(profile.TimeDeltas))
+	}
+	if profile.EndTime <= profile.StartTime {
+		t.Fatalf("unexpected profile time bounds: start=%d end=%d", profile.StartTime, profile.EndTime)
+	}
+	for _, node := range profile.Nodes {
+		if strings.Contains(node.CallFrame.URL, "/Work/gun/runtime/") {
+			t.Fatalf("profile leaked gun runtime Go frame: %s", node.CallFrame.URL)
+		}
+	}
+}
+
+func TestRunCommandRejectsCustomCPUProfInterval(t *testing.T) {
+	entry := filepath.Join(t.TempDir(), "argv.ts")
+	if err := os.WriteFile(entry, []byte(`console.log("ok")`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("go", "run", ".", "run", entry, "--cpu-prof", "--cpu-prof-interval=500")
+	cmd.Dir = "/Users/nikita/Work/gun"
+	cmd.Env = append(os.Environ(), "GOCACHE="+filepath.Join(t.TempDir(), "gocache"))
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		t.Fatal("expected run to fail for unsupported cpu-prof interval")
+	}
+	if !strings.Contains(stderr.String(), "only supports --cpu-prof-interval=1000") {
+		t.Fatalf("expected unsupported interval error, got:\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+}
+
 func buildFixture(t *testing.T, fixture string) string {
 	t.Helper()
 	outDir := t.TempDir()
@@ -120,7 +220,7 @@ func buildFixture(t *testing.T, fixture string) string {
 
 	t.Setenv("GOCACHE", filepath.Join(outDir, "gocache"))
 
-	if err := transpileProject(fixture, outDir, "main", false, 0); err != nil {
+	if err := transpileProject(fixture, outDir, "main", false, 0, nil); err != nil {
 		maybeSkipAsyncPhase0Boundary(t, err)
 		t.Fatal(err)
 	}
@@ -780,7 +880,7 @@ console.log("Listening on " + port);
 
 	t.Setenv("GOCACHE", filepath.Join(outDir, "gocache"))
 
-	if err := transpileProject(fixture, outDir, "main", false, 0); err != nil {
+	if err := transpileProject(fixture, outDir, "main", false, 0, nil); err != nil {
 		maybeSkipAsyncPhase0Boundary(t, err)
 		t.Fatal(err)
 	}

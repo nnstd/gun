@@ -221,6 +221,58 @@ func TestCompileWithExportsPreservesSourcePathDiagnostics(t *testing.T) {
 	assertErrorContains(t, err, "entry.ts")
 }
 
+func TestCompileWithCPUProfileInjectsRuntimeProfileScaffolding(t *testing.T) {
+	got, err := CompileWithOptLevelAndPathOptions(
+		[]byte(`console.log("hi")`),
+		"main",
+		"",
+		"entry.ts",
+		false,
+		0,
+		&CompileOptions{
+			CPUProfile: &CPUProfileConfig{Name: "custom.cpuprofile"},
+		},
+	)
+	if err != nil {
+		t.Fatalf("CompileWithOptLevelAndPathOptions failed: %v", err)
+	}
+	src := string(got)
+	assertContains(t, src, `"github.com/nnstd/gun/runtime/profile"`)
+	assertContains(t, src, `_gunCPUProfileStop :=`)
+	assertContains(t, src, `StartCPUProfileOrExit("", "custom.cpuprofile")`)
+	assertContains(t, src, `defer _gunCPUProfileStop()`)
+	assertContains(t, src, `defer error.RecoverMain()`)
+}
+
+func TestCompileWithoutCPUProfileDoesNotInjectRuntimeProfileScaffolding(t *testing.T) {
+	got, err := CompileWithOptLevelAndPath([]byte(`console.log("hi")`), "main", "", "entry.ts", false, 0)
+	if err != nil {
+		t.Fatalf("CompileWithOptLevelAndPath failed: %v", err)
+	}
+	src := string(got)
+	assertNotContains(t, src, `"github.com/nnstd/gun/runtime/profile"`)
+	assertNotContains(t, src, `_gunCPUProfileStop :=`)
+}
+
+func TestCompileWithCPUProfileDoesNotCollideWithUserProfileIdentifier(t *testing.T) {
+	got, err := CompileWithOptLevelAndPathOptions(
+		[]byte(`const _gunprofile_internal = 1; console.log(_gunprofile_internal);`),
+		"main",
+		"",
+		"entry.ts",
+		false,
+		0,
+		&CompileOptions{CPUProfile: &CPUProfileConfig{}},
+	)
+	if err != nil {
+		t.Fatalf("CompileWithOptLevelAndPathOptions failed: %v", err)
+	}
+	src := string(got)
+	assertContains(t, src, `var _gunprofile_internal = jsvalue.NewNumber(float64(1))`)
+	assertContains(t, src, `"github.com/nnstd/gun/runtime/profile"`)
+	assertContains(t, src, `StartCPUProfileOrExit("", "")`)
+}
+
 func TestCompilePackageSanitizesDollarExportsOnNamespaceImport(t *testing.T) {
 	out, err := CompilePackageWithOptLevel(map[string][]byte{
 		"entry.ts": []byte(`import * as core from "./util"; export function main() { return core.$foo; }`),

@@ -46,6 +46,8 @@ Transpile, compile, and execute in one step:
 gun run file.ts
 gun run file.ts -- --flag arg      # pass arguments to the program
 gun run file.ts -O1                # run with pipeline optimizations enabled
+gun run file.ts --cpu-prof         # write a Node-like .cpuprofile for the child binary
+gun run file.ts --cpu-prof-name=app.cpuprofile
 ```
 
 ### Options
@@ -57,6 +59,10 @@ gun run file.ts -O1                # run with pipeline optimizations enabled
 | `-v, --verbose` | Verbose output |
 | `--ast` | Print the tree-sitter AST instead of transpiling |
 | `-O` | Pipeline optimization level: `0`, `1`, or `2` |
+| `--cpu-prof` | For `gun run`, write a `.cpuprofile` for the executed child binary |
+| `--cpu-prof-dir` | Directory for CPU profile output |
+| `--cpu-prof-name` | File name for CPU profile output |
+| `--cpu-prof-interval` | CPU profile interval in microseconds; v1 supports only `1000` |
 
 ## Example
 

@@ -20,6 +20,8 @@ var cli struct {
 	Run       RunCmd       `cmd:"" help:"Transpile, build, and run a TypeScript file."`
 }
 
+const defaultCPUProfIntervalMicros = 1000
+
 type TranspileCmd struct {
 	Input    string `arg:"" help:"Input .ts file or directory."`
 	Output   string `short:"o" help:"Output directory."`
@@ -38,11 +40,15 @@ type BuildCmd struct {
 }
 
 type RunCmd struct {
-	Input    string   `arg:"" help:"Input .ts file."`
-	Pkg      string   `short:"p" default:"main" help:"Go package name."`
-	Verbose  bool     `short:"v" help:"Verbose output."`
-	OptLevel int      `short:"O" default:"0" help:"Optimization level for pipeline transpilation (0, 1, 2)."`
-	Args     []string `arg:"" optional:"" passthrough:"" help:"Arguments to pass to the compiled program."`
+	Input           string   `arg:"" help:"Input .ts file."`
+	Pkg             string   `short:"p" default:"main" help:"Go package name."`
+	Verbose         bool     `short:"v" help:"Verbose output."`
+	OptLevel        int      `short:"O" default:"0" help:"Optimization level for pipeline transpilation (0, 1, 2)."`
+	CPUProf         bool     `help:"Write a CPU profile for the executed child binary."`
+	CPUProfDir      string   `help:"Directory for CPU profile output."`
+	CPUProfName     string   `help:"File name for CPU profile output."`
+	CPUProfInterval int      `default:"1000" help:"CPU profile sampling interval in microseconds (v1 only supports 1000)."`
+	Args            []string `arg:"" optional:"" passthrough:"" help:"Arguments to pass to the compiled program."`
 }
 
 func (cmd *TranspileCmd) Run() error {
@@ -69,10 +75,10 @@ func (cmd *TranspileCmd) Run() error {
 
 	// No -o: just print to stdout
 	if cmd.Output == "" {
-		return transpileFile(cmd.Input, "", cmd.Pkg, "", cmd.Verbose, false, cmd.OptLevel)
+		return transpileFile(cmd.Input, "", cmd.Pkg, "", cmd.Verbose, false, cmd.OptLevel, nil)
 	}
 
-	return transpileProject(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose, cmd.OptLevel)
+	return transpileProject(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose, cmd.OptLevel, nil)
 }
 
 func (cmd *BuildCmd) Run() error {
@@ -90,7 +96,7 @@ func (cmd *BuildCmd) Run() error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	if err := transpileProject(cmd.Input, tmpDir, cmd.Pkg, cmd.Verbose, cmd.OptLevel); err != nil {
+	if err := transpileProject(cmd.Input, tmpDir, cmd.Pkg, cmd.Verbose, cmd.OptLevel, nil); err != nil {
 		return err
 	}
 
@@ -104,6 +110,9 @@ func (cmd *BuildCmd) Run() error {
 }
 
 func (cmd *RunCmd) Run() error {
+	if cmd.CPUProfInterval != defaultCPUProfIntervalMicros {
+		return fmt.Errorf("run command only supports --cpu-prof-interval=%d in v1", defaultCPUProfIntervalMicros)
+	}
 	info, err := os.Stat(cmd.Input)
 	if err != nil {
 		return err
@@ -118,7 +127,7 @@ func (cmd *RunCmd) Run() error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	if err := transpileProject(cmd.Input, tmpDir, cmd.Pkg, cmd.Verbose, cmd.OptLevel); err != nil {
+	if err := transpileProject(cmd.Input, tmpDir, cmd.Pkg, cmd.Verbose, cmd.OptLevel, cmd.compileOptions()); err != nil {
 		return err
 	}
 
@@ -148,16 +157,28 @@ func (cmd *RunCmd) Run() error {
 	return nil
 }
 
+func (cmd *RunCmd) compileOptions() *compiler.CompileOptions {
+	if !cmd.CPUProf {
+		return nil
+	}
+	return &compiler.CompileOptions{
+		CPUProfile: &compiler.CPUProfileConfig{
+			Dir:  cmd.CPUProfDir,
+			Name: cmd.CPUProfName,
+		},
+	}
+}
+
 // transpileProject transpiles a .ts entry file and all its relative imports
 // into outDir, then scaffolds a go.mod so the result is go-buildable.
-func transpileProject(input, outDir, pkg string, verbose bool, optLevel int) error {
+func transpileProject(input, outDir, pkg string, verbose bool, optLevel int, opts *compiler.CompileOptions) error {
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		return err
 	}
 
 	moduleName := "gunrun"
 	goFile := filepath.Join(outDir, strings.TrimSuffix(filepath.Base(input), ".ts")+".go")
-	if err := transpileFile(input, goFile, pkg, moduleName, verbose, false, optLevel); err != nil {
+	if err := transpileFile(input, goFile, pkg, moduleName, verbose, false, optLevel, opts); err != nil {
 		return err
 	}
 
@@ -165,11 +186,11 @@ func transpileProject(input, outDir, pkg string, verbose bool, optLevel int) err
 	if inputDir == "" {
 		inputDir = "."
 	}
-	if err := transpileRelativeImports(input, inputDir, outDir, moduleName, verbose, optLevel); err != nil {
+	if err := transpileRelativeImports(input, inputDir, outDir, moduleName, verbose, optLevel, opts); err != nil {
 		return err
 	}
 
-	if err := transpileNodeModuleImports(input, inputDir, outDir, moduleName, verbose, optLevel); err != nil {
+	if err := transpileNodeModuleImports(input, inputDir, outDir, moduleName, verbose, optLevel, opts); err != nil {
 		return err
 	}
 
@@ -211,7 +232,7 @@ func main() {
 	}
 }
 
-func transpileFile(inputPath, outputPath, pkgName, moduleName string, verbose, samePackageImports bool, optLevel int) error {
+func transpileFile(inputPath, outputPath, pkgName, moduleName string, verbose, samePackageImports bool, optLevel int, opts *compiler.CompileOptions) error {
 	source, err := os.ReadFile(inputPath)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", inputPath, err)
@@ -225,7 +246,7 @@ func transpileFile(inputPath, outputPath, pkgName, moduleName string, verbose, s
 		moduleName = detectModuleName(inputPath)
 	}
 
-	result, err := compiler.CompileWithOptLevelAndPath(source, pkgName, moduleName, inputPath, samePackageImports, optLevel)
+	result, err := compiler.CompileWithOptLevelAndPathOptions(source, pkgName, moduleName, inputPath, samePackageImports, optLevel, opts)
 	if err != nil {
 		return fmt.Errorf("compile %s: %w", inputPath, err)
 	}
@@ -265,7 +286,7 @@ func transpileDir(dirPath, outputDir, pkgName string, verbose bool, optLevel int
 			return err
 		}
 
-		return transpileFile(path, outPath, pkgName, "", verbose, false, optLevel)
+		return transpileFile(path, outPath, pkgName, "", verbose, false, optLevel, nil)
 	})
 }
 
@@ -435,16 +456,16 @@ func resolveImportFile(importPath, fromDir string) (string, error) {
 
 // transpileRelativeImports recursively discovers and transpiles relative imports
 // from a TS entry file into the correct subdirectories of tmpDir.
-func transpileRelativeImports(entryFile, inputDir, tmpDir, moduleName string, verbose bool, optLevel int) error {
+func transpileRelativeImports(entryFile, inputDir, tmpDir, moduleName string, verbose bool, optLevel int, opts *compiler.CompileOptions) error {
 	absInputDir, err := filepath.Abs(inputDir)
 	if err != nil {
 		return err
 	}
 	visited := map[string]bool{}
-	return walkImports(entryFile, absInputDir, absInputDir, tmpDir, moduleName, verbose, visited, optLevel)
+	return walkImports(entryFile, absInputDir, absInputDir, tmpDir, moduleName, verbose, visited, optLevel, opts)
 }
 
-func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose bool, visited map[string]bool, optLevel int) error {
+func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose bool, visited map[string]bool, optLevel int, opts *compiler.CompileOptions) error {
 	absFile, _ := filepath.Abs(tsFile)
 	if visited[absFile] {
 		return nil
@@ -496,12 +517,12 @@ func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose b
 		}
 
 		outFile := filepath.Join(outDir, filepath.Base(strings.TrimSuffix(resolved, ".ts"))+".go")
-		if err := transpileFile(resolved, outFile, pkgName, moduleName, verbose, false, optLevel); err != nil {
+		if err := transpileFile(resolved, outFile, pkgName, moduleName, verbose, false, optLevel, opts); err != nil {
 			return err
 		}
 
 		// Recurse into this file's imports
-		if err := walkImports(resolved, inputDir, baseDir, tmpDir, moduleName, verbose, visited, optLevel); err != nil {
+		if err := walkImports(resolved, inputDir, baseDir, tmpDir, moduleName, verbose, visited, optLevel, opts); err != nil {
 			return err
 		}
 	}
@@ -807,14 +828,14 @@ func splitPkgSubpath(pkgName string) (string, string) {
 
 // transpileNodeModuleImports discovers and transpiles node_modules dependencies
 // from the entry file and all its relative imports.
-func transpileNodeModuleImports(entryFile, inputDir, tmpDir, moduleName string, verbose bool, optLevel int) error {
+func transpileNodeModuleImports(entryFile, inputDir, tmpDir, moduleName string, verbose bool, optLevel int, opts *compiler.CompileOptions) error {
 	absInputDir, _ := filepath.Abs(inputDir)
 
 	// Collect all source files (entry + relative imports) to scan
 	sourceFiles := collectAllSourceFiles(entryFile)
 
 	visited := map[string]bool{}
-	return processNodeModuleImports(sourceFiles, absInputDir, tmpDir, moduleName, verbose, visited, optLevel)
+	return processNodeModuleImports(sourceFiles, absInputDir, tmpDir, moduleName, verbose, visited, optLevel, opts)
 }
 
 // collectAllSourceFiles returns the entry file plus all transitively-imported relative files.
@@ -854,7 +875,7 @@ func collectAllSourceFiles(entryFile string) []string {
 	return files
 }
 
-func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName string, verbose bool, visited map[string]bool, optLevel int) error {
+func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName string, verbose bool, visited map[string]bool, optLevel int, opts *compiler.CompileOptions) error {
 	var newSourceFiles []string
 
 	for _, srcFile := range sourceFiles {
@@ -902,7 +923,7 @@ func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName
 			}
 
 			// Discover all files in this package and compile together
-			allPkgFiles, err := transpileNodeModuleAsPackage(entryPath, outDir, moduleName, sanitized, verbose, optLevel)
+			allPkgFiles, err := transpileNodeModuleAsPackage(entryPath, outDir, moduleName, sanitized, verbose, optLevel, opts)
 			if err != nil {
 				return fmt.Errorf("transpile node_module %s: %w", pkgName, err)
 			}
@@ -912,14 +933,14 @@ func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName
 
 	// Recursively process any node_module imports found in the newly transpiled packages
 	if len(newSourceFiles) > 0 {
-		return processNodeModuleImports(newSourceFiles, inputDir, tmpDir, moduleName, verbose, visited, optLevel)
+		return processNodeModuleImports(newSourceFiles, inputDir, tmpDir, moduleName, verbose, visited, optLevel, opts)
 	}
 	return nil
 }
 
 // transpileNodeModuleAsPackage discovers all files in an npm package and compiles
 // them together using CompilePackage, so cross-file exports are shared.
-func transpileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string, verbose bool, optLevel int) ([]string, error) {
+func transpileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string, verbose bool, optLevel int, opts *compiler.CompileOptions) ([]string, error) {
 	// Phase 1: Discover all files in the package
 	files := map[string][]byte{}
 	allPaths := []string{}
@@ -976,7 +997,7 @@ func transpileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string,
 	}
 
 	// Phase 2: Compile all files together
-	results, err := compiler.CompilePackageWithOptLevel(files, pkgName, moduleName, absEntry, optLevel)
+	results, err := compiler.CompilePackageWithOptLevelOptions(files, pkgName, moduleName, absEntry, optLevel, opts)
 	if err != nil {
 		return nil, err
 	}

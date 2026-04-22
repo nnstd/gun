@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/nnstd/gun/runtime/profile"
 )
 
 // ValueType represents the JavaScript type tag.
@@ -70,6 +72,7 @@ type JSValue struct {
 	symbolID         uint64
 	prototype        *JSValue
 	funcVal          func(...*JSValue) *JSValue
+	profileFrame     *profile.Frame
 	isArr            bool // true when this JSValue has array semantics (even if empty)
 	isMethod         bool // true for class methods that expect this as _args[0]
 	frozen           bool // true for interned singletons; Set/DefineProperty no-op
@@ -386,6 +389,31 @@ func NewArenaFunction(fn func(...*JSValue) *JSValue) *JSValue {
 	}
 }
 
+// NewProfiledFunction creates a function JSValue with explicit JS-facing profiling metadata.
+func NewProfiledFunction(functionName, file string, line, column int, fn func(...*JSValue) *JSValue) *JSValue {
+	v := NewFunction(fn)
+	v.profileFrame = &profile.Frame{
+		FunctionName: functionName,
+		File:         file,
+		Line:         line,
+		Column:       column,
+	}
+	return v
+}
+
+// NewProfiledArenaFunction creates an arena-aware function JSValue with explicit
+// JS-facing profiling metadata.
+func NewProfiledArenaFunction(functionName, file string, line, column int, fn func(...*JSValue) *JSValue) *JSValue {
+	v := NewArenaFunction(fn)
+	v.profileFrame = &profile.Frame{
+		FunctionName: functionName,
+		File:         file,
+		Line:         line,
+		Column:       column,
+	}
+	return v
+}
+
 // Type returns the pre-computed type tag.
 func (v *JSValue) Type() ValueType {
 	return v.typ
@@ -686,6 +714,10 @@ func (v *JSValue) Call(args ...*JSValue) *JSValue {
 		return NewUndefined()
 	}
 	if v.funcVal != nil {
+		if v.profileFrame != nil {
+			leave := profile.EnterFrame(*v.profileFrame)
+			defer leave()
+		}
 		return v.funcVal(args...)
 	}
 	return NewUndefined()
