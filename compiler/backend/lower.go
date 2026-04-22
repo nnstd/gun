@@ -1622,7 +1622,7 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 
 	var stmts []ast.Stmt
 
-	if l.arenaEnabled && !hirBodyContainsNestedClosure(body) {
+	if l.arenaEnabled && hirBodyNeedsArena(body) && !hirBodyContainsNestedClosure(body) {
 		l.jsvalueImport()
 		l.hasArenaVar++
 		defer func() { l.hasArenaVar-- }()
@@ -1790,7 +1790,7 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 	}
 	var stmts []ast.Stmt
 	l.jsvalueImport()
-	if l.arenaEnabled && !hirBodyContainsNestedClosure(body) {
+	if l.arenaEnabled && hirBodyNeedsArena(body) && !hirBodyContainsNestedClosure(body) {
 		l.hasArenaVar++
 		defer func() { l.hasArenaVar-- }()
 		stmts = append(stmts, &ast.DeclStmt{Decl: varDecl("_arena", ptrType(selectorExpr(goIdent("jsvalue"), "Arena")), nil)})
@@ -2452,6 +2452,161 @@ func stmtReferencesIdent(s ast.Stmt, name string) bool {
 		return !found
 	})
 	return found
+}
+
+func hirBodyNeedsArena(body *hir.BlockStmt) bool {
+	if body == nil {
+		return false
+	}
+	needsArena := false
+	var walkExpr func(e hir.Expr)
+	var walkStmt func(s hir.Stmt)
+	walkExpr = func(e hir.Expr) {
+		if needsArena || e == nil {
+			return
+		}
+		switch e := e.(type) {
+		case *hir.BinaryExpr:
+			switch e.Op {
+			case hir.OpAdd, hir.OpSub, hir.OpMul, hir.OpDiv, hir.OpMod:
+				needsArena = true
+				return
+			}
+			walkExpr(e.Left)
+			walkExpr(e.Right)
+		case *hir.UnaryExpr:
+			if e.Op == hir.OpNeg {
+				needsArena = true
+				return
+			}
+			walkExpr(e.Operand)
+		case *hir.UpdateExpr:
+			walkExpr(e.Operand)
+		case *hir.AssignExpr:
+			walkExpr(e.Left)
+			walkExpr(e.Right)
+		case *hir.CallExpr:
+			walkExpr(e.Func)
+			for _, a := range e.Args {
+				walkExpr(a)
+			}
+		case *hir.NewExpr:
+			walkExpr(e.Callee)
+			for _, a := range e.Args {
+				walkExpr(a)
+			}
+		case *hir.MemberExpr:
+			walkExpr(e.Object)
+		case *hir.ComputedMemberExpr:
+			walkExpr(e.Object)
+			walkExpr(e.Property)
+		case *hir.TernaryExpr:
+			walkExpr(e.Cond)
+			walkExpr(e.Then)
+			walkExpr(e.Else)
+		case *hir.ArrayLiteral:
+			for _, el := range e.Elements {
+				walkExpr(el)
+			}
+		case *hir.ObjectLiteral:
+			for _, p := range e.Properties {
+				if p.Computed {
+					walkExpr(p.Key)
+				}
+				walkExpr(p.Value)
+			}
+		case *hir.TemplateLiteral:
+			for _, p := range e.Parts {
+				walkExpr(p)
+			}
+		case *hir.TaggedTemplateLiteral:
+			walkExpr(e.Tag)
+			if e.Template != nil {
+				for _, p := range e.Template.Parts {
+					walkExpr(p)
+				}
+			}
+		case *hir.SequenceExpr:
+			for _, ex := range e.Exprs {
+				walkExpr(ex)
+			}
+		case *hir.SpreadExpr:
+			walkExpr(e.Value)
+		case *hir.AwaitExpr:
+			walkExpr(e.Value)
+		case *hir.YieldExpr:
+			walkExpr(e.Value)
+		case *hir.TypeAssertExpr:
+			walkExpr(e.Expr)
+		case *hir.NonNullExpr:
+			walkExpr(e.Expr)
+		case *hir.ParenExpr:
+			walkExpr(e.Expr)
+		}
+	}
+	walkStmt = func(s hir.Stmt) {
+		if needsArena || s == nil {
+			return
+		}
+		switch s := s.(type) {
+		case *hir.ExprStmt:
+			walkExpr(s.Expr)
+		case *hir.ReturnStmt:
+			walkExpr(s.Value)
+		case *hir.IfStmt:
+			walkExpr(s.Cond)
+			walkStmt(s.Then)
+			walkStmt(s.Else)
+		case *hir.ForStmt:
+			walkStmt(s.Init)
+			walkExpr(s.Cond)
+			walkExpr(s.Post)
+			walkStmt(s.Body)
+		case *hir.ForOfStmt:
+			walkExpr(s.Value)
+			walkStmt(s.Body)
+		case *hir.ForInStmt:
+			walkExpr(s.Value)
+			walkStmt(s.Body)
+		case *hir.WhileStmt:
+			walkExpr(s.Cond)
+			walkStmt(s.Body)
+		case *hir.DoWhileStmt:
+			walkStmt(s.Body)
+			walkExpr(s.Cond)
+		case *hir.SwitchStmt:
+			walkExpr(s.Tag)
+			for _, c := range s.Cases {
+				walkExpr(c.Value)
+				for _, st := range c.Body {
+					walkStmt(st)
+				}
+			}
+		case *hir.TryCatchStmt:
+			walkStmt(s.Try)
+			if s.Catch != nil {
+				walkStmt(s.Catch.Body)
+			}
+			walkStmt(s.Finally)
+		case *hir.BlockStmt:
+			if s == nil {
+				return
+			}
+			for _, st := range s.Stmts {
+				walkStmt(st)
+			}
+		case *hir.VarDecl:
+			for _, d := range s.Declarators {
+				walkExpr(d.Init)
+			}
+		case *hir.ThrowStmt:
+			walkExpr(s.Value)
+		case *hir.LabeledStmt:
+			walkStmt(s.Stmt)
+		}
+	}
+	walkStmt(body)
+	return needsArena
 }
 
 func hirBodyContainsNestedClosure(body *hir.BlockStmt) bool {

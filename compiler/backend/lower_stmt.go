@@ -519,6 +519,13 @@ func (l *Lowerer) lowerDoWhileStmt(s *hir.DoWhileStmt) *ast.ForStmt {
 }
 
 func (l *Lowerer) lowerSwitchStmt(s *hir.SwitchStmt) *ast.SwitchStmt {
+	if tag, cases, ok := l.lowerStaticStringSwitch(s); ok {
+		return &ast.SwitchStmt{
+			Tag:  tag,
+			Body: &ast.BlockStmt{List: cases},
+		}
+	}
+
 	tag := l.lowerExpr(s.Tag)
 
 	var cases []ast.Stmt
@@ -539,6 +546,42 @@ func (l *Lowerer) lowerSwitchStmt(s *hir.SwitchStmt) *ast.SwitchStmt {
 		Tag:  tag,
 		Body: &ast.BlockStmt{List: cases},
 	}
+}
+
+func staticStringSwitchCaseValue(e hir.Expr) (string, bool) {
+	switch e := e.(type) {
+	case *hir.Literal:
+		if e.Kind == hir.LitString {
+			return e.Value, true
+		}
+	case *hir.ParenExpr:
+		return staticStringSwitchCaseValue(e.Expr)
+	}
+	return "", false
+}
+
+func (l *Lowerer) lowerStaticStringSwitch(s *hir.SwitchStmt) (ast.Expr, []ast.Stmt, bool) {
+	if s == nil || s.Tag == nil || !l.exprIsJSValue(s.Tag) {
+		return nil, nil, false
+	}
+	var cases []ast.Stmt
+	for _, c := range s.Cases {
+		cc := &ast.CaseClause{}
+		if c.Value != nil {
+			key, ok := staticStringSwitchCaseValue(c.Value)
+			if !ok {
+				return nil, nil, false
+			}
+			cc.List = []ast.Expr{stringLit(key)}
+		}
+		for _, st := range c.Body {
+			if gs := l.lowerStmt(st); gs != nil {
+				cc.Body = append(cc.Body, gs)
+			}
+		}
+		cases = append(cases, cc)
+	}
+	return callExpr(selectorExpr(l.lowerExpr(s.Tag), "String")), cases, true
 }
 
 func (l *Lowerer) lowerTryCatchStmt(s *hir.TryCatchStmt) ast.Stmt {
@@ -896,18 +939,15 @@ func (l *Lowerer) lowerAssignStmt(assign *hir.AssignExpr) ast.Stmt {
 	if comp, ok := assign.Left.(*hir.ComputedMemberExpr); ok {
 		if l.exprIsJSValue(comp.Object) {
 			l.jsvalueImport()
-			l.addImport("fmt")
 			obj := l.lowerExpr(comp.Object)
-			key := l.lowerExpr(comp.Property)
+			key := l.lowerComputedPropertyKeyExpr(comp.Property)
 			val := l.wrapAsJSValue(right)
 			if assign.Op != hir.OpAssign {
 				helperName := mapAssignOpToJSValue(assign.Op)
-				current := callExpr(selectorExpr(obj, "Get"),
-					callExpr(selectorExpr(goIdent("fmt"), "Sprint"), key))
+				current := callExpr(selectorExpr(obj, "Get"), key)
 				val = callExpr(selectorExpr(goIdent("jsvalue"), helperName), current, val)
 			}
-			return exprStmt(callExpr(selectorExpr(obj, "Set"),
-				callExpr(selectorExpr(goIdent("fmt"), "Sprint"), key), val))
+			return exprStmt(callExpr(selectorExpr(obj, "Set"), key, val))
 		}
 	}
 
@@ -943,10 +983,10 @@ func (l *Lowerer) lowerUpdateStmt(update *hir.UpdateExpr) ast.Stmt {
 	}
 	if cmem, ok := update.Operand.(*hir.ComputedMemberExpr); ok {
 		obj := l.lowerExpr(cmem.Object)
-		prop := l.lowerExpr(cmem.Property)
-		getExpr := callExpr(selectorExpr(obj, "Get"), callExpr(selectorExpr(goIdent("fmt"), "Sprint"), prop))
+		prop := l.lowerComputedPropertyKeyExpr(cmem.Property)
+		getExpr := callExpr(selectorExpr(obj, "Get"), prop)
 		incExpr := callExpr(selectorExpr(goIdent("jsvalue"), helperName), getExpr)
-		return exprStmt(callExpr(selectorExpr(obj, "Set"), callExpr(selectorExpr(goIdent("fmt"), "Sprint"), prop), incExpr))
+		return exprStmt(callExpr(selectorExpr(obj, "Set"), prop, incExpr))
 	}
 	operand := l.lowerExpr(update.Operand)
 	return assignStmt([]ast.Expr{operand},

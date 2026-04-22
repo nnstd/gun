@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/nnstd/gun/compiler/context"
@@ -64,10 +65,7 @@ func (l *Lowerer) lowerExpr(e hir.Expr) ast.Expr {
 
 	case *hir.ComputedMemberExpr:
 		obj := l.lowerExpr(e.Object)
-		idx := l.lowerExpr(e.Property)
-		l.addImport("fmt")
-		out = callExpr(selectorExpr(obj, "Get"),
-			callExpr(selectorExpr(goIdent("fmt"), "Sprint"), idx))
+		out = callExpr(selectorExpr(obj, "Get"), l.lowerComputedPropertyKeyExpr(e.Property))
 
 	case *hir.TernaryExpr:
 		out = l.lowerTernaryExpr(e)
@@ -852,18 +850,15 @@ func (l *Lowerer) lowerAssignExpr(e *hir.AssignExpr) ast.Expr {
 	// Computed member assignment: obj[key] = val → IIFE { obj.Set(key, val); return val }
 	if comp, ok := e.Left.(*hir.ComputedMemberExpr); ok && l.exprIsJSValue(comp.Object) {
 		l.jsvalueImport()
-		l.addImport("fmt")
 		obj := l.lowerExpr(comp.Object)
-		key := l.lowerExpr(comp.Property)
+		key := l.lowerComputedPropertyKeyExpr(comp.Property)
 		val := l.wrapAsJSValue(right)
 		if e.Op != hir.OpAssign {
 			helperName := mapAssignOpToJSValue(e.Op)
-			current := callExpr(selectorExpr(obj, "Get"),
-				callExpr(selectorExpr(goIdent("fmt"), "Sprint"), key))
+			current := callExpr(selectorExpr(obj, "Get"), key)
 			val = callExpr(selectorExpr(goIdent("jsvalue"), helperName), current, val)
 		}
-		setCall := callExpr(selectorExpr(obj, "Set"),
-			callExpr(selectorExpr(goIdent("fmt"), "Sprint"), key), val)
+		setCall := callExpr(selectorExpr(obj, "Set"), key, val)
 		return &ast.CallExpr{
 			Fun: &ast.FuncLit{
 				Type: &ast.FuncType{Params: fieldList(), Results: fieldList(goField("", jsValuePtrType()))},
@@ -995,11 +990,9 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 	// This ensures 'this' is passed correctly for method calls via computed keys.
 	if comp, ok := e.Func.(*hir.ComputedMemberExpr); ok && l.exprIsJSValue(comp.Object) {
 		l.jsvalueImport()
-		l.addImport("fmt")
 		obj := l.lowerExpr(comp.Object)
-		key := l.lowerExpr(comp.Property)
 		argExprs, hasSpread := l.lowerCallArgs(e.Args, true)
-		methodKey := callExpr(selectorExpr(goIdent("fmt"), "Sprint"), key)
+		methodKey := l.lowerComputedPropertyKeyExpr(comp.Property)
 		wrappedArgs := append([]ast.Expr{methodKey}, argExprs...)
 		if !l.isSimpleExpr(obj) {
 			recv := goIdent("_recv")
@@ -1461,6 +1454,37 @@ func (l *Lowerer) lowerPrivateMethodCall(mem *hir.MemberExpr, args []ast.Expr, h
 func (l *Lowerer) isThisExpr(e hir.Expr) bool {
 	_, ok := e.(*hir.ThisExpr)
 	return ok
+}
+
+func staticComputedPropertyKey(e hir.Expr) (string, bool) {
+	switch e := e.(type) {
+	case *hir.Literal:
+		switch e.Kind {
+		case hir.LitString:
+			return e.Value, true
+		case hir.LitNumber:
+			clean := strings.ReplaceAll(e.Value, "_", "")
+			if clean == "" || strings.ContainsAny(clean, ".eE") {
+				return "", false
+			}
+			n, err := strconv.ParseInt(clean, 10, 64)
+			if err != nil || n < 0 {
+				return "", false
+			}
+			return strconv.FormatInt(n, 10), true
+		}
+	case *hir.ParenExpr:
+		return staticComputedPropertyKey(e.Expr)
+	}
+	return "", false
+}
+
+func (l *Lowerer) lowerComputedPropertyKeyExpr(e hir.Expr) ast.Expr {
+	if key, ok := staticComputedPropertyKey(e); ok {
+		return stringLit(key)
+	}
+	l.addImport("fmt")
+	return callExpr(selectorExpr(goIdent("fmt"), "Sprint"), l.lowerExpr(e))
 }
 
 func describeHIRExpr(e hir.Expr) string {

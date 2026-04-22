@@ -28,13 +28,17 @@ func parseTS(t *testing.T, source string) *sitter.Tree {
 
 // lowerTS parses TypeScript, builds HIR, lowers to Go AST, and generates Go source.
 func lowerTS(t *testing.T, source string) string {
+	return lowerTSOpt(t, source, context.O0)
+}
+
+func lowerTSOpt(t *testing.T, source string, opt context.OptLevel) string {
 	t.Helper()
 	tree := parseTS(t, source)
 	defer tree.Close()
 
 	mod := hir.BuildModule(tree.RootNode(), []byte(source), "main")
 	ctx := context.New()
-	file := Lower(mod, ctx, "", false, context.O0)
+	file := Lower(mod, ctx, "", false, opt)
 	out, err := Generate(file)
 	if err != nil {
 		t.Fatalf("generate failed: %v", err)
@@ -965,6 +969,109 @@ func TestClassMethodsAreMarkedAsMethod(t *testing.T) {
 		}
 	`)
 	assertContains(t, out, "MarkAsMethod")
+}
+
+func TestClassGetterWithoutArenaWorkDoesNotAllocateArena(t *testing.T) {
+	out := lowerTSOpt(t, `
+		class Foo {
+			get value() { return this.name; }
+		}
+	`, context.O2)
+	assertNotContains(t, out, "GetArena")
+	assertNotContains(t, out, "ReleaseArena")
+	assertNotContains(t, out, "NewArenaFunction")
+}
+
+func TestFunctionWithArithmeticUsesArena(t *testing.T) {
+	out := lowerTSOpt(t, `
+		function add(a, b) {
+			return a + b;
+		}
+	`, context.O2)
+	assertContains(t, out, "GetArena")
+	assertContains(t, out, "ReleaseArena")
+	assertContains(t, out, "AAdd")
+}
+
+func TestFunctionWithOnlyPropertyReadsDoesNotUseArena(t *testing.T) {
+	out := lowerTSOpt(t, `
+		function read(req) {
+			return req.url;
+		}
+	`, context.O2)
+	assertNotContains(t, out, "GetArena")
+	assertNotContains(t, out, "ReleaseArena")
+	assertNotContains(t, out, "NewArenaFunction")
+}
+
+func TestFunctionWithComputedNumericIndexDoesNotUseArena(t *testing.T) {
+	out := lowerTSOpt(t, `
+		function first(arr) {
+			return arr[0];
+		}
+	`, context.O2)
+	assertNotContains(t, out, "GetArena")
+	assertNotContains(t, out, "ReleaseArena")
+	assertContains(t, out, `.Get("0")`)
+}
+
+func TestFunctionWithConstantDefaultValueDoesNotUseArena(t *testing.T) {
+	out := lowerTSOpt(t, `
+		function redirect(status) {
+			return status ?? 302;
+		}
+	`, context.O2)
+	assertNotContains(t, out, "GetArena")
+	assertNotContains(t, out, "ReleaseArena")
+}
+
+func TestFunctionWithOnlyIncrementDoesNotUseArena(t *testing.T) {
+	out := lowerTSOpt(t, `
+		function bump(i) {
+			i++;
+			return i;
+		}
+	`, context.O2)
+	assertNotContains(t, out, "GetArena")
+	assertNotContains(t, out, "ReleaseArena")
+	assertContains(t, out, "jsvalue.Inc")
+}
+
+func TestAllStringSwitchUsesRawStringSwitch(t *testing.T) {
+	out := lowerTS(t, `
+		function kind(t) {
+			switch (t) {
+				case "string":
+					return 1;
+				case "number":
+					return 2;
+				default:
+					return 3;
+			}
+		}
+	`)
+	assertContains(t, out, `switch (t).String()`)
+	assertContains(t, out, `case "string":`)
+	assertContains(t, out, `case "number":`)
+	assertNotContains(t, out, `case jsvalue.NewString("string")`)
+}
+
+func TestMixedTypeSwitchKeepsJSValueCases(t *testing.T) {
+	out := lowerTS(t, `
+		function kind(t) {
+			switch (t) {
+				case "string":
+					return 1;
+				case 1:
+					return 2;
+				default:
+					return 3;
+			}
+		}
+	`)
+	assertNotContains(t, out, `switch t.String()`)
+	assertContains(t, out, `case jsvalue.NewString("string"):`)
+	assertContains(t, out, `case jsvalue.NewNumber(float64(1)):`)
 }
 
 // --- Member assignment in expression context ---
