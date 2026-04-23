@@ -1,0 +1,7 @@
+listenFamily=IPv4
+message=ping
+family=IPv4
+address=127.0.0.1
+size=4
+receiver=closed
+sender=closed

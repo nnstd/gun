@@ -122,9 +122,9 @@ func TestSetImmediateFires(t *testing.T) {
 	}
 }
 
-func TestServerKeepsAlive(t *testing.T) {
+func TestHandleKeepsAlive(t *testing.T) {
 	el := newTestLoop()
-	el.RegisterServer()
+	el.RegisterHandle()
 
 	done := make(chan struct{})
 	go func() {
@@ -134,17 +134,47 @@ func TestServerKeepsAlive(t *testing.T) {
 
 	select {
 	case <-done:
-		t.Fatal("Run() returned while server was active")
+		t.Fatal("Run() returned while handle was active")
 	case <-time.After(200 * time.Millisecond):
 		// expected: still running
 	}
 
-	el.UnregisterServer()
+	el.UnregisterHandle()
 
 	select {
 	case <-done:
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("Run() did not return after UnregisterServer")
+		t.Fatal("Run() did not return after UnregisterHandle")
+	}
+}
+
+func TestScheduleCallbackRunsOnLoop(t *testing.T) {
+	el := newTestLoop()
+	el.RegisterHandle()
+
+	done := make(chan struct{})
+	go func() {
+		el.Run()
+		close(done)
+	}()
+
+	var called atomic.Bool
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		el.ScheduleCallback(func() {
+			called.Store(true)
+			el.UnregisterHandle()
+		})
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run() did not return after scheduled callback completed")
+	}
+
+	if !called.Load() {
+		t.Fatal("scheduled callback did not run")
 	}
 }
 

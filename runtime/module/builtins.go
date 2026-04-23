@@ -5,6 +5,7 @@ import (
 	"github.com/nnstd/gun/runtime/buffer"
 	"github.com/nnstd/gun/runtime/child_process"
 	"github.com/nnstd/gun/runtime/crypto"
+	"github.com/nnstd/gun/runtime/dgram"
 	"github.com/nnstd/gun/runtime/dns"
 	"github.com/nnstd/gun/runtime/events"
 	"github.com/nnstd/gun/runtime/fs"
@@ -40,6 +41,7 @@ func RegisterBuiltins() {
 	ModuleRegistry["assert"] = assert.AsJSValue
 	ModuleRegistry["module"] = AsJSValue
 	ModuleRegistry["crypto"] = crypto.AsJSValue
+	ModuleRegistry["dgram"] = dgram.AsJSValue
 	ModuleRegistry["util"] = util.AsJSValue
 	ModuleRegistry["child_process"] = child_process.AsJSValue
 	ModuleRegistry["dns"] = dns.AsJSValue

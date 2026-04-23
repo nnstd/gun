@@ -1,0 +1,4 @@
+message=pong
+family=IPv4
+receiver=closed
+sender=closed

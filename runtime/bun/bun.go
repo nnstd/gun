@@ -109,7 +109,7 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 		},
 	}
 
-	eventloop.Default.RegisterServer()
+	eventloop.Default.RegisterHandle()
 
 	serverObj.Set("stop", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		_ = server.Shutdown()
@@ -118,7 +118,7 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 	}))
 
 	go func() {
-		defer eventloop.Default.UnregisterServer()
+		defer eventloop.Default.UnregisterHandle()
 		_ = server.Serve(listener)
 	}()
 

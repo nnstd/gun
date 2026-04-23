@@ -12,7 +12,7 @@ import (
 
 // BuiltinModules is the list of known built-in module names.
 var BuiltinModules = []string{
-	"assert", "buffer", "child_process", "crypto", "dns", "events",
+	"assert", "buffer", "child_process", "crypto", "dgram", "dns", "events",
 	"fs", "http", "https", "module", "os", "path", "process",
 	"stream", "string_decoder", "timers", "url", "util", "v8", "zlib",
 }

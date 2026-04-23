@@ -214,10 +214,10 @@ func init() {
 			Handler: makeRequestHandler(this),
 		}
 
-		eventloop.Default.RegisterServer()
+		eventloop.Default.RegisterHandle()
 
 		go func() {
-			defer eventloop.Default.UnregisterServer()
+			defer eventloop.Default.UnregisterHandle()
 			var serveErr error
 			if si.isTLS {
 				serveErr = si.server.ServeTLSEmbed(ln, si.certPEM, si.keyPEM)

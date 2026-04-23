@@ -703,6 +703,13 @@ func TestRequireStripsNodePrefix(t *testing.T) {
 	}
 }
 
+func TestRequireStripsNodePrefixForDgram(t *testing.T) {
+	mod := buildHIR(t, `const dgram = require("node:dgram");`)
+	if len(mod.Imports) != 1 || mod.Imports[0].ModulePath != "dgram" {
+		t.Fatalf("expected ImportDecl with ModulePath=dgram, got %+v", mod.Imports)
+	}
+}
+
 func TestRequireNamedBindingsBecomeImportDecl(t *testing.T) {
 	mod := buildHIR(t, `const { readFileSync, writeFileSync } = require("fs");`)
 	if len(mod.Imports) != 1 {

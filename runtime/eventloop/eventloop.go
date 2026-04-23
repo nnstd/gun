@@ -19,7 +19,7 @@ type activeJob struct {
 // alive while timers or I/O handles are active.
 type EventLoop struct {
 	jobCount    atomic.Int64  // active timers + immediates
-	handleCount atomic.Int64  // active I/O (servers)
+	handleCount atomic.Int64  // active I/O handles
 	jobChan     chan func()   // timer/immediate callbacks — buffered
 	wakeupChan  chan struct{} // wake from select when counts change
 	nextJobID   atomic.Int64
@@ -52,15 +52,26 @@ func (el *EventLoop) wake() {
 	}
 }
 
-// RegisterServer increments the I/O handle count, keeping the loop alive.
-func (el *EventLoop) RegisterServer() {
+// RegisterHandle increments the I/O handle count, keeping the loop alive.
+func (el *EventLoop) RegisterHandle() {
 	el.handleCount.Add(1)
+	el.wake()
 }
 
-// UnregisterServer decrements the I/O handle count and wakes the loop.
-func (el *EventLoop) UnregisterServer() {
+// UnregisterHandle decrements the I/O handle count and wakes the loop.
+func (el *EventLoop) UnregisterHandle() {
 	el.handleCount.Add(-1)
 	el.wake()
+}
+
+// RegisterServer is a backward-compatible alias for RegisterHandle.
+func (el *EventLoop) RegisterServer() {
+	el.RegisterHandle()
+}
+
+// UnregisterServer is a backward-compatible alias for UnregisterHandle.
+func (el *EventLoop) UnregisterServer() {
+	el.UnregisterHandle()
 }
 
 // TrackPromise increments the job count to keep the event loop alive while a promise is pending.
@@ -78,7 +89,17 @@ func (el *EventLoop) SettlePromise() {
 // The microtask increments jobCount on schedule and decrements it on completion.
 // Used by Promise resolution to dispatch .then()/.catch() handlers asynchronously.
 func (el *EventLoop) ScheduleMicrotask(fn func()) {
-	ctx := profile.CaptureContext()
+	el.scheduleCallback(profile.CaptureContext(), fn)
+}
+
+// ScheduleCallback enqueues an I/O or runtime callback on the event loop.
+// Unlike handle registration, it keeps the loop alive only until the queued
+// callback has run.
+func (el *EventLoop) ScheduleCallback(fn func()) {
+	el.scheduleCallback(profile.CaptureContext(), fn)
+}
+
+func (el *EventLoop) scheduleCallback(ctx *profile.ContextToken, fn func()) {
 	el.jobCount.Add(1)
 	el.jobChan <- func() {
 		defer func() { recover() }()

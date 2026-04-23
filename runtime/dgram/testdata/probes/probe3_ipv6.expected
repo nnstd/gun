@@ -1,0 +1,4 @@
+message=ipv6
+family=IPv6
+receiver=closed
+sender=closed

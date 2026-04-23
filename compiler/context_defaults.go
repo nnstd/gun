@@ -950,6 +950,11 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 		GoPkgName:    "dns",
 		UseAsJSValue: true,
 	})
+	ctx.RegisterModule("dgram", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/dgram",
+		GoPkgName:    "dgram",
+		UseAsJSValue: true,
+	})
 	ctx.RegisterModule("dns/promises", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/dns",
 		GoPkgName:    "dns",

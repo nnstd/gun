@@ -82,7 +82,7 @@ func ClientRequest(isTLS, autoEnd bool, args ...*jsvalue.JSValue) *jsvalue.JSVal
 
 	registerClient(this, ci)
 
-	eventloop.Default.RegisterServer()
+	eventloop.Default.RegisterHandle()
 
 	if autoEnd {
 		go func() {
@@ -301,7 +301,7 @@ func (ci *clientInternal) dispatchRequest(this *jsvalue.JSValue) {
 		clientRegistryMu.Lock()
 		delete(clientRegistry, this)
 		clientRegistryMu.Unlock()
-		eventloop.Default.UnregisterServer()
+		eventloop.Default.UnregisterHandle()
 		return
 	}
 
@@ -311,7 +311,7 @@ func (ci *clientInternal) dispatchRequest(this *jsvalue.JSValue) {
 	this.MethodCall("emit", jsvalue.NewString("response"), respMsg)
 
 	go func() {
-		defer eventloop.Default.UnregisterServer()
+		defer eventloop.Default.UnregisterHandle()
 		if len(body) > 0 {
 			respMsg.MethodCall("emit", jsvalue.NewString("data"), jsvalue.NewString(string(body)))
 		}
