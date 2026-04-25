@@ -1,6 +1,8 @@
 import { ArrowLeft, ArrowRight } from 'lucide-react'
-import { startTransition, useMemo, useState, type ReactNode } from 'react'
-import { CodeBlock, InlineCode, Note, SiteFooter, SiteHeader, Tag } from '../components/site'
+import { startTransition, useMemo, useState } from 'react'
+import { allBlogs } from 'content-collections'
+import { MarkdownContent } from '../components/markdown'
+import { SiteFooter, SiteHeader, Tag } from '../components/site'
 
 type Post = {
   slug: string
@@ -13,185 +15,10 @@ type Post = {
   author: string
   authorRole: string
   featured?: boolean
+  html: string
 }
 
-export const POSTS: Post[] = [
-  {
-    slug: 'introducing-gun',
-    tag: 'Announcement',
-    date: 'Apr 2, 2026',
-    title: 'Introducing Gun: JavaScript to Go transpiler',
-    excerpt:
-      'We are open-sourcing Gun, a tool that compiles JavaScript and TypeScript plus their npm dependencies into valid Go code that ships as a single static binary.',
-    readTime: '6 min',
-    color: '#a0a0ff',
-    author: 'Sasha K.',
-    authorRole: 'Founder',
-    featured: true,
-  },
-  {
-    slug: 'jsvalue-runtime',
-    tag: 'Deep Dive',
-    date: 'Apr 8, 2026',
-    title: 'Inside the JSValue runtime: how Gun preserves JS semantics',
-    excerpt:
-      'Go is statically typed. JavaScript is not. Here is how a single tagged-union type bridges the gap without a VM or interpreter.',
-    readTime: '9 min',
-    color: '#4eca8a',
-    author: 'Mira P.',
-    authorRole: 'Runtime',
-  },
-  {
-    slug: 'npm-deps',
-    tag: 'Feature',
-    date: 'Apr 14, 2026',
-    title: 'Transpiling npm dependencies: the full story',
-    excerpt:
-      'Gun does not stop at your app code. It walks node_modules and transpiles every package along the way, including the ugly edge cases.',
-    readTime: '7 min',
-    color: '#f5c542',
-    author: 'Devin H.',
-    authorRole: 'Compiler',
-  },
-  {
-    slug: 'bun-node-compat',
-    tag: 'Compat',
-    date: 'Apr 17, 2026',
-    title: 'Node.js and Bun API compatibility in Gun',
-    excerpt:
-      'Which built-ins are supported today, what is on the roadmap, and how the compatibility layer stays testable across two ecosystems.',
-    readTime: '5 min',
-    color: '#4dd0e8',
-    author: 'Yuki T.',
-    authorRole: 'Compat',
-  },
-  {
-    slug: 'treesitter',
-    tag: 'Internals',
-    date: 'Apr 19, 2026',
-    title: 'Why we use Tree-sitter for parsing JavaScript',
-    excerpt:
-      'Tree-sitter gives Gun incremental parsing, error recovery, and embedded-language support, all of which matter when watch mode is part of the product.',
-    readTime: '8 min',
-    color: '#f472b6',
-    author: 'Mira P.',
-    authorRole: 'Runtime',
-  },
-  {
-    slug: 'april-fools',
-    tag: 'Fun',
-    date: 'Apr 1, 2026',
-    title: 'We are pivoting to a pixel-art mascot. Permanently.',
-    excerpt:
-      'After exhaustive deliberation and a heated 7 to 6 vote, the Gun team has reached a unanimous decision. The mascot stays and nobody regrets it.',
-    readTime: '1 min',
-    color: '#f5c542',
-    author: 'The Gun Team',
-    authorRole: 'Mascot Committee',
-  },
-]
-
-const POST_CONTENT: Record<string, ReactNode> = {
-  'introducing-gun': (
-    <>
-      <PostParagraph>
-        Today we are open-sourcing <strong className="text-white">Gun</strong>, a JavaScript-to-Go transpiler that converts your entire JS or TS codebase, including npm dependencies, into valid compilable Go.
-      </PostParagraph>
-      <PostHeading>The problem</PostHeading>
-      <PostParagraph>
-        JavaScript is fast to write, but Node.js still carries startup, runtime, and memory overhead. Rewriting a service in Go yields huge wins, but it is expensive and usually means abandoning the npm ecosystem that made the original system practical.
-      </PostParagraph>
-      <PostParagraph>Gun&apos;s answer is simple: do not rewrite. Transpile.</PostParagraph>
-      <PostHeading>How it works</PostHeading>
-      <PostParagraph>
-        Gun uses Tree-sitter to parse the source, runs a type-flow analysis pass, then emits Go that uses the <InlineCode>jsvalue</InlineCode> runtime to preserve JavaScript semantics.
-      </PostParagraph>
-      <CodeBlock lang="bash" code={`npm i -g gun-transpiler\ngun transpile server.js -o server.go\ngo run server.go`} />
-      <Note type="tip">
-        Gun transpiles npm dependencies too, not just your own code. If your app uses <InlineCode>express</InlineCode> or <InlineCode>axios</InlineCode>, those move through the pipeline with the rest of the graph.
-      </Note>
-      <PostHeading>What&apos;s next</PostHeading>
-      <PostParagraph>
-        We are working on broader Bun API coverage, faster watch-mode rebuilds, and more source map polish. The current landing rewrite is part of making that surface more honest.
-      </PostParagraph>
-    </>
-  ),
-  'jsvalue-runtime': (
-    <>
-      <PostParagraph>
-        Go is statically typed. JavaScript is not. Bridging those worlds without a full interpreter requires a careful design. This is the story of <InlineCode>*jsvalue.JSValue</InlineCode>.
-      </PostParagraph>
-      <PostHeading>The core type</PostHeading>
-      <PostParagraph>
-        Every value in Gun-transpiled code, numbers, strings, arrays, objects, and functions, becomes a tagged union carrying its JavaScript type alongside its Go storage.
-      </PostParagraph>
-      <CodeBlock lang="go" code={`var n = jsvalue.NewNumber(float64(42))\nvar s = jsvalue.NewString("hello")\nvar b = jsvalue.NewBool(true)\nvar o = jsvalue.ObjectFrom(map[string]any{\n    "name": jsvalue.NewString("gun"),\n})`} />
-      <PostHeading>Property access</PostHeading>
-      <PostParagraph>
-        Dynamic property access is handled via <InlineCode>.Get()</InlineCode> and <InlineCode>.Set()</InlineCode>. Method calls use <InlineCode>.MethodCall()</InlineCode>, which mirrors JavaScript lookup semantics closely enough for real application code.
-      </PostParagraph>
-    </>
-  ),
-  'npm-deps': (
-    <>
-      <PostParagraph>
-        One of Gun&apos;s most ambitious features is full npm dependency transpilation. When you run <InlineCode>gun transpile</InlineCode>, it does not stop at your source tree.
-      </PostParagraph>
-      <PostHeading>Why this matters</PostHeading>
-      <PostParagraph>
-        A typical Node.js app has hundreds of dependencies. If only your own files were transpiled, the output would still need a JavaScript runtime to execute the rest of the graph.
-      </PostParagraph>
-      <CodeBlock lang="bash" code={`gun transpile src/index.js -o go/`} />
-      <PostHeading>Handling edge cases</PostHeading>
-      <PostParagraph>
-        Some packages ship native addons. Gun handles that through aliases so those packages can be redirected to hand-written Go equivalents when needed.
-      </PostParagraph>
-      <CodeBlock lang="js" code={`export default {\n  aliases: {\n    bcrypt: 'github.com/my/bcrypt-go',\n  },\n}`} />
-    </>
-  ),
-  'bun-node-compat': (
-    <>
-      <PostParagraph>
-        Gun ships with a compatibility layer that implements the most commonly used Node.js and Bun APIs. The practical question is coverage, not ideology.
-      </PostParagraph>
-      <div className="grid gap-4 sm:grid-cols-2">
-        {[
-          ['http / https', 'createServer, request, fetch'],
-          ['fs', 'readFile, writeFile, stat, watch'],
-          ['path', 'join, resolve, dirname, basename'],
-          ['console', 'log, error, warn, table'],
-          ['process', 'env, argv, exit, cwd'],
-          ['timers', 'setTimeout, setInterval, clearTimeout'],
-          ['events', 'EventEmitter'],
-          ['stream', 'Readable, Writable, Transform'],
-        ].map(([module, methods]) => (
-          <div key={module} className="rounded-2xl border border-white/10 bg-brand-500/10 px-4 py-4">
-            <div className="font-mono text-[12px] font-bold text-cyan-300">{module}</div>
-            <div className="mt-2 text-sm leading-6 text-white/60">{methods}</div>
-          </div>
-        ))}
-      </div>
-    </>
-  ),
-  treesitter: (
-    <>
-      <PostParagraph>
-        Choosing a parser is one of the most consequential decisions in a transpiler&apos;s design. We evaluated several options before settling on Tree-sitter.
-      </PostParagraph>
-      <PostHeading>Why Tree-sitter</PostHeading>
-      <PostParagraph>
-        Incremental parsing, error recovery, and embeddable grammars matter a lot when the same engine powers both cold builds and watch-mode rebuilds. Tree-sitter handles that without dragging a language server into the compiler core.
-      </PostParagraph>
-    </>
-  ),
-  'april-fools': (
-    <>
-      <PostParagraph>
-        The mascot committee met, the votes were cast, and the conclusion was completely serious. Probably. The mascot stays because the repo would break without it.
-      </PostParagraph>
-    </>
-  ),
-}
+export const POSTS: Post[] = [...allBlogs]
 
 export function BlogPage() {
   const [filter, setFilter] = useState('All')
@@ -323,7 +150,6 @@ function PostCard({ post, onClick }: { post: Post; onClick: () => void }) {
 }
 
 function PostPage({ post, onOpen, onBack }: { post: Post; onOpen: (post: Post) => void; onBack: (post?: Post) => void }) {
-  const content = POST_CONTENT[post.slug] ?? <PostParagraph>Content coming soon.</PostParagraph>
   const currentIndex = POSTS.findIndex((entry) => entry.slug === post.slug)
   const newer = currentIndex > 0 ? POSTS[currentIndex - 1] : null
   const older = currentIndex < POSTS.length - 1 ? POSTS[currentIndex + 1] : null
@@ -356,7 +182,9 @@ function PostPage({ post, onOpen, onBack }: { post: Post; onOpen: (post: Post) =
 
       <div className="mt-10 h-px bg-[linear-gradient(90deg,rgba(102,107,215,0.7),transparent)]" />
 
-      <article className="mt-10 max-w-3xl space-y-6">{content}</article>
+      <article className="mt-10 max-w-3xl">
+        <MarkdownContent html={post.html} />
+      </article>
 
       <div className="mt-16 grid gap-4 border-t border-white/10 pt-8 md:grid-cols-2">
         {older ? <SiblingCard direction="older" post={older} onClick={() => onOpen(older)} /> : <div />}
@@ -379,12 +207,4 @@ function SiblingCard({ direction, post, onClick }: { direction: 'older' | 'newer
       <div className="mt-1 text-sm font-semibold leading-6 text-white">{post.title}</div>
     </button>
   )
-}
-
-function PostHeading({ children }: { children: ReactNode }) {
-  return <h2 className="font-syne text-[1.75rem] font-extrabold tracking-[-0.04em] text-white">{children}</h2>
-}
-
-function PostParagraph({ children }: { children: ReactNode }) {
-  return <p className="text-[16px] leading-8 text-white/65">{children}</p>
 }

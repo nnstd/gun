@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { POSTS } from '../pages/blog-page'
 import { ALL_PAGES, DOC_PAGES } from '../pages/docs-page'
 import { BENCHMARK_ROWS, FAQS, PILLARS, TRUSTED_BY } from '../pages/landing-page'
@@ -20,8 +22,16 @@ describe('landing routes', () => {
   })
 
   it('keeps blog metadata and featured post selection intact', () => {
+    const blogDir = join(process.cwd(), 'src/content/blog')
+    const files = readdirSync(blogDir).filter((file) => file.endsWith('.md'))
+
+    expect(files).toHaveLength(6)
+    expect(files).toContain('introducing-gun.md')
+
+    const introPost = readFileSync(join(blogDir, 'introducing-gun.md'), 'utf8')
+    expect(introPost).toMatch(/slug: introducing-gun/)
+    expect(introPost).toMatch(/## The problem/)
+
     expect(POSTS.some((post) => post.featured && post.slug === 'introducing-gun')).toBe(true)
-    expect(POSTS).toHaveLength(6)
-    expect(POSTS.map((post) => post.tag)).toContain('Deep Dive')
   })
 })

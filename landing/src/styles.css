@@ -17,15 +17,17 @@
   --color-fog-700: #5d5d7c;
   --color-fog-800: #44445a;
 
-  --font-syne: 'Syne', sans-serif;
-  --font-jetbrains: 'JetBrains Mono', monospace;
-  --font-space: 'Space Grotesk', sans-serif;
+  --font-syne: "Syne", sans-serif;
+  --font-jetbrains: "JetBrains Mono", monospace;
+  --font-space: "Space Grotesk", sans-serif;
 
   --animate-float: float 4s ease-in-out infinite;
 }
 
 @layer base {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     box-sizing: border-box;
   }
 
@@ -41,13 +43,21 @@
     line-height: 1.55;
     color: var(--color-fog-100);
     background:
-      radial-gradient(ellipse 70% 50% at 80% -10%, rgba(66, 68, 147, 0.55) 0%, transparent 60%),
-      radial-gradient(ellipse 50% 40% at 0% 30%, rgba(66, 68, 147, 0.32) 0%, transparent 55%),
+      radial-gradient(
+        ellipse 70% 50% at 80% -10%,
+        rgba(66, 68, 147, 0.55) 0%,
+        transparent 60%
+      ),
+      radial-gradient(
+        ellipse 50% 40% at 0% 30%,
+        rgba(66, 68, 147, 0.32) 0%,
+        transparent 55%
+      ),
       linear-gradient(180deg, #08080f 0%, #090914 100%);
   }
 
   body::before {
-    content: '';
+    content: "";
     position: fixed;
     inset: 0;
     pointer-events: none;
@@ -56,7 +66,11 @@
       linear-gradient(rgba(66, 68, 147, 0.06) 1px, transparent 1px),
       linear-gradient(90deg, rgba(66, 68, 147, 0.06) 1px, transparent 1px);
     background-size: 64px 64px;
-    mask-image: radial-gradient(ellipse 80% 70% at 50% 30%, #000 0%, transparent 75%);
+    mask-image: radial-gradient(
+      ellipse 80% 70% at 50% 30%,
+      #000 0%,
+      transparent 75%
+    );
   }
 
   a {
@@ -83,8 +97,13 @@
 }
 
 @keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-12px); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
 }
 
 @layer utilities {
@@ -98,5 +117,22 @@
 
   .bg-panel-hi {
     background-color: rgba(22, 22, 42, 0.96);
+  }
+}
+
+@layer components {
+  .shiki-demo {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    font-family: var(--font-jetbrains);
+    font-size: inherit;
+    line-height: normal;
+  }
+
+  .shiki-demo__code {
+    display: block;
+    white-space: pre;
+    font: inherit;
   }
 }

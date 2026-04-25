@@ -12,6 +12,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@content-collections/core": "^0.15.0",
+    "@content-collections/markdown": "^0.1.4",
+    "@content-collections/vite": "^0.3.0",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "latest",
     "@tanstack/react-router": "latest",
@@ -34,9 +37,11 @@
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.1",
     "jsdom": "^28.1.0",
+    "shiki": "^4.0.2",
     "typescript": "^5.7.2",
     "vite": "^8.0.0",
-    "vitest": "^3.0.5"
+    "vitest": "^3.0.5",
+    "zod": "^4.3.6"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
