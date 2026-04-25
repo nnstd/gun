@@ -33,6 +33,37 @@
 
   html {
     scroll-behavior: smooth;
+    background: #08080f;
+    color-scheme: dark;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(143, 149, 255, 0.72) #08080f;
+  }
+
+  ::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #08080f;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border: 3px solid #08080f;
+    border-radius: 999px;
+    background: linear-gradient(
+      180deg,
+      rgba(143, 149, 255, 0.8) 0%,
+      rgba(66, 68, 147, 0.92) 100%
+    );
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(
+      180deg,
+      rgba(185, 191, 255, 0.88) 0%,
+      rgba(102, 107, 215, 0.96) 100%
+    );
   }
 
   body {
