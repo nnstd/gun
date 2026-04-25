@@ -12,7 +12,6 @@ function cx(...parts: Array<string | false | null | undefined>) {
 
 const NAV_ITEMS = [
   { label: "Docs", href: "/docs", page: "docs" as const },
-  { label: "Playground", href: "/#playground", page: "home" as const },
   { label: "Benchmarks", href: "/#benchmarks", page: "home" as const },
   { label: "Examples", href: "/#examples", page: "home" as const },
   { label: "Blog", href: "/blog", page: "blog" as const },
@@ -23,7 +22,6 @@ const FOOTER_COLUMNS = [
     title: "Product",
     links: [
       { label: "Docs", href: "/docs" },
-      { label: "Playground", href: "/#playground" },
       { label: "Benchmarks", href: "/#benchmarks" },
       { label: "Changelog", href: "#" },
       { label: "Roadmap", href: "#" },
@@ -203,11 +201,11 @@ export function SiteFooter() {
           ))}
         </div>
 
-        <div className="flex flex-col gap-3 pt-6 font-mono text-[11px] uppercase tracking-[0.12em] text-white/35 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 pt-6 font-mono text-[11px] tracking-[0.12em] text-white/35 sm:flex-row sm:items-center sm:justify-between">
           <div>MIT / Copyright 2026 the gun project</div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
             <span>
-              <span className="mr-2 text-green-400">*</span>
+              <span className="mr-2 inline-block h-1.5 w-1.5 rounded-full bg-green-400 align-middle shadow-[0_0_6px_rgba(74,222,128,0.9)]" />
               all systems normal
             </span>
             <span>v1.0.2 / go1.22+</span>
@@ -602,6 +600,74 @@ export function MascotMark({ size = 28 }: { size?: number }) {
         fill="none"
         strokeLinecap="round"
       />
+    </svg>
+  );
+}
+
+export function MascotNotFound({ size = 240 }: { size?: number }) {
+  return (
+    <svg
+      viewBox="0 0 200 200"
+      fill="none"
+      className="relative animate-float drop-shadow-[0_16px_48px_rgba(66,68,147,0.5)]"
+      style={{ width: size, height: size }}
+      aria-hidden="true"
+    >
+      <defs>
+        <radialGradient id={`mascot-not-found-${size}`} cx="40%" cy="35%" r="65%">
+          <stop offset="0%" stopColor="#6666d4" />
+          <stop offset="100%" stopColor="#2a2a72" />
+        </radialGradient>
+        <radialGradient id={`mascot-not-found-shine-${size}`} cx="35%" cy="30%" r="65%">
+          <stop offset="0%" stopColor="white" stopOpacity="0.15" />
+          <stop offset="100%" stopColor="white" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+      <circle cx="100" cy="96" r="80" fill={`url(#mascot-not-found-${size})`} />
+      <ellipse cx="82" cy="54" rx="18" ry="22" fill="#3535a0" />
+      <ellipse cx="118" cy="54" rx="18" ry="22" fill="#3535a0" />
+      <circle cx="100" cy="96" r="76" fill={`url(#mascot-not-found-${size})`} />
+      <circle cx="100" cy="96" r="76" fill={`url(#mascot-not-found-shine-${size})`} />
+      <ellipse
+        cx="78"
+        cy="62"
+        rx="28"
+        ry="16"
+        fill="white"
+        opacity="0.08"
+        transform="rotate(-15 78 62)"
+      />
+      <circle cx="78" cy="92" r="18" fill="white" />
+      <circle cx="122" cy="92" r="18" fill="white" />
+      <circle cx="86" cy="94" r="11" fill="#0f0f2e" />
+      <circle cx="116" cy="94" r="11" fill="#0f0f2e" />
+      <circle cx="91" cy="88" r="4.5" fill="white" opacity="0.95" />
+      <circle cx="121" cy="88" r="4.5" fill="white" opacity="0.95" />
+      <ellipse cx="100" cy="128" rx="5" ry="6" fill="#0f0f2e" />
+      <ellipse cx="56" cy="114" rx="16" ry="9" fill="#f472b6" opacity="0.22" />
+      <ellipse cx="144" cy="114" rx="16" ry="9" fill="#f472b6" opacity="0.22" />
+      <text
+        x="148"
+        y="44"
+        fontFamily="Syne, sans-serif"
+        fontSize="36"
+        fontWeight="800"
+        fill="#a0a0ff"
+        opacity="0.85"
+      >
+        ?
+      </text>
+      <text
+        x="40"
+        y="58"
+        fontFamily="Syne, sans-serif"
+        fontSize="22"
+        fontWeight="800"
+        fill="#a0a0ff"
+        opacity="0.5"
+      >
+        ?
+      </text>
     </svg>
   );
 }

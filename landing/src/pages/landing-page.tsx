@@ -240,10 +240,10 @@ export function LandingPage() {
             <div className="mt-10 flex flex-wrap items-center gap-3.5">
               <InstallTabs size="lg" />
               <a
-                href="#playground"
+                href="/docs"
                 className="inline-flex items-center gap-2 rounded-xl border border-brand-300/40 px-5.5 py-3.25 text-sm font-medium text-white transition hover:bg-brand-500/10"
               >
-                Try in playground
+                Read documentation
                 <ArrowRight className="h-4 w-4" />
               </a>
             </div>

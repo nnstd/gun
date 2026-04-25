@@ -4,7 +4,7 @@ import { TanStackDevtools } from '@tanstack/react-devtools'
 import { AlertTriangle, ArrowLeft, ArrowRight, Home, RefreshCw } from 'lucide-react'
 
 import appCss from '../styles.css?url'
-import { Mascot, MascotMark, SiteFooter } from '../components/site'
+import { Mascot, MascotMark, MascotNotFound } from '../components/site'
 
 export const Route = createRootRoute({
   head: () => ({
@@ -58,7 +58,7 @@ function NotFoundPage() {
     <ErrorShell
       eyebrow="ERR_PATH_NOT_RESOLVED"
       eyebrowAccent="amber"
-      code="404"
+      code={<><span className="bg-[linear-gradient(135deg,#a0a0ff_0%,#7c7ee8_50%,#424493_100%)] bg-clip-text text-transparent">4</span><span className="text-white drop-shadow-[0_0_60px_rgba(66,68,147,0.4)]">0</span><span className="bg-[linear-gradient(135deg,#a0a0ff_0%,#7c7ee8_50%,#424493_100%)] bg-clip-text text-transparent">4</span></>}
       title="This route never made it through the transpiler."
       description="Gun walked the dependency graph and came back empty-handed. The page you tried to open does not exist, or it moved while no one was watching."
       panel={
@@ -101,9 +101,9 @@ function NotFoundPage() {
         <div className="border-t border-white/10 pt-6">
           <div className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-brand-300">Probably what you wanted</div>
           <div className="mt-4 flex flex-col gap-3 text-sm text-white/60">
-            <Link to="/" hash="playground" className="inline-flex items-center gap-2 transition hover:text-white">
+            <Link to="/docs" className="inline-flex items-center gap-2 transition hover:text-white">
               <ArrowRight className="h-4 w-4 text-brand-300" />
-              Playground
+              Documentation
             </Link>
             <Link to="/" hash="benchmarks" className="inline-flex items-center gap-2 transition hover:text-white">
               <ArrowRight className="h-4 w-4 text-brand-300" />
@@ -123,12 +123,8 @@ function NotFoundPage() {
       footerStatus="all systems normal; this page just is not one of them"
       mascot={
         <div className="relative flex items-center justify-center">
-          <div className="absolute h-[280px] w-[280px] rounded-full bg-[radial-gradient(circle,rgba(66,68,147,0.35)_0%,transparent_70%)]" />
-          <div className="relative">
-            <Mascot size={240} />
-            <div className="absolute -right-2 top-2 font-syne text-4xl font-extrabold text-brand-200/80">?</div>
-            <div className="absolute left-0 top-8 font-syne text-2xl font-extrabold text-brand-200/45">?</div>
-          </div>
+          <div className="absolute h-[360px] w-[360px] rounded-full bg-[radial-gradient(circle,rgba(66,68,147,0.4)_0%,transparent_70%)]" />
+          <MascotNotFound size={320} />
         </div>
       }
     />
@@ -216,7 +212,7 @@ function ErrorShell({
 }: {
   eyebrow: string
   eyebrowAccent: 'amber' | 'rose'
-  code: string
+  code: React.ReactNode
   title: string
   description: string
   panel: React.ReactNode
@@ -256,7 +252,7 @@ function ErrorShell({
             <span className={`h-2 w-2 rounded-full shadow-[0_0_10px_currentColor] ${dotClass}`} />
             {eyebrow}
           </div>
-          <h1 className="font-syne text-[clamp(7rem,16vw,14rem)] font-extrabold leading-[0.82] tracking-[-0.06em] text-white">
+          <h1 className="font-syne text-[clamp(7.5rem,18vw,15rem)] font-extrabold leading-[0.85] tracking-[-0.06em] text-white">
             {code}
           </h1>
           <h2 className="mt-2 max-w-3xl font-syne text-[clamp(1.8rem,4vw,2.75rem)] font-extrabold leading-[1.02] tracking-tighter text-white">
@@ -271,10 +267,15 @@ function ErrorShell({
         <aside>{mascot}</aside>
       </main>
 
-      <SiteFooter />
-      <div className="mx-auto max-w-370 px-5 pb-8 sm:px-8 lg:px-12">
-        <div className="border-t border-white/10 pt-5 font-mono text-[12px] text-white/35">{footerStatus}</div>
-      </div>
+      <footer className="border-t border-white/10">
+        <div className="mx-auto flex max-w-370 flex-col gap-3 px-5 py-6 font-mono text-[12px] text-white/35 sm:px-8 lg:flex-row lg:items-center lg:justify-between lg:px-12">
+          <div>MIT · © 2026 the gun project</div>
+          <div className="flex items-center gap-2">
+            <span className={`inline-block h-1.5 w-1.5 rounded-full shadow-[0_0_6px_currentColor] ${eyebrowAccent === 'rose' ? 'bg-rose-300 text-rose-300' : 'bg-green-400 text-green-400'}`} />
+            <span>{footerStatus}</span>
+          </div>
+        </div>
+      </footer>
     </div>
   )
 }
