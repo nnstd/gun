@@ -1,0 +1,102 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #eef0ff;
+  --color-brand-100: #d9dcff;
+  --color-brand-200: #b9bfff;
+  --color-brand-300: #8f95ff;
+  --color-brand-400: #666bd7;
+  --color-brand-500: #424493;
+  --color-brand-600: #2d2f6b;
+  --color-ink-950: #08080f;
+  --color-ink-900: #10101e;
+  --color-ink-850: #16162a;
+  --color-fog-100: #e8e8f4;
+  --color-fog-300: #b8b8cc;
+  --color-fog-500: #8888aa;
+  --color-fog-700: #5d5d7c;
+  --color-fog-800: #44445a;
+
+  --font-syne: 'Syne', sans-serif;
+  --font-jetbrains: 'JetBrains Mono', monospace;
+  --font-space: 'Space Grotesk', sans-serif;
+
+  --animate-float: float 4s ease-in-out infinite;
+}
+
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    overflow-x: hidden;
+    font-family: var(--font-space);
+    line-height: 1.55;
+    color: var(--color-fog-100);
+    background:
+      radial-gradient(ellipse 70% 50% at 80% -10%, rgba(66, 68, 147, 0.55) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 40% at 0% 30%, rgba(66, 68, 147, 0.32) 0%, transparent 55%),
+      linear-gradient(180deg, #08080f 0%, #090914 100%);
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.55;
+    background-image:
+      linear-gradient(rgba(66, 68, 147, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(66, 68, 147, 0.06) 1px, transparent 1px);
+    background-size: 64px 64px;
+    mask-image: radial-gradient(ellipse 80% 70% at 50% 30%, #000 0%, transparent 75%);
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  #app {
+    position: relative;
+    isolation: isolate;
+  }
+
+  ::selection {
+    background: rgba(102, 107, 215, 0.55);
+    color: white;
+  }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .bg-panel {
+    background-color: rgba(16, 16, 30, 0.88);
+  }
+
+  .bg-panel-hi {
+    background-color: rgba(22, 22, 42, 0.96);
+  }
+}

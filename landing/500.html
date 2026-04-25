@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>500 — internal error · gun</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #08080f;
+  --panel: #10101e;
+  --border: rgba(66,68,147,0.25);
+  --border-hi: rgba(66,68,147,0.55);
+  --text: #e8e8f4;
+  --muted: #8888aa;
+  --dim: #5c5cb8;
+  --faint: #44445a;
+  --primary: #424493;
+  --primary-hi: #6666cc;
+  --green: #4eca8a;
+  --amber: #f5c542;
+  --pink: #f472b6;
+  --red: #ff7a8a;
+}
+html, body { height: 100%; }
+body {
+  font-family: 'Space Grotesk', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.55;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+body::before {
+  content:''; position:fixed; inset:0; z-index:0; pointer-events:none;
+  background-image:
+    radial-gradient(ellipse 70% 50% at 80% -10%, rgba(244,114,182,0.18) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 40% at 0% 30%, rgba(66,68,147,0.4) 0%, transparent 55%);
+}
+body::after {
+  content:''; position:fixed; inset:0; z-index:0; pointer-events:none; opacity:0.55;
+  background-image:
+    linear-gradient(rgba(66,68,147,0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(66,68,147,0.06) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 30%, #000 0%, transparent 75%);
+}
+main, header, footer { position: relative; z-index: 1; }
+::selection { background: var(--primary); color: #fff; }
+
+@keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-12px)} }
+@keyframes glow-pulse-red { 0%,100%{transform:scale(1);opacity:.6} 50%{transform:scale(1.08);opacity:1} }
+@keyframes blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+@keyframes shake {
+  0%,100%{transform:translate(0,0)}
+  20%{transform:translate(-2px,1px)}
+  40%{transform:translate(2px,-1px)}
+  60%{transform:translate(-1px,1px)}
+  80%{transform:translate(1px,-1px)}
+}
+
+header.nav {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 48px;
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(14px);
+  background: rgba(8,8,15,0.72);
+}
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.brand-name {
+  font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 800;
+  letter-spacing: -0.5px; color: var(--text);
+}
+.nav-back {
+  font-family: 'JetBrains Mono', monospace; font-size: 12px;
+  color: var(--muted); text-decoration: none;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 14px; border-radius: 8px;
+  border: 1px solid var(--border);
+  transition: border-color 0.18s, color 0.18s, background 0.18s;
+}
+.nav-back:hover { color: var(--text); border-color: var(--border-hi); background: rgba(66,68,147,0.08); }
+
+main {
+  flex: 1; display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  align-items: center; gap: 80px;
+  padding: 60px 48px;
+  max-width: 1480px; width: 100%; margin: 0 auto;
+}
+
+.eyebrow {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--red);
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 6px 12px; border-radius: 100px;
+  background: rgba(255,122,138,0.08); border: 1px solid rgba(255,122,138,0.3);
+  margin-bottom: 28px;
+}
+.eyebrow .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--red); box-shadow: 0 0 8px var(--red);
+  animation: blink 0.9s infinite;
+}
+
+h1.code {
+  font-family: 'Syne', sans-serif;
+  font-size: clamp(120px, 18vw, 240px);
+  font-weight: 800;
+  letter-spacing: -0.06em;
+  line-height: 0.85;
+  margin-bottom: 8px;
+  display: flex; align-items: baseline;
+}
+h1.code .d {
+  background: linear-gradient(135deg, #ffb1bd 0%, #ff7a8a 50%, #c43d50 100%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shake 0.18s ease-in-out 6;
+  animation-iteration-count: 1;
+}
+
+.tagline {
+  font-family: 'Syne', sans-serif;
+  font-size: clamp(28px, 3.4vw, 44px);
+  font-weight: 800;
+  letter-spacing: -1.2px;
+  line-height: 1.05;
+  margin-bottom: 18px;
+  color: var(--text);
+}
+.lede {
+  font-size: 16px; color: var(--muted);
+  line-height: 1.65; max-width: 480px;
+  margin-bottom: 28px;
+}
+
+/* Stack-trace panel */
+.trace {
+  font-family: 'JetBrains Mono', monospace;
+  background: #0a0a14;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 28px;
+  max-width: 600px;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.4);
+}
+.trace-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255,122,138,0.05);
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--red);
+}
+.trace-head .dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--red);
+  box-shadow: 0 0 8px var(--red);
+}
+.trace-head .meta { margin-left: auto; color: var(--faint); font-size: 10px; letter-spacing: 0.1em; }
+.trace-body {
+  padding: 14px 18px;
+  font-size: 12px; line-height: 1.85;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+.trace-body .err-line { color: var(--red); font-weight: 600; }
+.trace-body .frame { display: block; }
+.trace-body .frame .at { color: var(--faint); }
+.trace-body .frame .fn { color: var(--text); }
+.trace-body .frame .file { color: var(--dim); }
+.trace-body .frame.highlight { background: rgba(255,122,138,0.06); margin: 0 -18px; padding: 0 18px; border-left: 2px solid var(--red); }
+
+.actions {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+  margin-bottom: 32px;
+}
+.btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 13px 22px; border-radius: 10px;
+  font-size: 14px; font-weight: 600;
+  text-decoration: none; transition: all 0.18s;
+  font-family: 'Space Grotesk', sans-serif;
+  border: none; cursor: pointer;
+}
+.btn.primary {
+  background: var(--primary); color: #fff;
+  box-shadow: 0 0 28px rgba(66,68,147,0.45);
+}
+.btn.primary:hover { background: var(--primary-hi); transform: translateY(-1px); }
+.btn.ghost {
+  color: var(--text);
+  border: 1px solid var(--border-hi);
+  background: transparent;
+}
+.btn.ghost:hover { background: rgba(66,68,147,0.1); }
+
+.helpline {
+  border-top: 1px solid var(--border);
+  padding-top: 22px;
+  font-size: 13px; color: var(--muted);
+  max-width: 540px;
+}
+.helpline .label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--dim); margin-bottom: 10px;
+}
+.helpline a { color: var(--text); text-decoration: underline; text-decoration-color: var(--border-hi); }
+.helpline a:hover { text-decoration-color: var(--text); }
+
+/* Mascot — sad / glitched */
+.mascot-stage {
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+}
+.mascot-glow {
+  position: absolute; width: 360px; height: 360px;
+  background: radial-gradient(circle, rgba(255,122,138,0.18) 0%, transparent 70%);
+  border-radius: 50%;
+  animation: glow-pulse-red 2.4s ease-in-out infinite;
+}
+.mascot-svg {
+  position: relative;
+  width: 320px;
+  animation: float 4s ease-in-out infinite;
+  filter: drop-shadow(0 16px 48px rgba(120,30,40,0.45));
+}
+
+footer {
+  border-top: 1px solid var(--border);
+  padding: 24px 48px;
+  display: flex; justify-content: space-between;
+  font-size: 12px; color: var(--faint);
+  font-family: 'JetBrains Mono', monospace;
+}
+footer .status .dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--red); margin-right: 6px;
+  box-shadow: 0 0 6px var(--red);
+}
+
+@media (max-width: 900px) {
+  main { grid-template-columns: 1fr; gap: 40px; padding: 40px 24px; }
+  .mascot-svg { width: 240px; }
+  .mascot-glow { width: 280px; height: 280px; }
+  header.nav, footer { padding-left: 24px; padding-right: 24px; }
+}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <a class="brand" href="Gun Landing Page.html">
+    <svg width="32" height="32" viewBox="0 0 200 200" fill="none" style="filter: drop-shadow(0 0 8px rgba(66,68,147,0.6));">
+      <defs>
+        <radialGradient id="navmm" cx="40%" cy="35%" r="65%">
+          <stop offset="0%" stop-color="#6666d4"/><stop offset="100%" stop-color="#2a2a72"/>
+        </radialGradient>
+      </defs>
+      <ellipse cx="82" cy="54" rx="18" ry="22" fill="#3535a0"/>
+      <ellipse cx="118" cy="54" rx="18" ry="22" fill="#3535a0"/>
+      <circle cx="100" cy="96" r="80" fill="url(#navmm)"/>
+      <circle cx="78" cy="92" r="18" fill="white"/>
+      <circle cx="122" cy="92" r="18" fill="white"/>
+      <circle cx="80" cy="94" r="11" fill="#0f0f2e"/>
+      <circle cx="124" cy="94" r="11" fill="#0f0f2e"/>
+      <circle cx="85" cy="88" r="4.5" fill="white"/>
+      <circle cx="129" cy="88" r="4.5" fill="white"/>
+      <path d="M82 120 Q100 136 118 120" stroke="#0f0f2e" stroke-width="6" fill="none" stroke-linecap="round"/>
+    </svg>
+    <span class="brand-name">gun</span>
+  </a>
+  <a href="Gun Landing Page.html" class="nav-back">
+    <span style="opacity:0.7;">←</span> Back to gun
+  </a>
+</header>
+
+<main>
+  <section>
+    <div class="eyebrow">
+      <span class="dot"></span>
+      ERR_RUNTIME_PANIC
+    </div>
+    <h1 class="code"><span class="d">5</span><span class="d">0</span><span class="d">0</span></h1>
+    <h2 class="tagline">Something panicked on our side.</h2>
+    <p class="lede">
+      An uncaught error reached the top of the event loop. It's not your fault — and it's not yours to fix. We've already been notified, and the trace is on its way to a real human.
+    </p>
+
+    <div class="trace">
+      <div class="trace-head">
+        <span class="dot"></span>
+        <span>panic · uncaught error</span>
+        <span class="meta" id="trace-meta">incident #—</span>
+      </div>
+      <div class="trace-body"><span class="err-line">JSValue.TypeError: Cannot read properties of undefined (reading 'response')</span>
+
+<span class="frame highlight"><span class="at">  at</span> <span class="fn">handleRequest</span> (<span class="file">runtime/http/server.go:142</span>)</span>
+<span class="frame"><span class="at">  at</span> <span class="fn">eventloop.tick</span> (<span class="file">runtime/eventloop/loop.go:88</span>)</span>
+<span class="frame"><span class="at">  at</span> <span class="fn">main.serve</span> (<span class="file">build/main.go:31</span>)</span>
+<span class="frame"><span class="at">  at</span> <span class="fn">runtime.goexit</span> (<span class="file">go/src/runtime/asm_amd64.s:1650</span>)</span></div>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" onclick="location.reload()">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+          <path d="M11.5 5A4.5 4.5 0 1 0 12 8.2" stroke="white" stroke-width="1.6" stroke-linecap="round"/>
+          <path d="M12 2.5V5h-2.5" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Try again
+      </button>
+      <a href="Gun Landing Page.html" class="btn ghost">Back to home</a>
+    </div>
+
+    <div class="helpline">
+      <div class="label">If this keeps happening</div>
+      <p>
+        Check <a href="#">status.gun.dev</a> for live incidents, or open an issue on <a href="#">GitHub</a> with the incident ID above. For runtime errors in your own builds, see the <a href="Gun Landing Page.html#docs">debugging guide</a>.
+      </p>
+    </div>
+  </section>
+
+  <aside class="mascot-stage" aria-hidden="true">
+    <div class="mascot-glow"></div>
+    <svg class="mascot-svg" viewBox="0 0 200 200" fill="none">
+      <defs>
+        <radialGradient id="mb1" cx="40%" cy="35%" r="65%">
+          <stop offset="0%" stop-color="#6666d4"/><stop offset="100%" stop-color="#2a2a72"/>
+        </radialGradient>
+        <radialGradient id="mb2" cx="35%" cy="30%" r="65%">
+          <stop offset="0%" stop-color="white" stop-opacity="0.15"/>
+          <stop offset="100%" stop-color="white" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <circle cx="100" cy="96" r="80" fill="url(#mb1)"/>
+      <ellipse cx="82" cy="54" rx="18" ry="22" fill="#3535a0"/>
+      <ellipse cx="118" cy="54" rx="18" ry="22" fill="#3535a0"/>
+      <circle cx="100" cy="96" r="76" fill="url(#mb1)"/>
+      <circle cx="100" cy="96" r="76" fill="url(#mb2)"/>
+      <ellipse cx="78" cy="62" rx="28" ry="16" fill="white" opacity="0.08" transform="rotate(-15 78 62)"/>
+      <!-- X eyes — knocked out -->
+      <g stroke="#0f0f2e" stroke-width="4" stroke-linecap="round">
+        <line x1="68" y1="84" x2="86" y2="100"/>
+        <line x1="86" y1="84" x2="68" y2="100"/>
+        <line x1="114" y1="84" x2="132" y2="100"/>
+        <line x1="132" y1="84" x2="114" y2="100"/>
+      </g>
+      <!-- Frown -->
+      <path d="M80 134 Q100 118 120 134" stroke="#0f0f2e" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+      <ellipse cx="56" cy="114" rx="16" ry="9" fill="#f472b6" opacity="0.18"/>
+      <ellipse cx="144" cy="114" rx="16" ry="9" fill="#f472b6" opacity="0.18"/>
+      <!-- Bandage on top -->
+      <g transform="translate(72 24) rotate(-12)">
+        <rect x="0" y="0" width="44" height="14" rx="3" fill="#f5c542" opacity="0.9"/>
+        <rect x="0" y="0" width="44" height="14" rx="3" fill="none" stroke="#c89b1f" stroke-width="0.8"/>
+        <circle cx="8" cy="7" r="1.2" fill="#c89b1f"/>
+        <circle cx="36" cy="7" r="1.2" fill="#c89b1f"/>
+        <circle cx="22" cy="3" r="1.2" fill="#c89b1f"/>
+        <circle cx="22" cy="11" r="1.2" fill="#c89b1f"/>
+      </g>
+      <!-- Stars/dizzy -->
+      <text x="148" y="50" font-family="Syne, sans-serif" font-size="22" font-weight="800" fill="#ff7a8a" opacity="0.9">✦</text>
+      <text x="40" y="64" font-family="Syne, sans-serif" font-size="14" font-weight="800" fill="#ff7a8a" opacity="0.6">✦</text>
+      <text x="160" y="86" font-family="Syne, sans-serif" font-size="10" font-weight="800" fill="#ff7a8a" opacity="0.5">✦</text>
+    </svg>
+  </aside>
+</main>
+
+<footer>
+  <div>MIT · © 2026 the gun project</div>
+  <div class="status"><span class="dot"></span>service degraded · the binary is fine, this request wasn't</div>
+</footer>
+
+<script>
+  // Generate a fake incident id so the page feels grounded
+  try {
+    var id = 'GUN-' + Math.random().toString(36).slice(2,8).toUpperCase();
+    document.getElementById('trace-meta').textContent = 'incident ' + id;
+  } catch(e) {}
+</script>
+</body>
+</html>

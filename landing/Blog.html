@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gun — Blog</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Space Grotesk', sans-serif;
+  background: #08080f; color: #e8e8f4; min-height: 100vh; line-height: 1.55;
+  overflow-x: hidden;
+}
+body::before {
+  content:''; position:fixed; inset:0; z-index:0; pointer-events:none;
+  background-image:
+    radial-gradient(ellipse 60% 40% at 80% -10%, rgba(66,68,147,0.5) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 30% at 0% 30%, rgba(66,68,147,0.3) 0%, transparent 55%);
+}
+body::after {
+  content:''; position:fixed; inset:0; z-index:0; pointer-events:none; opacity:0.45;
+  background-image:
+    linear-gradient(rgba(66,68,147,0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(66,68,147,0.05) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 30%, #000 0%, transparent 75%);
+}
+#root { position: relative; z-index: 1; }
+::selection { background: #424493; color: #fff; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(66,68,147,0.35); border-radius: 4px; }
+@keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
+@keyframes blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+@keyframes shimmer { 0%{transform:translateX(-100%)} 100%{transform:translateX(100%)} }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo } = React;
+
+const C = {
+  bg: '#08080f', panel: '#10101e', panelHi: '#16162a',
+  border: 'rgba(66,68,147,0.25)', borderHi: 'rgba(66,68,147,0.55)',
+  text: '#e8e8f4', muted: '#8888aa', dim: '#5c5cb8', faint: '#44445a',
+  primary: '#424493', primaryHi: '#6666cc',
+  green: '#4eca8a', amber: '#f5c542', cyan: '#4dd0e8', pink: '#f472b6',
+};
+
+const MascotMark = ({ size = 28 }) => (
+  <svg width={size} height={size} viewBox="0 0 200 200" fill="none" style={{ flexShrink:0, filter:'drop-shadow(0 0 8px rgba(66,68,147,0.6))' }}>
+    <defs>
+      <radialGradient id={`mm-${size}`} cx="40%" cy="35%" r="65%"><stop offset="0%" stopColor="#6666d4"/><stop offset="100%" stopColor="#2a2a72"/></radialGradient>
+    </defs>
+    <ellipse cx="82" cy="54" rx="18" ry="22" fill="#3535a0"/>
+    <ellipse cx="118" cy="54" rx="18" ry="22" fill="#3535a0"/>
+    <circle cx="100" cy="96" r="80" fill={`url(#mm-${size})`}/>
+    <circle cx="78" cy="92" r="18" fill="white"/>
+    <circle cx="122" cy="92" r="18" fill="white"/>
+    <circle cx="80" cy="94" r="11" fill="#0f0f2e"/>
+    <circle cx="124" cy="94" r="11" fill="#0f0f2e"/>
+    <circle cx="85" cy="88" r="4.5" fill="white"/>
+    <circle cx="129" cy="88" r="4.5" fill="white"/>
+    <path d="M82 120 Q100 136 118 120" stroke="#0f0f2e" strokeWidth="6" fill="none" strokeLinecap="round"/>
+  </svg>
+);
+
+const Nav = ({ crumb }) => (
+  <nav style={{
+    display:'grid', gridTemplateColumns:'auto 1fr auto', alignItems:'center', gap:32,
+    padding:'18px 48px', borderBottom:`1px solid ${C.border}`,
+    backdropFilter:'blur(14px)', background:'rgba(8,8,15,0.78)',
+    position:'sticky', top:0, zIndex:100
+  }}>
+    <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+      <a href="Gun Landing Page.html" style={{ display:'flex', alignItems:'center', gap:10, textDecoration:'none' }}>
+        <MascotMark size={32}/>
+        <span style={{ fontFamily:"'Syne',sans-serif", fontSize:24, fontWeight:800, letterSpacing:-0.5, color:C.text }}>gun</span>
+      </a>
+      <span style={{ color:'rgba(255,255,255,0.12)', fontSize:18 }}>/</span>
+      <span style={{ fontSize:14, color:C.muted, fontFamily:"'JetBrains Mono',monospace", letterSpacing:'0.04em' }}>{crumb}</span>
+    </div>
+    <ul style={{ display:'flex', gap:28, listStyle:'none', justifyContent:'center' }}>
+      {[['Docs','Docs.html',false],['Playground','Gun Landing Page.html#playground',false],['Benchmarks','Gun Landing Page.html#benchmarks',false],['Examples','Gun Landing Page.html#examples',false],['Blog','Blog.html',true]].map(([n,h,active]) => (
+        <li key={n}><a href={h} style={{ color: active ? C.text : C.muted, textDecoration:'none', fontSize:14, fontWeight:500 }}
+          onMouseEnter={e=>e.target.style.color=C.text} onMouseLeave={e=>e.target.style.color = active ? C.text : C.muted}
+        >{n}</a></li>
+      ))}
+    </ul>
+    <div style={{ display:'flex', gap:12, alignItems:'center' }}>
+      <a href="#" style={{ color:C.muted, fontSize:13, textDecoration:'none', display:'flex', alignItems:'center', gap:6 }}
+        onMouseEnter={e=>e.currentTarget.style.color=C.text} onMouseLeave={e=>e.currentTarget.style.color=C.muted}>
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2 .37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        14.2k
+      </a>
+      <a href="Gun Landing Page.html" style={{ background:C.primary, color:'white', padding:'9px 18px', borderRadius:8, fontSize:13, fontWeight:600, textDecoration:'none', boxShadow:`0 0 18px ${C.primary}55` }}
+        onMouseEnter={e=>{e.currentTarget.style.background=C.primaryHi}}
+        onMouseLeave={e=>{e.currentTarget.style.background=C.primary}}>
+        Install →
+      </a>
+    </div>
+  </nav>
+);
+
+const Footer = () => (
+  <footer style={{ borderTop:`1px solid ${C.border}`, padding:'48px 48px 32px', maxWidth:1480, margin:'0 auto' }}>
+    <div style={{ display:'grid', gridTemplateColumns:'1.4fr 1fr 1fr 1fr', gap:48, paddingBottom:36, borderBottom:`1px solid ${C.border}` }}>
+      <div>
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14 }}>
+          <MascotMark size={28}/>
+          <span style={{ fontFamily:"'Syne',sans-serif", fontSize:22, fontWeight:800, color:C.text, letterSpacing:-0.5 }}>gun</span>
+        </div>
+        <p style={{ fontSize:13, color:C.muted, lineHeight:1.6, maxWidth:300 }}>
+          A JavaScript-to-Go compiler with a runtime that gets out of your way.
+        </p>
+      </div>
+      {[
+        ['Product', ['Docs','Playground','Benchmarks','Changelog','Roadmap']],
+        ['Resources', ['Examples','Migration guide','Source maps','API reference']],
+        ['Community', ['GitHub','Discord','Twitter','Bluesky','npm']],
+      ].map(([h, links]) => (
+        <div key={h}>
+          <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:10, fontWeight:700, letterSpacing:'0.16em', textTransform:'uppercase', color:C.dim, marginBottom:14 }}>{h}</div>
+          <ul style={{ listStyle:'none', display:'flex', flexDirection:'column', gap:8 }}>
+            {links.map(l => (
+              <li key={l}><a href={l==='Docs'?'Docs.html':'#'} style={{ fontSize:13, color:C.muted, textDecoration:'none' }}
+                onMouseEnter={e=>e.target.style.color=C.text} onMouseLeave={e=>e.target.style.color=C.muted}>{l}</a></li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', paddingTop:24, fontSize:12, color:C.faint, fontFamily:"'JetBrains Mono',monospace" }}>
+      <div>MIT · © 2026 the gun project</div>
+      <div style={{ display:'flex', gap:24 }}>
+        <span><span style={{ color:C.green }}>●</span> all systems normal</span>
+        <span>v1.0.2 · go1.22+</span>
+      </div>
+    </div>
+  </footer>
+);
+
+// ── Atoms ─────────────────────────────────────────────────────────────
+const IC = ({c}) => <code style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:12.5, background:'rgba(66,68,147,0.15)', border:`1px solid ${C.border}`, padding:'1.5px 7px', borderRadius:5, color:'#a0a0ff' }}>{c}</code>;
+
+const langStyle = (lang) => ({
+  bash: { bg:'rgba(78,202,138,0.1)', co:C.green, bd:'rgba(78,202,138,0.3)', label:'Shell' },
+  js:   { bg:'rgba(245,197,66,0.12)', co:C.amber, bd:'rgba(245,197,66,0.3)', label:'JavaScript' },
+  ts:   { bg:'rgba(77,208,232,0.1)', co:C.cyan, bd:'rgba(77,208,232,0.3)', label:'TypeScript' },
+  go:   { bg:'rgba(77,208,232,0.08)', co:'#4dd0e8', bd:'rgba(77,208,232,0.25)', label:'Go' },
+}[lang] || { bg:'rgba(66,68,147,0.1)', co:C.dim, bd:C.border, label:lang });
+
+const CB = ({ lang='go', file, code }) => {
+  const s = langStyle(lang);
+  return (
+    <div style={{ background:'#0a0a14', border:`1px solid ${C.border}`, borderRadius:12, overflow:'hidden', margin:'22px 0', boxShadow:'0 8px 28px rgba(0,0,0,0.35)' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 16px', borderBottom:`1px solid ${C.border}`, background:'rgba(66,68,147,0.05)' }}>
+        <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:10, fontWeight:700, padding:'2.5px 8px', borderRadius:4, background:s.bg, color:s.co, border:`1px solid ${s.bd}`, letterSpacing:'0.06em' }}>{s.label}</span>
+        {file && <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:11.5, color:C.faint }}>{file}</span>}
+      </div>
+      <pre style={{ padding:'18px 20px', fontFamily:"'JetBrains Mono',monospace", fontSize:13, lineHeight:1.8, color:'#d8d8e8', overflowX:'auto', whiteSpace:'pre' }}>{code}</pre>
+    </div>
+  );
+};
+
+const Note = ({ type='info', children }) => {
+  const m = {
+    info: { bg:'rgba(66,68,147,0.08)', bd:'rgba(66,68,147,0.4)', co:'#a0a0ff', ic:'i' },
+    tip:  { bg:'rgba(78,202,138,0.06)', bd:'rgba(78,202,138,0.32)', co:C.green, ic:'★' },
+  }[type] || { bg:'rgba(66,68,147,0.08)', bd:'rgba(66,68,147,0.4)', co:'#a0a0ff', ic:'i' };
+  return (
+    <div style={{ background:m.bg, border:`1px solid ${m.bd}`, borderRadius:10, padding:'14px 18px 14px 16px', margin:'22px 0', display:'flex', gap:14, alignItems:'flex-start' }}>
+      <span style={{ flexShrink:0, width:22, height:22, borderRadius:'50%', background:m.bg, border:`1px solid ${m.bd}`, color:m.co, display:'flex', alignItems:'center', justifyContent:'center', fontFamily:"'JetBrains Mono',monospace", fontSize:11, fontWeight:800 }}>{m.ic}</span>
+      <div style={{ fontSize:14, color:'#c0c0e0', lineHeight:1.65 }}>{children}</div>
+    </div>
+  );
+};
+
+// ── Posts ─────────────────────────────────────────────────────────────
+const posts = [
+  {
+    slug: 'introducing-gun', tag: 'Announcement', date: 'Apr 2, 2026',
+    title: 'Introducing Gun: JavaScript → Go transpiler',
+    excerpt: "We're open-sourcing Gun — a tool that compiles JavaScript and TypeScript, plus their npm dependencies, into valid Go code that ships as a single static binary.",
+    readTime: '6 min', color: '#a0a0ff',
+    author: 'Sasha K.', authorRole: 'Founder', featured: true,
+  },
+  {
+    slug: 'jsvalue-runtime', tag: 'Deep Dive', date: 'Apr 8, 2026',
+    title: 'Inside the JSValue runtime: how Gun preserves JS semantics',
+    excerpt: "Go is statically typed. JavaScript is not. Here's how a single tagged-union type bridges the gap without a VM, an interpreter, or any runtime hacks.",
+    readTime: '9 min', color: '#4eca8a', author: 'Mira P.', authorRole: 'Runtime',
+  },
+  {
+    slug: 'npm-deps', tag: 'Feature', date: 'Apr 14, 2026',
+    title: 'Transpiling npm dependencies: the full story',
+    excerpt: "Gun doesn't just transpile your code — it walks node_modules and transpiles every package along the way. Here's how we handle the edge cases.",
+    readTime: '7 min', color: '#f5c542', author: 'Devin H.', authorRole: 'Compiler',
+  },
+  {
+    slug: 'bun-node-compat', tag: 'Compat', date: 'Apr 17, 2026',
+    title: 'Node.js and Bun API compatibility in Gun',
+    excerpt: "Which built-ins are supported today, what's on the roadmap, and how we test compatibility across both runtimes without doubling our test surface.",
+    readTime: '5 min', color: '#4dd0e8', author: 'Yuki T.', authorRole: 'Compat',
+  },
+  {
+    slug: 'treesitter', tag: 'Internals', date: 'Apr 19, 2026',
+    title: 'Why we use Tree-sitter for parsing JavaScript',
+    excerpt: 'Tree-sitter gives us incremental parsing, error recovery, and embedded-language support — all things we need for a production transpiler with 20ms watch rebuilds.',
+    readTime: '8 min', color: '#f472b6', author: 'Mira P.', authorRole: 'Runtime',
+  },
+  {
+    slug: 'april-fools', tag: 'Fun', date: 'Apr 1, 2026',
+    title: "We're pivoting to a pixel-art mascot. Permanently.",
+    excerpt: 'After exhaustive deliberation and a heated 7–6 vote, the Gun team has reached a unanimous decision. The pixel mascot stays. We regret nothing.',
+    readTime: '1 min', color: '#f5c542', author: 'The Gun Team', authorRole: 'Mascot Committee',
+  },
+];
+
+// ── Post bodies ───────────────────────────────────────────────────────
+const PH2 = ({c}) => <h2 style={{ fontFamily:"'Syne',sans-serif", fontSize:26, fontWeight:800, letterSpacing:-0.7, margin:'48px 0 14px', color:C.text }}>{c}</h2>;
+const PP  = ({children}) => <p style={{ fontSize:16.5, color:'#c0c0d8', lineHeight:1.78, marginBottom:18 }}>{children}</p>;
+
+const postContent = {
+  'introducing-gun': () => <>
+    <PP>Today we're open-sourcing <strong style={{ color:C.text }}>Gun</strong> — a JavaScript-to-Go transpiler that converts your entire JS/TS codebase, including its npm dependencies, into valid compilable Go.</PP>
+    <PH2 c="The problem"/>
+    <PP>JavaScript is fast to write, but Node.js has real overhead — a heavy runtime, slow startup, high memory pressure under load. Rewriting a JS service in Go yields huge wins, but it's expensive, risky, and means abandoning the npm ecosystem you already depend on.</PP>
+    <PP>Gun's answer: don't rewrite. Transpile.</PP>
+    <PH2 c="How it works"/>
+    <PP>Gun uses Tree-sitter to parse your source, runs a type-flow analysis pass, then emits Go code that uses the <IC c="jsvalue"/> runtime to preserve JavaScript semantics. The result is a real Go binary, with no Node.js runtime on the server.</PP>
+    <CB lang="bash" code={`npm i -g gun-transpiler
+gun transpile server.js -o server.go
+go run server.go`}/>
+    <Note type="tip">Gun transpiles npm dependencies too — not just your own code. If your app uses <IC c="express"/> or <IC c="axios"/>, those get transpiled along with everything else.</Note>
+    <PH2 c="What's next"/>
+    <PP>We're working on broader Bun API coverage, watch-mode incremental builds (already shipping in v1.0.2), and source map support for debugging. Star the repo and follow along on GitHub.</PP>
+  </>,
+
+  'jsvalue-runtime': () => <>
+    <PP>Go is statically typed. JavaScript is not. Bridging these two worlds without a full interpreter requires a careful design. This is the story of <IC c="*jsvalue.JSValue"/> — the single type that makes Gun's output possible.</PP>
+    <PH2 c="The core type"/>
+    <PP>Every value in Gun-transpiled code — numbers, strings, objects, functions, arrays — is represented as a <IC c="*jsvalue.JSValue"/>. It's a tagged union storing the underlying Go value alongside its JavaScript type tag.</PP>
+    <CB lang="go" code={`var n = jsvalue.NewNumber(float64(42))
+var s = jsvalue.NewString("hello")
+var b = jsvalue.NewBool(true)
+var o = jsvalue.ObjectFrom(map[string]any{
+    "name": jsvalue.NewString("gun"),
+})`}/>
+    <PH2 c="Property access"/>
+    <PP>Dynamic property access is handled via <IC c=".Get()"/> and <IC c=".Set()"/>. Method calls use <IC c=".MethodCall()"/>. These mirror JavaScript's prototype lookup semantics exactly.</PP>
+    <CB lang="go" code={`obj.Get("key")             // obj.key
+obj.Set("key", val)        // obj.key = val
+obj.MethodCall("fn", arg)  // obj.fn(arg)
+fn.Call(arg1, arg2)        // fn(arg1, arg2)`}/>
+    <Note>You never call these methods manually. Gun emits them automatically when it encounters property access in your JS source.</Note>
+    <PH2 c="Performance"/>
+    <PP>JSValue operations add some overhead compared to hand-written Go. But compared to Node.js, the Go runtime wins handily — you trade a bit of idiomatic Go style for a 10× runtime improvement and a single static binary.</PP>
+  </>,
+
+  'npm-deps': () => <>
+    <PP>One of Gun's most ambitious features is full npm dependency transpilation. When you run <IC c="gun transpile"/>, it doesn't just process your source — it walks your entire <IC c="node_modules"/> tree and transpiles that too.</PP>
+    <PH2 c="Why this matters"/>
+    <PP>A typical Node.js app has hundreds of dependencies. If Gun only transpiled your own code, the output would still need a Node.js runtime to execute the rest. Full dep transpilation means the final Go binary is truly self-contained.</PP>
+    <CB lang="bash" code={`# Transpiles your code AND every npm dep
+gun transpile src/index.js -o go/`}/>
+    <PH2 c="Handling edge cases"/>
+    <PP>Some packages use native addons or platform-specific code. Gun handles this via an alias system — map a package to a hand-written Go equivalent in your <IC c="gun.config.js"/>.</PP>
+    <CB lang="js" file="gun.config.js" code={`export default {
+  aliases: {
+    'bcrypt': 'github.com/my/bcrypt-go',
+  }
+}`}/>
+    <Note type="tip">Most pure-JS packages transpile without any configuration. Aliases are only needed for native bindings.</Note>
+  </>,
+
+  'bun-node-compat': () => <>
+    <PP>Gun ships with a compatibility layer that implements the most commonly used Node.js and Bun APIs. Here's what's supported today and what's on deck.</PP>
+    <PH2 c="Supported today"/>
+    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, margin:'18px 0 30px' }}>
+      {[['http / https','createServer, request, fetch'],['fs','readFile, writeFile, stat, watch'],['path','join, resolve, dirname, basename'],['console','log, error, warn, table'],['process','env, argv, exit, cwd'],['timers','setTimeout, setInterval'],['events','EventEmitter'],['stream','Readable, Writable, Transform']].map(([m,a])=>(
+        <div key={m} style={{ background:'rgba(66,68,147,0.06)', border:`1px solid ${C.border}`, borderRadius:8, padding:'14px 16px' }}>
+          <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:12.5, color:C.cyan, marginBottom:5, fontWeight:700 }}>{m}</div>
+          <div style={{ fontSize:12.5, color:C.muted }}>{a}</div>
+        </div>
+      ))}
+    </div>
+    <Note>Bun-specific APIs like <IC c="Bun.serve()"/> and <IC c="Bun.file()"/> map to their Gun runtime equivalents and pass the same conformance tests.</Note>
+  </>,
+
+  'treesitter': () => <>
+    <PP>Choosing a parser is one of the most consequential decisions in a transpiler's design. We evaluated several before settling on Tree-sitter. Here's why.</PP>
+    <PH2 c="Why not Acorn or Babel?"/>
+    <PP>Acorn and Babel are fast, but they're JS-only. Tree-sitter is language-agnostic, written in C, and designed for editor tooling — which means it's built for <em style={{ color:C.text }}>incremental parsing</em>. When a file changes, Tree-sitter re-parses only the affected region.</PP>
+    <PH2 c="Incremental parsing"/>
+    <PP>For Gun's watch mode, incremental parsing means re-transpilation is nearly instant even for large codebases. Only changed subtrees are reanalyzed and re-emitted.</PP>
+    <CB lang="bash" code={`gun watch src/ -o go/
+# → Changed: src/server.js (re-transpiled in 12ms)`}/>
+    <PH2 c="Error recovery"/>
+    <PP>Tree-sitter never throws on invalid syntax — it produces a partial tree with error nodes. This lets Gun give useful diagnostics even for files mid-edit.</PP>
+  </>,
+
+  'april-fools': () => <>
+    <PP>After weeks of deliberation, extensive user research, and a heated internal vote (7–6), the Gun team has reached a unanimous decision: the pixel-art mascot is now permanent.</PP>
+    <PH2 c="The case for pixels"/>
+    <PP>The smooth round mascot had its fans. But the pixel-art version speaks to our roots. We are, at heart, a tool for people who appreciate the elegance of a well-placed bit.</PP>
+    <PP>Also, it looks sick at 16×16.</PP>
+    <Note type="tip">This is an April Fools post. The smooth logo is still the default. The pixel mascot does appear on April 1st though — check the landing page.</Note>
+    <PH2 c="No regrets"/>
+    <PP>Happy April 1st from the Gun team.</PP>
+  </>,
+};
+
+// ── Avatar ────────────────────────────────────────────────────────────
+const Avatar = ({ name, size=28 }) => {
+  const initials = name.split(/\s+/).slice(0,2).map(s=>s[0]).join('').toUpperCase();
+  // deterministic hue from name
+  let h = 0; for (const c of name) h = (h*31 + c.charCodeAt(0)) >>> 0;
+  const hue = h % 60 + 220; // purple-ish range
+  return (
+    <div style={{
+      width:size, height:size, borderRadius:'50%',
+      background:`linear-gradient(135deg, hsl(${hue} 60% 55%), hsl(${hue+30} 50% 35%))`,
+      border:`1px solid ${C.borderHi}`,
+      display:'flex', alignItems:'center', justifyContent:'center',
+      fontFamily:"'Space Grotesk',sans-serif", fontSize:size*0.38, fontWeight:700, color:'#fff',
+      flexShrink:0, letterSpacing:0,
+    }}>{initials}</div>
+  );
+};
+
+const Tag = ({ label, color }) => (
+  <span style={{ display:'inline-flex', alignItems:'center', fontFamily:"'JetBrains Mono',monospace", fontSize:10, fontWeight:700, letterSpacing:'0.1em', padding:'3.5px 10px', borderRadius:100, background:`${color}1a`, color, border:`1px solid ${color}40`, textTransform:'uppercase' }}>
+    <span style={{ width:5, height:5, background:color, borderRadius:'50%', marginRight:7, boxShadow:`0 0 6px ${color}` }}/>
+    {label}
+  </span>
+);
+
+// ── Featured ──────────────────────────────────────────────────────────
+const Featured = ({ p, onClick }) => {
+  const [h, setH] = useState(false);
+  return (
+    <div onClick={onClick} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)}
+      style={{
+        position:'relative', overflow:'hidden',
+        background: h ? 'rgba(66,68,147,0.13)' : 'rgba(66,68,147,0.06)',
+        border:`1px solid ${h ? C.borderHi : C.border}`,
+        borderRadius:18, padding:'48px 56px', marginBottom:60, cursor:'pointer',
+        transition:'all 0.22s', display:'grid', gridTemplateColumns:'1.5fr auto', gap:60, alignItems:'center',
+      }}>
+      <div style={{ position:'absolute', top:0, left:0, right:0, height:2, background:`linear-gradient(90deg, transparent, ${C.primary}, transparent)`, opacity: h ? 1 : 0.5, transition:'opacity 0.3s' }}/>
+      <div>
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:18 }}>
+          <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:10, fontWeight:700, letterSpacing:'0.14em', color:C.dim, padding:'3px 10px', borderRadius:100, background:'rgba(66,68,147,0.08)', border:`1px solid ${C.border}`, textTransform:'uppercase' }}>FEATURED</span>
+          <Tag label={p.tag} color={p.color}/>
+          <span style={{ fontSize:12.5, color:C.faint, fontFamily:"'JetBrains Mono',monospace" }}>{p.date}</span>
+          <span style={{ fontSize:12.5, color:C.faint }}>· {p.readTime} read</span>
+        </div>
+        <h2 style={{ fontFamily:"'Syne',sans-serif", fontSize:'clamp(30px,3.4vw,42px)', fontWeight:800, letterSpacing:-1.4, lineHeight:1.05, marginBottom:20, color:C.text, maxWidth:680 }}>{p.title}</h2>
+        <p style={{ fontSize:16.5, color:C.muted, lineHeight:1.7, maxWidth:600, marginBottom:28 }}>{p.excerpt}</p>
+        <div style={{ display:'flex', alignItems:'center', gap:14 }}>
+          <Avatar name={p.author} size={32}/>
+          <div>
+            <div style={{ fontSize:13, fontWeight:600, color:C.text }}>{p.author}</div>
+            <div style={{ fontSize:11.5, color:C.faint, fontFamily:"'JetBrains Mono',monospace", letterSpacing:'0.06em' }}>{p.authorRole}</div>
+          </div>
+          <span style={{ flex:1 }}/>
+          <span style={{ display:'inline-flex', alignItems:'center', gap:8, color: h ? C.text : '#a0a0ff', fontSize:14, fontWeight:600, transition:'color 0.2s' }}>
+            Read post
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7H12M8 3L12 7L8 11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </span>
+        </div>
+      </div>
+      {/* Decorative side */}
+      <div style={{ width:200, height:200, position:'relative', flexShrink:0 }}>
+        <div style={{ position:'absolute', inset:0, borderRadius:18, background:`radial-gradient(circle at 30% 30%, ${C.primary}aa, transparent 65%)`, filter:'blur(6px)' }}/>
+        <div style={{ position:'absolute', inset:8, borderRadius:14, border:`1px solid ${C.borderHi}`, background:'#0a0a14', overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <MascotMark size={130}/>
+        </div>
+        <div style={{ position:'absolute', top:-8, right:-8, padding:'4px 9px', background:'#0a0a14', border:`1px solid ${C.borderHi}`, borderRadius:6, fontFamily:"'JetBrains Mono',monospace", fontSize:9.5, fontWeight:700, color:C.green, letterSpacing:'0.1em' }}>● NEW</div>
+      </div>
+    </div>
+  );
+};
+
+// ── Card ──────────────────────────────────────────────────────────────
+const Card = ({ p, onClick }) => {
+  const [h, setH] = useState(false);
+  return (
+    <div onClick={onClick} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)}
+      style={{
+        background: h ? '#13132a' : '#10101e',
+        border:`1px solid ${h ? C.borderHi : C.border}`,
+        borderRadius:14, padding:'24px 26px', cursor:'pointer',
+        transition:'all 0.2s', transform: h ? 'translateY(-3px)' : 'none',
+        boxShadow: h ? '0 14px 40px rgba(0,0,0,0.45)' : '0 4px 12px rgba(0,0,0,0.2)',
+        position:'relative', overflow:'hidden', display:'flex', flexDirection:'column',
+      }}>
+      <div style={{ position:'absolute', top:0, left:0, right:0, height:2, background:`linear-gradient(90deg, transparent, ${p.color}, transparent)`, opacity: h ? 0.8 : 0, transition:'opacity 0.3s' }}/>
+      <div style={{ marginBottom:14 }}>
+        <Tag label={p.tag} color={p.color}/>
+      </div>
+      <h3 style={{ fontFamily:"'Syne',sans-serif", fontSize:18, fontWeight:800, letterSpacing:-0.4, lineHeight:1.25, marginBottom:10, color:C.text }}>{p.title}</h3>
+      <p style={{ fontSize:13.5, color:C.muted, lineHeight:1.65, marginBottom:18, flex:1 }}>{p.excerpt}</p>
+      <div style={{ display:'flex', alignItems:'center', gap:10, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
+        <Avatar name={p.author} size={22}/>
+        <span style={{ fontSize:12, color:C.muted, fontWeight:500 }}>{p.author}</span>
+        <span style={{ flex:1 }}/>
+        <span style={{ fontSize:11, color:C.faint, fontFamily:"'JetBrains Mono',monospace" }}>{p.date}</span>
+        <span style={{ fontSize:11, color:C.faint }}>· {p.readTime}</span>
+      </div>
+    </div>
+  );
+};
+
+// ── Post page ─────────────────────────────────────────────────────────
+const PostPage = ({ post, onOpen, onBack }) => {
+  const Content = postContent[post.slug];
+  const idx = posts.indexOf(post);
+  const next = posts[idx + 1];
+  const prev = posts[idx - 1];
+  useEffect(() => { window.scrollTo(0, 0); }, [post.slug]);
+
+  return (
+    <div style={{ maxWidth:1100, margin:'0 auto', padding:'56px 60px 110px' }}>
+      <button onClick={onBack} style={{
+        display:'inline-flex', alignItems:'center', gap:8, color:C.muted,
+        background:'rgba(66,68,147,0.06)', border:`1px solid ${C.border}`,
+        cursor:'pointer', fontSize:13, marginBottom:48, padding:'8px 14px', borderRadius:8,
+        fontFamily:"'Space Grotesk',sans-serif", transition:'all 0.15s',
+      }}
+        onMouseEnter={e=>{ e.currentTarget.style.color=C.text; e.currentTarget.style.borderColor=C.borderHi; }}
+        onMouseLeave={e=>{ e.currentTarget.style.color=C.muted; e.currentTarget.style.borderColor=C.border; }}>
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M12 7H2M6 3L2 7L6 11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        All posts
+      </button>
+
+      {/* Header */}
+      <div style={{ maxWidth:760, marginBottom:44 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:11, marginBottom:24, flexWrap:'wrap' }}>
+          <Tag label={post.tag} color={post.color}/>
+          <span style={{ fontSize:13, color:C.faint, fontFamily:"'JetBrains Mono',monospace" }}>{post.date}</span>
+          <span style={{ fontSize:13, color:C.faint }}>· {post.readTime} read</span>
+        </div>
+        <h1 style={{ fontFamily:"'Syne',sans-serif", fontSize:'clamp(34px,4.2vw,56px)', fontWeight:800, letterSpacing:-1.8, lineHeight:1.04, marginBottom:24, color:C.text }}>{post.title}</h1>
+        <p style={{ fontSize:18, color:C.muted, lineHeight:1.65, marginBottom:30 }}>{post.excerpt}</p>
+        <div style={{ display:'flex', alignItems:'center', gap:14, paddingTop:20, borderTop:`1px solid ${C.border}` }}>
+          <Avatar name={post.author} size={38}/>
+          <div>
+            <div style={{ fontSize:14, fontWeight:600, color:C.text }}>{post.author}</div>
+            <div style={{ fontSize:12, color:C.faint, fontFamily:"'JetBrains Mono',monospace", letterSpacing:'0.06em' }}>{post.authorRole}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div style={{ maxWidth:720 }}>
+        {Content ? <Content/> : <p style={{ color:C.muted }}>Content coming soon.</p>}
+      </div>
+
+      {/* Prev / Next */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginTop:88, paddingTop:36, borderTop:`1px solid ${C.border}` }}>
+        {next ? (
+          <div onClick={()=>onOpen(next)} style={{
+            background:'rgba(66,68,147,0.05)', border:`1px solid ${C.border}`,
+            borderRadius:14, padding:'18px 22px', cursor:'pointer', transition:'all 0.18s',
+          }}
+            onMouseEnter={e=>{ e.currentTarget.style.background='rgba(66,68,147,0.12)'; e.currentTarget.style.borderColor=C.borderHi; }}
+            onMouseLeave={e=>{ e.currentTarget.style.background='rgba(66,68,147,0.05)'; e.currentTarget.style.borderColor=C.border; }}>
+            <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:10, color:C.dim, letterSpacing:'0.14em', textTransform:'uppercase', marginBottom:6 }}>← Older</div>
+            <div style={{ fontSize:14.5, fontWeight:600, color:C.text, lineHeight:1.3 }}>{next.title}</div>
+          </div>
+        ) : <div/>}
+        {prev ? (
+          <div onClick={()=>onOpen(prev)} style={{
+            background:'rgba(66,68,147,0.05)', border:`1px solid ${C.border}`,
+            borderRadius:14, padding:'18px 22px', cursor:'pointer', textAlign:'right', transition:'all 0.18s',
+          }}
+            onMouseEnter={e=>{ e.currentTarget.style.background='rgba(66,68,147,0.12)'; e.currentTarget.style.borderColor=C.borderHi; }}
+            onMouseLeave={e=>{ e.currentTarget.style.background='rgba(66,68,147,0.05)'; e.currentTarget.style.borderColor=C.border; }}>
+            <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:10, color:C.dim, letterSpacing:'0.14em', textTransform:'uppercase', marginBottom:6 }}>Newer →</div>
+            <div style={{ fontSize:14.5, fontWeight:600, color:C.text, lineHeight:1.3 }}>{prev.title}</div>
+          </div>
+        ) : <div/>}
+      </div>
+    </div>
+  );
+};
+
+// ── Index ─────────────────────────────────────────────────────────────
+const Index = ({ onOpen }) => {
+  const [filter, setFilter] = useState('All');
+  const tags = ['All', ...Array.from(new Set(posts.map(p=>p.tag)))];
+  const featured = posts.find(p=>p.featured);
+  const rest = posts.filter(p => !p.featured && (filter==='All' || p.tag===filter));
+
+  return (
+    <div style={{ maxWidth:1280, margin:'0 auto', padding:'72px 60px 110px' }}>
+      {/* Header */}
+      <div style={{ display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:60, alignItems:'flex-end', marginBottom:60 }}>
+        <div>
+          <div style={{ display:'inline-flex', alignItems:'center', gap:10, fontFamily:"'JetBrains Mono',monospace", fontSize:11, fontWeight:600, color:C.dim, marginBottom:24, padding:'5px 11px', border:`1px solid ${C.border}`, borderRadius:100, background:'rgba(66,68,147,0.08)' }}>
+            <span style={{ background:C.primary, color:'#fff', padding:'2px 8px', borderRadius:100, letterSpacing:'0.1em' }}>BLOG</span>
+            Updates · deep dives · stories from the team
+          </div>
+          <h1 style={{ fontFamily:"'Syne',sans-serif", fontSize:'clamp(48px,6vw,84px)', fontWeight:800, letterSpacing:-2.5, color:C.text, lineHeight:0.95, marginBottom:20 }}>
+            What's new<br/>
+            <span style={{ background:'linear-gradient(135deg,#a0a0ff 0%,#7c7ee8 50%,#424493 100%)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text' }}>in Gun.</span>
+          </h1>
+          <p style={{ fontSize:17, color:C.muted, maxWidth:520, lineHeight:1.6 }}>
+            Release notes, deep dives, and stories from the people who build the compiler. We post when there's something worth saying.
+          </p>
+        </div>
+
+        <div style={{ display:'flex', flexDirection:'column', gap:10, alignItems:'flex-end', justifyContent:'flex-end', paddingBottom:6 }}>
+          <a href="#" style={{ display:'inline-flex', alignItems:'center', gap:8, color:C.muted, textDecoration:'none', fontSize:13.5, padding:'8px 14px', border:`1px solid ${C.border}`, borderRadius:8, background:'rgba(66,68,147,0.06)' }}
+            onMouseEnter={e=>{ e.currentTarget.style.color=C.text; e.currentTarget.style.borderColor=C.borderHi; }}
+            onMouseLeave={e=>{ e.currentTarget.style.color=C.muted; e.currentTarget.style.borderColor=C.border; }}>
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 13a3 3 0 013-3 3 3 0 013 3M3 4a8 8 0 018 8M3 8a4 4 0 014 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+            RSS feed
+          </a>
+          <span style={{ fontSize:11.5, color:C.faint, fontFamily:"'JetBrains Mono',monospace", letterSpacing:'0.06em' }}>{posts.length} posts · updated weekly</span>
+        </div>
+      </div>
+
+      {/* Featured */}
+      {featured && <Featured p={featured} onClick={()=>onOpen(featured)}/>}
+
+      {/* Filters */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:30, gap:20, flexWrap:'wrap' }}>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          {tags.map(t=>(
+            <button key={t} onClick={()=>setFilter(t)} style={{
+              padding:'7px 16px', borderRadius:100, fontSize:13, fontWeight:600, cursor:'pointer',
+              border:`1px solid ${filter===t ? C.borderHi : C.border}`,
+              background: filter===t ? 'rgba(66,68,147,0.18)' : 'transparent',
+              color: filter===t ? C.text : C.muted,
+              fontFamily:"'Space Grotesk',sans-serif", transition:'all 0.15s',
+            }}>{t}</button>
+          ))}
+        </div>
+        <div style={{ fontSize:12, color:C.faint, fontFamily:"'JetBrains Mono',monospace", letterSpacing:'0.06em' }}>
+          {rest.length} {rest.length === 1 ? 'post' : 'posts'} {filter !== 'All' && `in ${filter}`}
+        </div>
+      </div>
+
+      {/* Grid */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(320px, 1fr))', gap:18 }}>
+        {rest.map(p => <Card key={p.slug} p={p} onClick={()=>onOpen(p)}/>)}
+      </div>
+
+      {/* Newsletter */}
+      <div style={{
+        marginTop:96, position:'relative', overflow:'hidden',
+        background:'rgba(66,68,147,0.08)', border:`1px solid ${C.borderHi}`,
+        borderRadius:18, padding:'48px 56px',
+        display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:48, alignItems:'center',
+      }}>
+        <div style={{ position:'absolute', top:0, left:0, right:0, height:2, background:`linear-gradient(90deg, transparent, ${C.primary}, transparent)` }}/>
+        <div>
+          <div style={{ display:'inline-flex', alignItems:'center', gap:8, fontFamily:"'JetBrains Mono',monospace", fontSize:10.5, fontWeight:700, letterSpacing:'0.14em', color:C.dim, padding:'4px 10px', borderRadius:100, background:'rgba(66,68,147,0.1)', border:`1px solid ${C.border}`, marginBottom:14, textTransform:'uppercase' }}>
+            <span style={{ width:6, height:6, background:C.green, borderRadius:'50%', boxShadow:`0 0 6px ${C.green}` }}/>
+            Newsletter
+          </div>
+          <h3 style={{ fontFamily:"'Syne',sans-serif", fontSize:30, fontWeight:800, letterSpacing:-1, marginBottom:10, color:C.text, lineHeight:1.05 }}>Stay in the loop.</h3>
+          <p style={{ fontSize:14.5, color:C.muted, lineHeight:1.6, maxWidth:380 }}>New posts in your inbox. Roughly weekly. No spam, no marketing fluff — just engineering writeups and release notes.</p>
+        </div>
+        <form onSubmit={e=>e.preventDefault()} style={{ display:'flex', gap:10, alignItems:'stretch' }}>
+          <input type="email" placeholder="you@example.com" style={{
+            flex:1, background:'rgba(8,8,15,0.6)', border:`1px solid ${C.borderHi}`,
+            borderRadius:10, padding:'12px 16px', color:C.text, fontSize:14,
+            fontFamily:"'Space Grotesk',sans-serif", outline:'none',
+          }}
+            onFocus={e=>e.target.style.borderColor=C.primaryHi}
+            onBlur={e=>e.target.style.borderColor=C.borderHi}/>
+          <button type="submit" style={{
+            background:C.primary, color:'#fff', border:'none',
+            padding:'12px 22px', borderRadius:10, fontSize:14, fontWeight:600,
+            cursor:'pointer', boxShadow:`0 0 18px ${C.primary}55`,
+            fontFamily:"'Space Grotesk',sans-serif",
+          }}
+            onMouseEnter={e=>e.currentTarget.style.background=C.primaryHi}
+            onMouseLeave={e=>e.currentTarget.style.background=C.primary}>
+            Subscribe →
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// ── App ───────────────────────────────────────────────────────────────
+const App = () => {
+  const [active, setActive] = useState(null);
+
+  const open = (p) => { setActive(p); window.scrollTo(0, 0); };
+  const back = () => { setActive(null); window.scrollTo(0, 0); };
+
+  return (
+    <div style={{ minHeight:'100vh', display:'flex', flexDirection:'column' }}>
+      <Nav crumb={active ? `Blog / ${active.tag}` : 'Blog'}/>
+      <div style={{ flex:1 }}>
+        {active
+          ? <PostPage post={active} onOpen={open} onBack={back}/>
+          : <Index onOpen={open}/>}
+      </div>
+      <Footer/>
+    </div>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
