@@ -59,6 +59,22 @@ const blog = defineCollection({
   }),
 })
 
+const docs = defineCollection({
+  name: 'doc',
+  directory: 'src/content/docs',
+  include: '**/*.md',
+  schema: z.object({
+    title: z.string(),
+    lead: z.string().optional(),
+    sections: z.array(z.string()).default([]),
+    content: z.string(),
+  }),
+  transform: async (document, context) => ({
+    ...document,
+    html: await highlightMarkdownCode(await compileMarkdown(context, document)),
+  }),
+})
+
 export default defineConfig({
-  content: [blog],
+  content: [blog, docs],
 })

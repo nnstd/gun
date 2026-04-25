@@ -15,6 +15,11 @@ describe('landing routes', () => {
   })
 
   it('keeps docs navigation and page content wired', () => {
+    const docsDir = join(process.cwd(), 'src/content/docs')
+    const files = readdirSync(docsDir).filter((file) => file.endsWith('.md'))
+
+    expect(files).toHaveLength(20)
+    expect(files).toContain('introduction.md')
     expect(ALL_PAGES[0]).toBe('Introduction')
     expect(ALL_PAGES).toContain('CLI Reference')
     expect(DOC_PAGES.Installation?.lead).toMatch(/npm package/i)
