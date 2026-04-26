@@ -1,0 +1,19 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: landing
+spec:
+  hosts:
+    - gun.nnstd.dev
+  gateways:
+    - istio-system/nnstd
+  http:
+    - headers:
+        request:
+          add:
+            x-forwarded-proto: https
+      route:
+        - destination:
+            host: gun-landing
+            port:
+              number: 80
