@@ -75,14 +75,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Read package version
-        id: pkg
-        run: echo "version=$(jq -r .version landing/package.json)" >> "$GITHUB_OUTPUT"
-
-      - name: Pin landing image tag
-        run: |
-          sed -i "s|ghcr.io/${{ github.repository_owner }}/gun-landing:latest|ghcr.io/${{ github.repository_owner }}/gun-landing:v${{ steps.pkg.outputs.version }}|" landing/k8s/deployment.yaml
-
       - name: Set up kubectl
         uses: azure/setup-kubectl@v4
 
