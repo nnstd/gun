@@ -31,7 +31,10 @@ if (import.meta.hot) {
   );
 }
 
-ogApp.get("/image.png", async (c) => {
+let pngCache: Uint8Array | null = null;
+let pngPromise: Promise<Uint8Array> | null = null;
+
+async function renderOgPng(): Promise<Uint8Array> {
   await wasmReady;
 
   const svg = await satori(
@@ -215,9 +218,19 @@ ogApp.get("/image.png", async (c) => {
   const resvg = new Resvg(svg, {
     fitTo: { mode: "width", value: 1200 },
   });
-  const png = resvg.render().asPng();
+  return resvg.render().asPng();
+}
 
-  return c.body(png, 200, {
+ogApp.get("/image.png", async (c) => {
+  if (!pngCache) {
+    pngPromise ??= renderOgPng().then((png) => {
+      pngCache = png;
+      return png;
+    });
+    await pngPromise;
+  }
+
+  return c.body(pngCache!, 200, {
     "Content-Type": "image/png",
     "Cache-Control": "public, max-age=86400, s-maxage=604800",
   });
