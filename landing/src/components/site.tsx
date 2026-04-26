@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { hc, type InferResponseType } from "hono/client";
 import { ArrowRight, Check, ChevronDown, Copy, Github } from "lucide-react";
 import { highlightCodeBlock } from "../lib/code-highlighter";
+import type { AppType } from "../../server/app";
 
 type PageKind = "home" | "docs" | "blog";
 type InstallTabSize = "md" | "lg";
@@ -39,7 +41,7 @@ const FOOTER_COLUMNS = [
   {
     title: "Community",
     links: [
-      { label: "GitHub", href: "#" },
+      { label: "GitHub", href: "https://github.com/nnstd/gun" },
       { label: "Discord", href: "#" },
       { label: "Twitter", href: "#" },
       { label: "Bluesky", href: "#" },
@@ -47,6 +49,12 @@ const FOOTER_COLUMNS = [
     ],
   },
 ];
+
+const githubClient = hc<AppType>("/");
+type GithubStarsResponse = InferResponseType<
+  typeof githubClient.api.github.stars.$get,
+  200
+>;
 
 const INSTALL_COMMANDS = {
   npm: "npm i -g gun-transpiler",
@@ -88,6 +96,32 @@ export function SiteHeader({
   current: PageKind;
   crumb?: ReactNode;
 }) {
+  const [stars, setStars] = useState("--");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadStars() {
+      const response = await githubClient.api.github.stars.$get();
+
+      if (!response.ok) return;
+
+      const data: GithubStarsResponse = await response.json();
+
+      if (!cancelled) {
+        setStars(formatGithubStars(data.stars));
+      }
+    }
+
+    loadStars().catch(() => {
+      if (!cancelled) setStars("--");
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-black/65 backdrop-blur-xl">
       <div className="mx-auto flex max-w-370 flex-col gap-4 px-5 py-4 sm:px-8 lg:px-12">
@@ -115,9 +149,7 @@ export function SiteHeader({
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-8">
             <nav className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-white/60 lg:justify-center">
               {NAV_ITEMS.map((item) => {
-                const active =
-                  current === item.page &&
-                  (item.page !== "home" || item.href === "/#playground");
+                const active = current === item.page;
                 return (
                   <a
                     key={item.label}
@@ -135,11 +167,13 @@ export function SiteHeader({
 
             <div className="flex items-center gap-3">
               <a
-                href="#"
+                href="https://github.com/nnstd/gun"
+                target="_blank"
+                rel="noreferrer"
                 className="inline-flex items-center gap-2 text-sm text-white/60 transition-colors hover:text-white"
               >
                 <Github className="h-4 w-4" />
-                14.2k
+                {stars}
               </a>
               <a
                 href="/#install"
@@ -160,6 +194,14 @@ export function SiteHeader({
       </div>
     </header>
   );
+}
+
+function formatGithubStars(stars: number) {
+  if (stars >= 1000) {
+    return `${(stars / 1000).toFixed(1)}k`;
+  }
+
+  return String(stars);
 }
 
 export function SiteFooter() {

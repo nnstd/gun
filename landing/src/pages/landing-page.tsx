@@ -406,8 +406,8 @@ export function LandingPage() {
                 key={pillar.title}
                 className={
                   index < 2
-                    ? "rounded-3xl border border-white/10 bg-panel p-7 lg:col-span-3"
-                    : "rounded-3xl border border-white/10 bg-panel p-7 lg:col-span-2"
+                    ? "rounded-3xl border border-white/10 bg-ink-900 p-7 transition hover:border-brand-300/35 hover:bg-ink-850 lg:col-span-3"
+                    : "rounded-3xl border border-white/10 bg-ink-900 p-7 transition hover:border-brand-300/35 hover:bg-ink-850 lg:col-span-2"
                 }
               >
                 <h3 className="font-syne text-[1.55rem] font-extrabold leading-[1.08] tracking-[-0.04em] text-white">

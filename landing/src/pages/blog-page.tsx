@@ -161,7 +161,7 @@ function PostCard({ post, onClick }: { post: Post; onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="group rounded-3xl border border-white/10 bg-panel p-6 text-left transition hover:-translate-y-1 hover:border-brand-300/35 hover:bg-panel-hi"
+      className="group rounded-3xl border border-white/10 bg-ink-900 p-6 text-left transition hover:-translate-y-1 hover:border-brand-300/35 hover:bg-ink-850"
     >
       <Tag label={post.tag} color={post.color} />
       <h3 className="mt-4 font-syne text-[1.35rem] font-bold leading-[1.15] tracking-[-0.04em] text-white">

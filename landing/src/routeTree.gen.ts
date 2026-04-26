@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as DocsRouteImport } from './routes/docs'
 import { Route as BlogRouteImport } from './routes/blog'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiSplatRouteImport } from './routes/api/$'
 
 const DocsRoute = DocsRouteImport.update({
   id: '/docs',
@@ -28,35 +29,44 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSplatRoute = ApiSplatRouteImport.update({
+  id: '/api/$',
+  path: '/api/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/blog': typeof BlogRoute
   '/docs': typeof DocsRoute
+  '/api/$': typeof ApiSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/blog': typeof BlogRoute
   '/docs': typeof DocsRoute
+  '/api/$': typeof ApiSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/blog': typeof BlogRoute
   '/docs': typeof DocsRoute
+  '/api/$': typeof ApiSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/blog' | '/docs'
+  fullPaths: '/' | '/blog' | '/docs' | '/api/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/blog' | '/docs'
-  id: '__root__' | '/' | '/blog' | '/docs'
+  to: '/' | '/blog' | '/docs' | '/api/$'
+  id: '__root__' | '/' | '/blog' | '/docs' | '/api/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BlogRoute: typeof BlogRoute
   DocsRoute: typeof DocsRoute
+  ApiSplatRoute: typeof ApiSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +92,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/$': {
+      id: '/api/$'
+      path: '/api/$'
+      fullPath: '/api/$'
+      preLoaderRoute: typeof ApiSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,6 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BlogRoute: BlogRoute,
   DocsRoute: DocsRoute,
+  ApiSplatRoute: ApiSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
