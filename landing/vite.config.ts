@@ -25,4 +25,7 @@ export default defineConfig({
   server: {
     allowedHosts: true,
   },
+  preview: {
+    host: "127.0.0.1",
+  },
 });
