@@ -1,7 +1,7 @@
 {
   "name": "gun-landing",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "imports": {
     "#/*": "./src/*"
@@ -17,6 +17,7 @@
     "@content-collections/core": "^0.15.0",
     "@content-collections/markdown": "^0.1.4",
     "@content-collections/vite": "^0.3.0",
+    "@resvg/resvg-wasm": "^2.6.2",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "latest",
     "@tanstack/react-router": "latest",
@@ -28,6 +29,7 @@
     "lucide-react": "^0.545.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "satori": "^0.26.0",
     "tailwindcss": "^4.1.18"
   },
   "devDependencies": {

@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as DocsRouteImport } from './routes/docs'
 import { Route as BlogRouteImport } from './routes/blog'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as OgSplatRouteImport } from './routes/og/$'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
 
 const DocsRoute = DocsRouteImport.update({
@@ -29,6 +30,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OgSplatRoute = OgSplatRouteImport.update({
+  id: '/og/$',
+  path: '/og/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSplatRoute = ApiSplatRouteImport.update({
   id: '/api/$',
   path: '/api/$',
@@ -40,12 +46,14 @@ export interface FileRoutesByFullPath {
   '/blog': typeof BlogRoute
   '/docs': typeof DocsRoute
   '/api/$': typeof ApiSplatRoute
+  '/og/$': typeof OgSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/blog': typeof BlogRoute
   '/docs': typeof DocsRoute
   '/api/$': typeof ApiSplatRoute
+  '/og/$': typeof OgSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +61,14 @@ export interface FileRoutesById {
   '/blog': typeof BlogRoute
   '/docs': typeof DocsRoute
   '/api/$': typeof ApiSplatRoute
+  '/og/$': typeof OgSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/blog' | '/docs' | '/api/$'
+  fullPaths: '/' | '/blog' | '/docs' | '/api/$' | '/og/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/blog' | '/docs' | '/api/$'
-  id: '__root__' | '/' | '/blog' | '/docs' | '/api/$'
+  to: '/' | '/blog' | '/docs' | '/api/$' | '/og/$'
+  id: '__root__' | '/' | '/blog' | '/docs' | '/api/$' | '/og/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,6 +76,7 @@ export interface RootRouteChildren {
   BlogRoute: typeof BlogRoute
   DocsRoute: typeof DocsRoute
   ApiSplatRoute: typeof ApiSplatRoute
+  OgSplatRoute: typeof OgSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -92,6 +102,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/og/$': {
+      id: '/og/$'
+      path: '/og/$'
+      fullPath: '/og/$'
+      preLoaderRoute: typeof OgSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/$': {
       id: '/api/$'
       path: '/api/$'
@@ -107,6 +124,7 @@ const rootRouteChildren: RootRouteChildren = {
   BlogRoute: BlogRoute,
   DocsRoute: DocsRoute,
   ApiSplatRoute: ApiSplatRoute,
+  OgSplatRoute: OgSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

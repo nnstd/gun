@@ -11,6 +11,7 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./
 COPY --from=build /app/serve.ts ./
+COPY --from=build /app/src/assets ./src/assets
 ENV PORT=3000
 EXPOSE 3000
 CMD ["sh", "-c", "bun run start"]

@@ -17,6 +17,25 @@ export const Route = createRootRoute({
         content:
           'Gun transpiles your JavaScript codebase and its npm dependencies into Go, with Bun and Node compatibility and a landing, docs, and blog experience rebuilt from the latest HTML variants.',
       },
+      { property: 'og:title', content: 'Gun — Compile JavaScript to Go' },
+      {
+        property: 'og:description',
+        content:
+          'Transpile JavaScript and TypeScript codebases — npm dependencies and all — into native Go binaries with Bun and Node compatibility.',
+      },
+      { property: 'og:type', content: 'website' },
+      { property: 'og:url', content: 'https://gun.nnstd.dev' },
+      { property: 'og:image', content: 'https://gun.nnstd.dev/og/image.png' },
+      { property: 'og:locale', content: 'en_US' },
+      { property: 'og:site_name', content: 'Gun' },
+      { name: 'twitter:card', content: 'summary_large_image' },
+      { name: 'twitter:title', content: 'Gun — Compile JavaScript to Go' },
+      {
+        name: 'twitter:description',
+        content:
+          'Transpile JavaScript and TypeScript codebases — npm dependencies and all — into native Go binaries with Bun and Node compatibility.',
+      },
+      { name: 'twitter:image', content: 'https://gun.nnstd.dev/og/image.png' },
     ],
     links: [
       { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
