@@ -171,7 +171,7 @@ func isAlreadyJSValue(expr ast.Expr) bool {
 				return true
 			}
 			switch sel.Sel.Name {
-			case "Get", "Index", "Call", "MethodCall":
+			case "Get", "Index", "Call", "MethodCall", "MarkAsAsync", "MarkAsMethod", "New":
 				return true
 			}
 		}

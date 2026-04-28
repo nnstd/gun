@@ -69,6 +69,29 @@ func TestFromPrimitiveJSValuePassthrough(t *testing.T) {
 	})
 }
 
+func TestHeapEscapeCopiesNestedArenaValues(t *testing.T) {
+	a := NewArena()
+	obj := ObjectFrom("n", a.NewNumber(42), "arr", NewArray(a.NewString("x")))
+	obj.isArenaAllocated = true
+	escaped := HeapEscape(obj)
+
+	if escaped.Get("n").isArenaAllocated {
+		t.Fatal("object property still points at arena value")
+	}
+	if escaped.Get("arr").Index(0).isArenaAllocated {
+		t.Fatal("array element still points at arena value")
+	}
+
+	a.reset()
+	_ = a.NewNumber(7)
+	if got := escaped.Get("n").Number(); got != 42 {
+		t.Fatalf("escaped object property changed after arena reuse: got %v", got)
+	}
+	if got := escaped.Get("arr").Index(0).String(); got != "x" {
+		t.Fatalf("escaped array element changed after arena reuse: got %q", got)
+	}
+}
+
 func TestFromPrimitives(t *testing.T) {
 	if v := From(42); v.typ != TypeNumber || int(v.Number()) != 42 {
 		t.Errorf("From(int): got type=%v num=%v", v.typ, v.Number())

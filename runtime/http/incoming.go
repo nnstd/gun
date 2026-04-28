@@ -39,20 +39,25 @@ func newIncomingMessage(ctx *fasthttp.RequestCtx) *jsvalue.JSValue {
 	return this
 }
 
-// newClientResponseMessage builds a client-side IncomingMessage from a fasthttp.Response.
-func newClientResponseMessage(resp *fasthttp.Response) *jsvalue.JSValue {
+func newTransportResponseMessage(resp *TransportResponse) *jsvalue.JSValue {
 	this := jsvalue.NewObjectWithPrototype(incomingCls.Get("prototype"))
 	initEvents(this)
 
 	headers := jsvalue.NewObject()
 	rawHeaders := jsvalue.NewArray()
-	for key, value := range resp.Header.All() {
-		headers.Set(strings.ToLower(string(key)), jsvalue.NewString(string(value)))
-		rawHeaders.MethodCall("push", jsvalue.NewString(string(key)), jsvalue.NewString(string(value)))
+	if resp != nil {
+		for key, value := range resp.Headers {
+			headers.Set(strings.ToLower(key), jsvalue.NewString(value))
+		}
+		for _, header := range resp.RawHeaders {
+			rawHeaders.MethodCall("push", jsvalue.NewString(header.Key), jsvalue.NewString(header.Value))
+		}
+		this.Set("statusCode", jsvalue.NewNumber(float64(resp.StatusCode)))
+		this.Set("statusMessage", jsvalue.NewString(resp.StatusText))
+	} else {
+		this.Set("statusCode", jsvalue.NewNumber(0))
+		this.Set("statusMessage", jsvalue.NewString(""))
 	}
-
-	this.Set("statusCode", jsvalue.NewNumber(float64(resp.StatusCode())))
-	this.Set("statusMessage", jsvalue.NewString(string(resp.Header.StatusMessage())))
 	this.Set("headers", headers)
 	this.Set("rawHeaders", rawHeaders)
 	this.Set("httpVersion", jsvalue.NewString("1.1"))

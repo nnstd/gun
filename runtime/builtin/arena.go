@@ -192,7 +192,7 @@ func (a *Arena) NewNumber(f float64) *JSValue {
 	v.typ = TypeNumber
 	v.numVal = f
 	v.prototype = NumberPrototype
-	v.ext = nil
+	v.ext.Store(nil)
 	v.boxedValue = nil
 	v.funcVal = nil
 	v.isArr = false
@@ -213,7 +213,7 @@ func (a *Arena) NewString(s string) *JSValue {
 	v.typ = TypeString
 	v.strVal = s
 	v.prototype = StringPrototype
-	v.ext = nil
+	v.ext.Store(nil)
 	v.boxedValue = nil
 	v.funcVal = nil
 	v.isArr = false
@@ -254,13 +254,167 @@ func ReleaseArena(a *Arena) {
 	arenaPool.Put(a)
 }
 
-func heapEscape(v *JSValue) *JSValue {
-	if v == nil || !v.isArenaAllocated {
+func HeapEscape(v *JSValue) *JSValue {
+	return heapEscape(v, map[*JSValue]*JSValue{})
+}
+
+func heapEscape(v *JSValue, seen map[*JSValue]*JSValue) *JSValue {
+	if v == nil {
+		return v
+	}
+	if escaped, ok := seen[v]; ok {
+		return escaped
+	}
+	if !v.isArenaAllocated && !heapEscapeNeedsClone(v, seen) {
 		return v
 	}
 
-	h := new(JSValue)
-	*h = *v
-	h.isArenaAllocated = false
+	h := cloneHeapValue(v)
+	seen[v] = h
+	heapEscapeContents(h, seen)
 	return h
+}
+
+func cloneHeapValue(v *JSValue) *JSValue {
+	h := &JSValue{
+		typ:             v.typ,
+		boolVal:         v.boolVal,
+		numVal:          v.numVal,
+		strVal:          v.strVal,
+		bigIntVal:       v.bigIntVal,
+		boxedValue:      v.boxedValue,
+		symbolDesc:      v.symbolDesc,
+		symbolID:        v.symbolID,
+		prototype:       v.prototype,
+		funcVal:         v.funcVal,
+		profileFrame:    v.profileFrame,
+		isArr:           v.isArr,
+		isMethod:        v.isMethod,
+		isAsyncFunction: v.isAsyncFunction,
+		frozen:          v.frozen,
+	}
+	if ext := v.extOrNil(); ext != nil {
+		newExt := &jsValueExt{
+			regexVal:  ext.regexVal,
+			classInit: ext.classInit,
+		}
+		if props := v.propertiesOrNil(); props != nil {
+			props.ForEach(func(key string, desc *PropertyDescriptor) {
+				if desc == nil {
+					return
+				}
+				newExt.properties.Set(key, &PropertyDescriptor{
+					Value:        desc.Value,
+					Writable:     desc.Writable,
+					Enumerable:   desc.Enumerable,
+					Configurable: desc.Configurable,
+					Get:          desc.Get,
+					Set:          desc.Set,
+				})
+			})
+		}
+		if arr := v.arrayListOrNil(); arr != nil {
+			for i := 0; i < arr.Len(); i++ {
+				newExt.arrayVal.Push(arr.Get(i))
+			}
+		}
+		if m := v.mapState(); m != nil {
+			newExt.mapVal = &jsMap{entries: make([]*jsMapEntry, 0, len(m.entries))}
+			for _, entry := range m.entries {
+				if entry == nil {
+					newExt.mapVal.entries = append(newExt.mapVal.entries, nil)
+					continue
+				}
+				newExt.mapVal.entries = append(newExt.mapVal.entries, &jsMapEntry{key: entry.key, value: entry.value})
+			}
+		}
+		if s := v.setState(); s != nil {
+			newExt.setVal = &jsSet{items: append([]*JSValue(nil), s.items...)}
+		}
+		h.ext.Store(newExt)
+	}
+	return h
+}
+
+func heapEscapeNeedsClone(v *JSValue, seen map[*JSValue]*JSValue) bool {
+	if v == nil {
+		return false
+	}
+	if v.isArenaAllocated {
+		return true
+	}
+	if _, ok := seen[v]; ok {
+		return false
+	}
+	seen[v] = v
+	defer delete(seen, v)
+	if arr := v.arrayListOrNil(); arr != nil {
+		for i := 0; i < arr.Len(); i++ {
+			if heapEscapeNeedsClone(arr.Get(i), seen) {
+				return true
+			}
+		}
+	}
+	if props := v.propertiesOrNil(); props != nil {
+		needs := false
+		props.ForEach(func(_ string, desc *PropertyDescriptor) {
+			if !needs && desc != nil && heapEscapeNeedsClone(desc.Value, seen) {
+				needs = true
+			}
+		})
+		if needs {
+			return true
+		}
+	}
+	if m := v.mapState(); m != nil {
+		for _, entry := range m.entries {
+			if entry != nil && (heapEscapeNeedsClone(entry.key, seen) || heapEscapeNeedsClone(entry.value, seen)) {
+				return true
+			}
+		}
+	}
+	if s := v.setState(); s != nil {
+		for _, item := range s.items {
+			if heapEscapeNeedsClone(item, seen) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func heapEscapeContents(v *JSValue, seen map[*JSValue]*JSValue) {
+	if v == nil {
+		return
+	}
+	if v.isArr {
+		arr := v.arrayListOrNil()
+		if arr != nil {
+			for i := 0; i < arr.Len(); i++ {
+				arr.Set(i, heapEscape(arr.Get(i), seen))
+			}
+		}
+	}
+	if props := v.propertiesOrNil(); props != nil {
+		props.ForEach(func(_ string, desc *PropertyDescriptor) {
+			if desc == nil {
+				return
+			}
+			desc.Value = heapEscape(desc.Value, seen)
+		})
+	}
+	if m := v.mapState(); m != nil {
+		for _, entry := range m.entries {
+			if entry == nil {
+				continue
+			}
+			entry.key = heapEscape(entry.key, seen)
+			entry.value = heapEscape(entry.value, seen)
+		}
+	}
+	if s := v.setState(); s != nil {
+		for i, item := range s.items {
+			s.items[i] = heapEscape(item, seen)
+		}
+	}
 }

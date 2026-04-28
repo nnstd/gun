@@ -142,6 +142,18 @@ func registerGlobalObjects(ctx *tcontext.TranspilerContext) {
 // registerGlobalFunctions registers bare global function calls like parseInt, isNaN.
 func registerGlobalFunctions(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
+		Name: "fetch",
+		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+			imp.AddImport("github.com/nnstd/gun/runtime/web")
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			for i, arg := range args {
+				args[i] = jsvalueWrapLit(arg)
+			}
+			return callExpr(selectorExpr(selectorExpr(ident("web"), "Fetch"), "Call"), args...)
+		},
+	})
+
+	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
 		Name: "isNaN",
 		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
 			imp.AddImport("github.com/nnstd/gun/runtime/builtin/math")
@@ -619,7 +631,7 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		},
 	})
 
-	for _, identName := range []string{"Headers", "Request", "Response", "URL", "File", "RegExp"} {
+	for _, identName := range []string{"Headers", "Request", "Response", "URL", "File", "RegExp", "fetch"} {
 		name := identName
 		ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 			Name: name,
@@ -631,6 +643,9 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 				imp.AddImport("github.com/nnstd/gun/runtime/web")
 				if name == "URL" {
 					return selectorExpr(ident("web"), "URL")
+				}
+				if name == "fetch" {
+					return selectorExpr(ident("web"), "Fetch")
 				}
 				return selectorExpr(ident("web"), name)
 			},
@@ -1007,6 +1022,7 @@ func registerKnownGlobals(ctx *tcontext.TranspilerContext) {
 	ctx.MarkKnownGlobal("Response")
 	ctx.MarkKnownGlobal("URL")
 	ctx.MarkKnownGlobal("File")
+	ctx.MarkKnownGlobal("fetch")
 	ctx.MarkKnownGlobal("Symbol")
 	ctx.MarkKnownGlobal("module")
 	ctx.MarkKnownGlobal("require")

@@ -23,9 +23,11 @@ package dynfunc
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"strconv"
 	"strings"
+
 	"github.com/nnstd/gun/compiler/hir"
 	"github.com/nnstd/gun/compiler/symbol"
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
@@ -33,6 +35,7 @@ import (
 	_ "github.com/nnstd/gun/runtime/builtin/error"
 	_ "github.com/nnstd/gun/runtime/builtin/json"
 	_ "github.com/nnstd/gun/runtime/builtin/math"
+	_ "github.com/nnstd/gun/runtime/web"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
@@ -71,9 +74,7 @@ func newInterpreter() *Interpreter {
 //
 // new Function() only sees these — no closure access.
 func (interp *Interpreter) populateGlobals() {
-	for name, val := range jsvalue.Globals() {
-		interp.globals[name] = val
-	}
+	maps.Copy(interp.globals, jsvalue.Globals())
 }
 
 func (interp *Interpreter) pushScope() {
@@ -544,7 +545,7 @@ func (interp *Interpreter) expandArgs(args []hir.Expr) []*jsvalue.JSValue {
 		if spread, ok := a.(*hir.SpreadExpr); ok {
 			val := interp.evalExpr(spread.Value)
 			n := val.Len()
-			for i := 0; i < n; i++ {
+			for i := range n {
 				expanded = append(expanded, val.Get(fmt.Sprintf("%d", i)))
 			}
 		} else {
@@ -583,7 +584,7 @@ func (interp *Interpreter) evalArrayLiteral(a *hir.ArrayLiteral) *jsvalue.JSValu
 		} else if spread, ok := el.(*hir.SpreadExpr); ok {
 			val := interp.evalExpr(spread.Value)
 			n := val.Len()
-			for i := 0; i < n; i++ {
+			for i := range n {
 				elems = append(elems, val.Get(fmt.Sprintf("%d", i)))
 			}
 		} else {
@@ -723,15 +724,11 @@ func (interp *Interpreter) evalFuncDecl(params []*hir.Param, body *hir.BlockStmt
 	capturedScopes := make([]map[symbol.ID]*jsvalue.JSValue, len(interp.scopes))
 	for i, s := range interp.scopes {
 		cp := make(map[symbol.ID]*jsvalue.JSValue, len(s))
-		for k, v := range s {
-			cp[k] = v
-		}
+		maps.Copy(cp, s)
 		capturedScopes[i] = cp
 	}
 	capturedGlobals := make(map[string]*jsvalue.JSValue, len(interp.globals))
-	for k, v := range interp.globals {
-		capturedGlobals[k] = v
-	}
+	maps.Copy(capturedGlobals, interp.globals)
 	thisVal := interp.thisVal
 	superVal := interp.superVal
 
@@ -746,9 +743,7 @@ func (interp *Interpreter) evalFuncDecl(params []*hir.Param, body *hir.BlockStmt
 		child.scopes = make([]map[symbol.ID]*jsvalue.JSValue, len(capturedScopes))
 		for i, s := range capturedScopes {
 			cs := make(map[symbol.ID]*jsvalue.JSValue, len(s))
-			for k, v := range s {
-				cs[k] = v
-			}
+			maps.Copy(cs, s)
 			child.scopes[i] = cs
 		}
 
@@ -861,7 +856,7 @@ func (interp *Interpreter) bindPattern(pat hir.Pattern, source *jsvalue.JSValue)
 
 // --- Statement execution ---
 
-type execResult interface{}
+type execResult any
 
 func (interp *Interpreter) execStmt(s hir.Stmt) execResult {
 	if s == nil {
@@ -1018,7 +1013,7 @@ func (interp *Interpreter) execForOf(f *hir.ForOfStmt) execResult {
 	iterable := interp.evalExpr(f.Value)
 	length := iterable.Len()
 
-	for i := 0; i < length; i++ {
+	for i := range length {
 		elem := iterable.Get(fmt.Sprintf("%d", i))
 		if f.Elem != nil {
 			interp.set(f.Elem, elem)
@@ -1145,7 +1140,7 @@ func CompileFunctionHIR(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 	body := args[len(args)-1].String()
 	var paramNames []string
 	for _, a := range args[:len(args)-1] {
-		for _, p := range strings.Split(a.String(), ",") {
+		for p := range strings.SplitSeq(a.String(), ",") {
 			p = strings.TrimSpace(p)
 			if p != "" {
 				paramNames = append(paramNames, p)

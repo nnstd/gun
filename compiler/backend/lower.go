@@ -3122,6 +3122,8 @@ func hirExprReferencesName(expr hir.Expr, name string) bool {
 			}
 		case *hir.ParenExpr:
 			walk(e.Expr)
+		case *hir.AwaitExpr:
+			walk(e.Value)
 		}
 	}
 	walk(expr)
@@ -3217,6 +3219,64 @@ func walkStmtExprRefs(stmt hir.Stmt, name string, found *bool) {
 				}
 			}
 		}
+	case *hir.ThrowStmt:
+		if hirExprReferencesName(s.Value, name) {
+			*found = true
+		}
+	case *hir.WhileStmt:
+		if hirExprReferencesName(s.Cond, name) {
+			*found = true
+			return
+		}
+		if s.Body != nil {
+			for _, st := range s.Body.Stmts {
+				walkStmtExprRefs(st, name, found)
+				if *found {
+					return
+				}
+			}
+		}
+	case *hir.DoWhileStmt:
+		if hirExprReferencesName(s.Cond, name) {
+			*found = true
+			return
+		}
+		if s.Body != nil {
+			for _, st := range s.Body.Stmts {
+				walkStmtExprRefs(st, name, found)
+				if *found {
+					return
+				}
+			}
+		}
+	case *hir.ForInStmt:
+		if hirExprReferencesName(s.Value, name) {
+			*found = true
+			return
+		}
+		if s.Body != nil {
+			for _, st := range s.Body.Stmts {
+				walkStmtExprRefs(st, name, found)
+				if *found {
+					return
+				}
+			}
+		}
+	case *hir.ForOfStmt:
+		if hirExprReferencesName(s.Value, name) {
+			*found = true
+			return
+		}
+		if s.Body != nil {
+			for _, st := range s.Body.Stmts {
+				walkStmtExprRefs(st, name, found)
+				if *found {
+					return
+				}
+			}
+		}
+	case *hir.LabeledStmt:
+		walkStmtExprRefs(s.Stmt, name, found)
 	}
 }
 

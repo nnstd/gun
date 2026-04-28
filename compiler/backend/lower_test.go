@@ -971,6 +971,38 @@ func TestClassMethodsAreMarkedAsMethod(t *testing.T) {
 	assertContains(t, out, "MarkAsMethod")
 }
 
+func TestClassMethodsThatReplaceThemselvesAreSynchronized(t *testing.T) {
+	out := lowerTS(t, `
+		class Lazy {
+			match(value) {
+				this.match = value;
+				this.#state = value;
+				return value;
+			}
+		}
+	`)
+	assertContains(t, out, `MarkSynchronized("match")`)
+}
+
+func TestMethodLikeFunctionThatReplacesItselfIsSynchronized(t *testing.T) {
+	out := lowerTS(t, `
+		function match(value) {
+			this.match = value;
+			return value;
+		}
+	`)
+	assertContains(t, out, `MarkSynchronized("match")`)
+}
+
+func TestClassMethodsThatDoNotReplaceThemselvesAreNotSynchronized(t *testing.T) {
+	out := lowerTS(t, `
+		class Writer {
+			name(value) { this.value = value; return this.value; }
+		}
+	`)
+	assertNotContains(t, out, "MarkSynchronized")
+}
+
 func TestClassGetterWithoutArenaWorkDoesNotAllocateArena(t *testing.T) {
 	out := lowerTSOpt(t, `
 		class Foo {
@@ -990,7 +1022,24 @@ func TestFunctionWithArithmeticUsesArena(t *testing.T) {
 	`, context.O2)
 	assertContains(t, out, "GetArena")
 	assertContains(t, out, "ReleaseArena")
+	assertContains(t, out, "NewArenaFunction")
 	assertContains(t, out, "AAdd")
+}
+
+func TestFunctionArenaScopePopsBeforeRelease(t *testing.T) {
+	out := lowerTSOpt(t, `
+		function add(a, b) {
+			return a + b;
+		}
+	`, context.O2)
+	release := strings.Index(out, "defer jsvalue.ReleaseArena(_arena)")
+	pop := strings.Index(out, "defer _arena.PopScope()")
+	if release < 0 || pop < 0 {
+		t.Fatalf("expected arena defers in output:\n%s", out)
+	}
+	if release > pop {
+		t.Fatalf("ReleaseArena defer must be emitted before PopScope defer so PopScope runs first:\n%s", out)
+	}
 }
 
 func TestFunctionWithOnlyPropertyReadsDoesNotUseArena(t *testing.T) {

@@ -2,6 +2,7 @@ package jsvalue
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/dlclark/regexp2"
 )
@@ -12,6 +13,7 @@ import (
 type regexp2Wrapper struct {
 	re      *regexp2.Regexp
 	pattern string
+	mu      sync.Mutex
 }
 
 func newRegexp2(pattern string) (*regexp2Wrapper, error) {
@@ -27,6 +29,8 @@ func newRegexp2(pattern string) (*regexp2Wrapper, error) {
 }
 
 func (w *regexp2Wrapper) MatchString(s string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	m, _ := w.re.MatchString(s)
 	return m
 }
@@ -36,11 +40,15 @@ func (w *regexp2Wrapper) String() string {
 }
 
 func (w *regexp2Wrapper) ReplaceAllString(src, repl string) string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	result, _ := w.re.Replace(src, repl, -1, -1)
 	return result
 }
 
 func (w *regexp2Wrapper) FindStringSubmatch(s string) []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	m, _ := w.re.FindStringMatch(s)
 	if m == nil {
 		return nil
@@ -54,6 +62,8 @@ func (w *regexp2Wrapper) FindStringSubmatch(s string) []string {
 }
 
 func (w *regexp2Wrapper) Split(s string, n int) []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	// Implement split using FindStringMatch
 	var parts []string
 	lastIndex := 0
@@ -75,6 +85,8 @@ func (w *regexp2Wrapper) Split(s string, n int) []string {
 
 // FindAllString returns all non-overlapping matches, like regexp.FindAllString.
 func (w *regexp2Wrapper) FindAllString(s string, n int) []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	var results []string
 	m, _ := w.re.FindStringMatch(s)
 	for m != nil {
@@ -89,6 +101,8 @@ func (w *regexp2Wrapper) FindAllString(s string, n int) []string {
 
 // FindStringSubmatchIndex returns the index pairs for the first match.
 func (w *regexp2Wrapper) FindStringSubmatchIndex(s string) []int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	m, _ := w.re.FindStringMatch(s)
 	if m == nil {
 		return nil

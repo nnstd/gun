@@ -7,6 +7,7 @@ import (
 	"net"
 	"runtime/debug"
 	"strconv"
+	"sync"
 	"syscall"
 
 	"github.com/valyala/fasthttp"
@@ -19,7 +20,15 @@ import (
 )
 
 var (
-	listenFn  = net.Listen
+	listenFn = net.Listen
+
+	// fetchMu serializes the fetch handler call to prevent concurrent
+	// mutation of shared router state (Hono's trie router mutates handlerSet
+	// objects during match). In JS this is safe (single-threaded), but Go's
+	// fasthttp spawns a goroutine per request. The mutex covers only the
+	// synchronous dispatch; async promise resolution runs after unlock.
+	fetchMu sync.Mutex
+
 	AsJSValue = func() *jsvalue.JSValue {
 		obj := jsvalue.NewObject()
 		obj.Set("serve", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
@@ -52,7 +61,7 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 	routes := options.Get("routes")
 	if !routes.Bool() && routes.TypeString() != "object" {
 		if fetch.TypeString() == "undefined" {
-			panic(error.InvalidArgType("Bun.serve() needs either:\n\n  - A routes object:\n     routes: {\n       \"/path\": {\n         GET: (req) => new Response(\"Hello\")\n       }\n     }\n\n  - Or a fetch handler:\n     fetch: (req) => {\n       return new Response(\"Hello\")\n     }\n\nLearn more at https://bun.com/docs/api/http"))
+			panic(error.InvalidArgType("Bun.serve() needs either:\n\n - A routes object:\n routes: {\n \"/path\": {\n GET: (req) => new Response(\"Hello\")\n }\n }\n\n - Or a fetch handler:\n fetch: (req) => {\n return new Response(\"Hello\")\n }\n\nLearn more at https://bun.com/docs/api/http"))
 		}
 		if fetch.TypeString() != "function" {
 			panic(error.InvalidArgType("Expected fetch() to be a function"))
@@ -88,7 +97,6 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 	serverObj.Set("port", jsvalue.NewNumber(float64(actualPort)))
 	serverObj.Set("url", jsvalue.NewString(fmt.Sprintf("http://127.0.0.1:%d", actualPort)))
 
-	// JSValues are self-locking via per-object RWMutex — no global mutex needed.
 	server := &fasthttp.Server{
 		Handler: func(ctx *fasthttp.RequestCtx) {
 			defer func() {
@@ -98,12 +106,26 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 					ctx.SetBodyString(fmt.Sprintf("Internal Server Error: %v", r))
 				}
 			}()
+
+			// Serialize the fetch dispatch to prevent concurrent mutation
+			// of shared router state (handlerSet.params writes in Hono's
+			// trie router). For sync handlers, the mutex is held only for
+			// the brief routing + handler execution. For async handlers,
+			// we capture the promise result before unlocking.
+			fetchMu.Lock()
 			req := web.RequestFromFastHTTP(ctx)
 			res := fetch.Call(req, serverObj)
+
 			if !promise.IsPromise(res) {
+				fetchMu.Unlock()
 				web.WriteResponseFastHTTP(ctx, res)
 				return
 			}
+
+			// For async handlers: the promise's .then() callbacks are
+			// scheduled as microtasks on the event loop. We must unlock
+			// before awaiting so the event loop can process them.
+			fetchMu.Unlock()
 			res = promise.Await(res)
 			web.WriteResponseFastHTTP(ctx, res)
 		},

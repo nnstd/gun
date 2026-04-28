@@ -844,16 +844,21 @@ func (l *Lowerer) lowerAssignExpr(e *hir.AssignExpr) ast.Expr {
 			current := callExpr(selectorExpr(obj, "Get"), l.lowerClassMemberKey(mem.Property, mem.Private, nil))
 			val = callExpr(selectorExpr(goIdent("jsvalue"), helperName), current, val)
 		}
-		setCall := callExpr(selectorExpr(obj, "Set"), l.lowerClassMemberKey(mem.Property, mem.Private, nil), val)
+		tmp := l.nextSyntheticName("_v")
+		setCall := callExpr(selectorExpr(obj, "Set"), l.lowerClassMemberKey(mem.Property, mem.Private, nil), goIdent(tmp))
 		return &ast.CallExpr{
 			Fun: &ast.FuncLit{
 				Type: &ast.FuncType{Params: fieldList(), Results: fieldList(goField("", jsValuePtrType()))},
-				Body: blockStmt(exprStmt(setCall), returnStmt(val)),
+				Body: blockStmt(
+					assignDefine([]ast.Expr{goIdent(tmp)}, []ast.Expr{val}),
+					exprStmt(setCall),
+					returnStmt(goIdent(tmp)),
+				),
 			},
 		}
 	}
 
-	// Computed member assignment: obj[key] = val → IIFE { obj.Set(key, val); return val }
+	// Computed member assignment: obj[key] = val → IIFE { tmp := val; obj.Set(key, tmp); return tmp }
 	if comp, ok := e.Left.(*hir.ComputedMemberExpr); ok && l.exprIsJSValue(comp.Object) {
 		l.jsvalueImport()
 		obj := l.lowerExpr(comp.Object)
@@ -864,11 +869,16 @@ func (l *Lowerer) lowerAssignExpr(e *hir.AssignExpr) ast.Expr {
 			current := callExpr(selectorExpr(obj, "Get"), key)
 			val = callExpr(selectorExpr(goIdent("jsvalue"), helperName), current, val)
 		}
-		setCall := callExpr(selectorExpr(obj, "Set"), key, val)
+		tmp := l.nextSyntheticName("_v")
+		setCall := callExpr(selectorExpr(obj, "Set"), key, goIdent(tmp))
 		return &ast.CallExpr{
 			Fun: &ast.FuncLit{
 				Type: &ast.FuncType{Params: fieldList(), Results: fieldList(goField("", jsValuePtrType()))},
-				Body: blockStmt(exprStmt(setCall), returnStmt(val)),
+				Body: blockStmt(
+					assignDefine([]ast.Expr{goIdent(tmp)}, []ast.Expr{val}),
+					exprStmt(setCall),
+					returnStmt(goIdent(tmp)),
+				),
 			},
 		}
 	}

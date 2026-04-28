@@ -1,6 +1,7 @@
 package web
 
 import (
+	stdjson "encoding/json"
 	"io"
 	"net/http"
 	neturl "net/url"
@@ -9,6 +10,7 @@ import (
 	"github.com/valyala/fasthttp"
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
+	jserror "github.com/nnstd/gun/runtime/builtin/error"
 	jsonpkg "github.com/nnstd/gun/runtime/builtin/json"
 	"github.com/nnstd/gun/runtime/promise"
 )
@@ -49,6 +51,7 @@ func newResponseValue(proto, body, status, statusText, headers *jsvalue.JSValue)
 		"body", body,
 		"_bodyInit", body,
 		"ok", jsvalue.NewBool(status.Number() >= 200 && status.Number() < 300),
+		"bodyUsed", jsvalue.NewBool(false),
 	)
 	return res
 }
@@ -63,21 +66,41 @@ var Request = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSVa
 		init = args[1]
 	}
 
-	url := ""
-	if input != nil {
-		if input.Get("url").Bool() || input.Get("url").TypeString() == "string" {
-			url = input.Get("url").String()
-		} else {
-			url = input.String()
-		}
-	}
-	if url == "" {
-		url = "http://127.0.0.1/"
-	}
-
 	method := jsvalue.NewString("GET")
 	headers := newHeadersValue(nil)
 	body := jsvalue.NewString("")
+	url := ""
+
+	if input != nil {
+		switch {
+		case input.Get("url").TypeString() == "string":
+			if input.Get("bodyUsed").Bool() {
+				panic(jserror.TypeError.Call(jsvalue.NewString("Cannot construct a Request from a consumed body")))
+			}
+			url = input.Get("url").String()
+			if v := input.Get("method"); v.TypeString() == "string" {
+				method = jsvalue.NewString(strings.ToUpper(v.String()))
+			}
+			if v := input.Get("headers"); v.TypeString() == "object" {
+				headers = cloneHeaders(v)
+			}
+			if v := input.Get("body"); v.TypeString() == "string" {
+				body = jsvalue.NewString(v.String())
+			}
+		case input.Get("href").TypeString() == "string":
+			url = input.Get("href").String()
+		case input.TypeString() == "string":
+			url = input.String()
+		default:
+			panic(jserror.TypeError.Call(jsvalue.NewString("Request input must be a string, Request, or URL with href")))
+		}
+	}
+	if url == "" {
+		panic(jserror.TypeError.Call(jsvalue.NewString("Request requires an absolute URL")))
+	}
+	if _, err := parseAbsoluteURL(url); err != nil {
+		panic(jserror.TypeError.Call(jsvalue.NewString(err.Error())))
+	}
 
 	if init != nil && init.TypeString() == "object" {
 		if init.Get("method").Bool() || init.Get("method").TypeString() == "string" {
@@ -165,9 +188,6 @@ var URL = jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 })
 
 func newRequestValueWithPrototype(proto *jsvalue.JSValue, url, method string, headers *jsvalue.JSValue, body string) *jsvalue.JSValue {
-	if url == "" {
-		url = "http://127.0.0.1/"
-	}
 	if method == "" {
 		method = "GET"
 	}
@@ -180,6 +200,7 @@ func newRequestValueWithPrototype(proto *jsvalue.JSValue, url, method string, he
 		"method", jsvalue.NewString(method),
 		"headers", headers,
 		"body", jsvalue.NewString(body),
+		"bodyUsed", jsvalue.NewBool(false),
 	)
 	req.Set("raw", req)
 	return req
@@ -223,28 +244,74 @@ func init() {
 		if len(args) < 1 || args[0] == nil {
 			return promise.Promise.Get("resolve").Call(jsvalue.NewString(""))
 		}
-		return promise.Promise.Get("resolve").Call(jsvalue.NewString(args[0].Get("body").String()))
+		text, errVal := consumeBody(args[0])
+		if errVal != nil {
+			return promise.Promise.Get("reject").Call(errVal)
+		}
+		return promise.Promise.Get("resolve").Call(jsvalue.NewString(text))
 	}).MarkAsMethod())
 	Request.Get("prototype").Set("json", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		if len(args) < 1 || args[0] == nil {
 			return promise.Promise.Get("resolve").Call(jsvalue.NewUndefined())
 		}
-		parsed := jsonpkg.Parse(jsvalue.NewString(args[0].Get("body").String()))
-		return promise.Promise.Get("resolve").Call(jsvalue.From(parsed))
+		text, errVal := consumeBody(args[0])
+		if errVal != nil {
+			return promise.Promise.Get("reject").Call(errVal)
+		}
+		parsed, err := parseJSONBody(text)
+		if err != nil {
+			return promise.Promise.Get("reject").Call(jserror.SyntaxError.Call(jsvalue.NewString(err.Error())))
+		}
+		return promise.Promise.Get("resolve").Call(parsed)
 	}).MarkAsMethod())
 
 	Response.Get("prototype").Set("text", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		if len(args) < 1 || args[0] == nil {
-			return jsvalue.NewString("")
+			return promise.Promise.Get("resolve").Call(jsvalue.NewString(""))
 		}
-		return jsvalue.NewString(args[0].Get("body").String())
+		text, errVal := consumeBody(args[0])
+		if errVal != nil {
+			return promise.Promise.Get("reject").Call(errVal)
+		}
+		return promise.Promise.Get("resolve").Call(jsvalue.NewString(text))
 	}).MarkAsMethod())
 	Response.Get("prototype").Set("json", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		if len(args) < 1 || args[0] == nil {
-			return jsvalue.NewUndefined()
+			return promise.Promise.Get("resolve").Call(jsvalue.NewUndefined())
 		}
-		return jsvalue.NewString(args[0].Get("body").String())
+		text, errVal := consumeBody(args[0])
+		if errVal != nil {
+			return promise.Promise.Get("reject").Call(errVal)
+		}
+		parsed, err := parseJSONBody(text)
+		if err != nil {
+			return promise.Promise.Get("reject").Call(jserror.SyntaxError.Call(jsvalue.NewString(err.Error())))
+		}
+		return promise.Promise.Get("resolve").Call(parsed)
 	}).MarkAsMethod())
+}
+
+func consumeBody(v *jsvalue.JSValue) (string, *jsvalue.JSValue) {
+	if v == nil {
+		return "", nil
+	}
+	if v.Get("bodyUsed").Bool() {
+		return "", jserror.TypeError.Call(jsvalue.NewString("Body has already been read"))
+	}
+	v.Set("bodyUsed", jsvalue.NewBool(true))
+	body := v.Get("body")
+	if body == nil || body.TypeString() == "undefined" || body.TypeString() == "null" {
+		return "", nil
+	}
+	return body.String(), nil
+}
+
+func parseJSONBody(text string) (*jsvalue.JSValue, error) {
+	var decoded any
+	if err := stdjson.Unmarshal([]byte(text), &decoded); err != nil {
+		return nil, err
+	}
+	return jsonpkg.Parse(jsvalue.NewString(text)), nil
 }
 
 func normalizeHeaderKey(v *jsvalue.JSValue) string {

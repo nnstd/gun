@@ -50,7 +50,7 @@ type jsValueExt struct {
 	mapVal     *jsMap
 	setVal     *jsSet
 	classInit  func(this *JSValue, args ...*JSValue) *JSValue
-	meta       *jsValueMeta
+	meta       atomic.Pointer[jsValueMeta]
 	metaInit   sync.Mutex
 }
 
@@ -78,7 +78,7 @@ type JSValue struct {
 	isAsyncFunction  bool
 	frozen           bool // true for interned singletons; Set/DefineProperty no-op
 	isArenaAllocated bool
-	ext              *jsValueExt
+	ext              atomic.Pointer[jsValueExt]
 }
 
 var jsValueExtInitMu sync.Mutex
@@ -178,6 +178,31 @@ func (v *JSValue) MarkAsAsync() *JSValue {
 	return v
 }
 
+// MarkSynchronized wraps a JS function with a per-function mutex. This is for
+// JS methods that intentionally rewrite shared object state during lazy setup
+// and must not be entered concurrently by Go HTTP handlers.
+func (v *JSValue) MarkSynchronized(methodName string) *JSValue {
+	if v == nil || v.funcVal == nil {
+		return v
+	}
+	var mu sync.Mutex
+	original := v.funcVal
+	v.funcVal = func(args ...*JSValue) *JSValue {
+		mu.Lock()
+		defer mu.Unlock()
+		if methodName != "" && len(args) > 0 && args[0] != nil {
+			if desc := args[0].GetOwnProperty(methodName); desc != nil && desc.Value != nil && desc.Value != v {
+				if v.isMethod {
+					return desc.Value.Call(args[1:]...)
+				}
+				return desc.Value.Call(args...)
+			}
+		}
+		return original(args...)
+	}
+	return v
+}
+
 func (v *JSValue) IsAsyncFunction() bool {
 	return v != nil && v.isAsyncFunction
 }
@@ -186,32 +211,36 @@ func (v *JSValue) extOrNil() *jsValueExt {
 	if v == nil {
 		return nil
 	}
-	return v.ext
+	return v.ext.Load()
 }
 
 func (v *JSValue) ensureExt() *jsValueExt {
-	if v.ext != nil {
-		return v.ext
+	if ext := v.ext.Load(); ext != nil {
+		return ext
 	}
 	jsValueExtInitMu.Lock()
 	defer jsValueExtInitMu.Unlock()
-	if v.ext == nil {
-		v.ext = &jsValueExt{}
+	if ext := v.ext.Load(); ext != nil {
+		return ext
 	}
-	return v.ext
+	ext := &jsValueExt{}
+	v.ext.Store(ext)
+	return ext
 }
 
 func (v *JSValue) ensureMeta() *jsValueMeta {
 	ext := v.ensureExt()
-	if ext.meta != nil {
-		return ext.meta
+	if meta := ext.meta.Load(); meta != nil {
+		return meta
 	}
 	ext.metaInit.Lock()
 	defer ext.metaInit.Unlock()
-	if ext.meta == nil {
-		ext.meta = &jsValueMeta{}
+	if meta := ext.meta.Load(); meta != nil {
+		return meta
 	}
-	return ext.meta
+	meta := &jsValueMeta{}
+	ext.meta.Store(meta)
+	return meta
 }
 
 func (v *JSValue) propertiesOrZero() *SmallPropMap {
@@ -285,8 +314,10 @@ func (v *JSValue) cacheEntries() *[4]cacheEntry {
 }
 
 func (v *JSValue) genLoad() uint64 {
-	if ext := v.extOrNil(); ext != nil && ext.meta != nil {
-		return ext.meta.gen.Load()
+	if ext := v.extOrNil(); ext != nil {
+		if meta := ext.meta.Load(); meta != nil {
+			return meta.gen.Load()
+		}
 	}
 	return 0
 }
@@ -366,19 +397,14 @@ func NewFunction(fn func(...*JSValue) *JSValue) *JSValue {
 	}
 }
 
-// NewArenaFunction creates a function JSValue whose return value is heap-escaped
-// when arena mode is active. Use only for generated functions that bind `_arena`.
+// NewArenaFunction creates a function JSValue for generated functions that bind
+// `_arena`. The compiler emits HeapEscape at arena-backed return sites so the
+// value is copied before function defers release the arena.
 func NewArenaFunction(fn func(...*JSValue) *JSValue) *JSValue {
-	wrapped := fn
-	if !arenaDisabled {
-		wrapped = func(args ...*JSValue) *JSValue {
-			return heapEscape(fn(args...))
-		}
-	}
 	return &JSValue{
 		typ:       TypeFunction,
 		prototype: FunctionPrototype,
-		funcVal:   wrapped,
+		funcVal:   fn,
 	}
 }
 

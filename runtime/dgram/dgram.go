@@ -141,13 +141,6 @@ func defaultBindAddress(network string) string {
 	return "0.0.0.0"
 }
 
-func loopbackAddress(network string) string {
-	if network == "udp6" {
-		return "::1"
-	}
-	return "127.0.0.1"
-}
-
 func parseBindArgs(args []*jsvalue.JSValue, network string) (bindOptions, error) {
 	opts := bindOptions{address: defaultBindAddress(network)}
 	for _, arg := range args {

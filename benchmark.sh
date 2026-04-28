@@ -11,6 +11,7 @@ set -uo pipefail
 GUN_DIR="$(cd "$(dirname "$0")" && pwd)"
 GUN_BIN="${GUN_BIN:-go run $GUN_DIR}"
 BUN_BIN="${BUN_BIN:-bun}"
+NODE_BIN="${NODE_BIN:-node}"
 BENCH_DIR="/tmp/gun-bench"
 K6_DURATION="${K6_DURATION:-10s}"
 K6_RATE="${K6_RATE:-10000}"
@@ -35,6 +36,7 @@ check_deps() {
   local missing=()
   command -v go >/dev/null 2>&1      || missing+=("go")
   command -v $BUN_BIN >/dev/null 2>&1 || missing+=("bun")
+  command -v $NODE_BIN >/dev/null 2>&1 || missing+=("node")
   command -v k6 >/dev/null 2>&1     || missing+=("k6")
   if [ ${#missing[@]} -gt 0 ]; then
     fail "Missing: ${missing[*]}"
@@ -45,7 +47,7 @@ check_deps() {
 # ── Kill servers on our ports ───────────────────────────────
 
 kill_servers() {
-  for port in 3080 3081 3082 3083 3090; do
+  for port in 3080 3081 3082 3083 3090 3091; do
     local pid=$(lsof -ti :$port 2>/dev/null || true)
     if [ -n "$pid" ]; then
       kill $pid 2>/dev/null || true
@@ -58,6 +60,34 @@ cleanup() {
   kill_servers
 }
 trap cleanup EXIT
+
+measure_cold_start() {
+  local port=$1
+  shift
+  local start_ns end_ns
+  start_ns=$(python3 -c 'import time; print(time.monotonic_ns())')
+  PORT=$port "$@" >/dev/null 2>&1 &
+  local pid=$!
+  local deadline=$((SECONDS + 10))
+  while [ $SECONDS -lt $deadline ]; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      kill $pid 2>/dev/null || true
+      echo "0"
+      return 1
+    fi
+    if curl -sf "http://127.0.0.1:${port}/plaintext" >/dev/null 2>&1; then
+      end_ns=$(python3 -c 'import time; print(time.monotonic_ns())')
+      kill $pid 2>/dev/null || true
+      wait $pid 2>/dev/null || true
+      python3 -c "print(f'{(${end_ns}-${start_ns})/1_000_000:.1f}')"
+      return 0
+    fi
+    sleep 0.01
+  done
+  kill $pid 2>/dev/null || true
+  echo "0"
+  return 1
+}
 
 wait_for_server() {
   local pid=$1
@@ -142,15 +172,76 @@ console.log(`Listening on ${port}`);
 TYPESCRIPT
 }
 
+write_server_node_mjs() {
+  cat > "$BENCH_DIR/node/server.mjs" << 'NODEJS'
+import { Hono } from "hono";
+import { serve } from "@hono/node-server";
+import { z } from "zod";
+
+const app = new Hono();
+const port = Number(process.env.PORT || 3000);
+
+const UserSchema = z.object({
+  name: z.string().min(1),
+  email: z.string().email(),
+  age: z.number().min(0).max(150),
+});
+
+function fib(n) {
+  let a = 0;
+  let b = 1;
+  for (let i = 0; i < n; i++) {
+    const next = a + b;
+    a = b;
+    b = next;
+  }
+  return a;
+}
+
+app.get("/plaintext", (c) => c.text("Hello, World!"));
+app.get("/json", (c) => c.json({ hello: "world", ts: Date.now() }));
+app.get("/users/:id", (c) => {
+  const id = c.req.param("id");
+  return c.json({ id, name: "User " + id });
+});
+app.post("/users", async (c) => {
+  const body = await c.req.json();
+  const result = UserSchema.safeParse(body);
+  if (!result.success) {
+    return c.json({ error: "validation failed" }, 400);
+  }
+  return c.json({ created: true, ...result.data }, 201);
+});
+app.get("/items/:itemId/comments/:commentId", (c) => {
+  return c.json({
+    item: c.req.param("itemId"),
+    comment: c.req.param("commentId"),
+  });
+});
+app.get("/fib/:n", (c) => {
+  const raw = c.req.param("n");
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > 78) {
+    return c.json({ error: "n must be an integer between 0 and 78" }, 400);
+  }
+  return c.json({ n, value: fib(n) });
+});
+
+serve({ fetch: app.fetch, port });
+console.log(`Listening on ${port}`);
+NODEJS
+}
+
 # ── Bootstrap ───────────────────────────────────────────────
 
 bootstrap() {
   log "Bootstrapping in $BENCH_DIR ..."
 
   rm -rf "$BENCH_DIR"
-  mkdir -p "$BENCH_DIR/bun" "$BENCH_DIR/logs"
+  mkdir -p "$BENCH_DIR/bun" "$BENCH_DIR/node" "$BENCH_DIR/logs"
 
   write_server_ts
+  write_server_node_mjs
 
   # ── Gun: transpile + build for each opt level ──
   for level in $GUN_OPT_LEVELS; do
@@ -166,6 +257,23 @@ bootstrap() {
   cp "$BENCH_DIR/server.ts" "$BENCH_DIR/bun/server.ts"
   (cd "$BENCH_DIR/bun" && $BUN_BIN init -y 2>&1 | tail -1 && $BUN_BIN add hono zod 2>&1 | tail -3)
   ok "Bun setup done"
+
+  # ── Node: install deps ──
+  log "Installing Node deps ..."
+  cat > "$BENCH_DIR/node/package.json" << 'PKG'
+{
+  "name": "gun-bench-node",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "hono": "^4.12.15",
+    "@hono/node-server": "^1.13.7",
+    "zod": "^3.23.8"
+  }
+}
+PKG
+  (cd "$BENCH_DIR/node" && npm install --silent --no-audit --no-fund 2>&1 | tail -3)
+  ok "Node setup done"
 }
 
 # ── Sample server resource usage during benchmark ───────────
@@ -399,6 +507,11 @@ main() {
   for level in $GUN_OPT_LEVELS; do
     kill_servers
     local label="Gun -O${level}"
+    log "Cold start: ${label} ..."
+    local cs
+    cs=$(measure_cold_start $port "$BENCH_DIR/gun-o${level}/bench-server")
+    eval "gun_o${level}_cold_start=\"$cs\""
+    kill_servers
     log "Starting ${label} server on :${port} ..."
     local server_log="$BENCH_DIR/logs/gun-o${level}.server.log"
     local k6_log="$BENCH_DIR/logs/gun-o${level}.k6.log"
@@ -438,6 +551,9 @@ main() {
 
   # ── Bun benchmark ──
   local bun_port=3090
+  log "Cold start: Bun ..."
+  bun_cold_start=$(measure_cold_start $bun_port $BUN_BIN run "$BENCH_DIR/bun/server.ts")
+  kill_servers
   log "Starting Bun server on :${bun_port} ..."
   local bun_server_log="$BENCH_DIR/logs/bun.server.log"
   local bun_k6_log="$BENCH_DIR/logs/bun.k6.log"
@@ -472,6 +588,42 @@ main() {
   kill $bun_pid 2>/dev/null || true
   kill_servers
 
+  # ── Node benchmark ──
+  local node_port=3091
+  log "Cold start: Node ..."
+  node_cold_start=$(measure_cold_start $node_port $NODE_BIN "$BENCH_DIR/node/server.mjs")
+  kill_servers
+  log "Starting Node server on :${node_port} ..."
+  local node_server_log="$BENCH_DIR/logs/node.server.log"
+  local node_k6_log="$BENCH_DIR/logs/node.k6.log"
+  : > "$node_server_log"
+  PORT=$node_port $NODE_BIN "$BENCH_DIR/node/server.mjs" >"$node_server_log" 2>&1 &
+  local node_pid=$!
+  if ! wait_for_server "$node_pid" "$node_port" 5; then
+    warn "Node server did not become ready on :${node_port}, skipping (see $node_server_log)"
+    kill $node_pid 2>/dev/null || true
+    kill_servers
+  elif verify_server "Node" $node_port; then
+    local node_stopfile="$BENCH_DIR/node-res.stop"
+    rm -f "$node_stopfile"
+    sample_resources "$node_pid" "$BENCH_DIR/node-res.txt" "$node_stopfile" &
+    local node_sampler_pid=$!
+
+    run_k6 "Node" $node_port "$BENCH_DIR/node-results.json" "$node_k6_log"
+    touch "$node_stopfile"
+    wait $node_sampler_pid 2>/dev/null || true
+
+    local m=$(parse_k6_json "$BENCH_DIR/node-results.json")
+    extract_metrics "node" "$m"
+    local r=$(parse_resources "$BENCH_DIR/node-res.txt")
+    extract_metrics "node" "$r"
+  else
+    warn "Node server verification failed, skipping (see $node_server_log)"
+  fi
+
+  kill $node_pid 2>/dev/null || true
+  kill_servers
+
   # ── Summary table ──
   echo ""
   echo -e "${BOLD}========================================${RESET}"
@@ -479,9 +631,9 @@ main() {
   echo -e "${BOLD}========================================${RESET}"
   echo ""
 
-  printf "${BOLD}%-18s %-14s %-14s %-14s %-14s${RESET}\n" "Metric" "Gun -O0" "Gun -O1" "Gun -O2" "Bun"
+  printf "${BOLD}%-18s %-14s %-14s %-14s %-14s %-14s${RESET}\n" "Metric" "Gun -O0" "Gun -O1" "Gun -O2" "Bun" "Node"
 
-  for metric in rps err avg p50 p90 p95 peak_rss avg_cpu peak_cpu; do
+  for metric in rps err avg p50 p90 p95 peak_rss avg_cpu peak_cpu cold_start; do
     case "$metric" in
       rps) label="Throughput" ;;
       err) label="Error rate" ;;
@@ -492,15 +644,18 @@ main() {
       peak_rss) label="Peak RSS" ;;
       avg_cpu) label="CPU (avg)" ;;
       peak_cpu) label="CPU (peak)" ;;
+      cold_start) label="Cold start" ;;
     esac
     local v0="$(get_metric gun_o0 $metric)"
     local v1="$(get_metric gun_o1 $metric)"
     local v2="$(get_metric gun_o2 $metric)"
     local vb="$(get_metric bun $metric)"
-    [ "$metric" = "rps" ] && { v0="$v0 req/s"; v1="$v1 req/s"; v2="$v2 req/s"; vb="$vb req/s"; }
-    [ "$metric" = "peak_rss" ] && { v0="$v0 MB"; v1="$v1 MB"; v2="$v2 MB"; vb="$vb MB"; }
-    [ "$metric" = "avg_cpu" ] || [ "$metric" = "peak_cpu" ] && { v0="$v0%"; v1="$v1%"; v2="$v2%"; vb="$vb%"; }
-    printf "%-18s %-14s %-14s %-14s %-14s\n" "$label" "$v0" "$v1" "$v2" "$vb"
+    local vn="$(get_metric node $metric)"
+    [ "$metric" = "rps" ] && { v0="$v0 req/s"; v1="$v1 req/s"; v2="$v2 req/s"; vb="$vb req/s"; vn="$vn req/s"; }
+    [ "$metric" = "peak_rss" ] && { v0="$v0 MB"; v1="$v1 MB"; v2="$v2 MB"; vb="$vb MB"; vn="$vn MB"; }
+    [ "$metric" = "cold_start" ] && { v0="$v0 ms"; v1="$v1 ms"; v2="$v2 ms"; vb="$vb ms"; vn="$vn ms"; }
+    [ "$metric" = "avg_cpu" ] || [ "$metric" = "peak_cpu" ] && { v0="$v0%"; v1="$v1%"; v2="$v2%"; vb="$vb%"; vn="$vn%"; }
+    printf "%-18s %-14s %-14s %-14s %-14s %-14s\n" "$label" "$v0" "$v1" "$v2" "$vb" "$vn"
   done
   echo ""
 }

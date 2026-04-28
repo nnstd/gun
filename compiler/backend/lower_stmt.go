@@ -106,6 +106,9 @@ func (l *Lowerer) lowerStmt(s hir.Stmt) ast.Stmt {
 		if s.Value != nil {
 			val := l.lowerExpr(s.Value)
 			val = jsvalueWrapLit(val)
+			if l.arenaEnabled && l.disableArenaCount == 0 && l.hasArenaVar > 0 {
+				val = callExpr(selectorExpr(goIdent("jsvalue"), "HeapEscape"), val)
+			}
 			out = returnStmt(val)
 			break
 		}

@@ -239,87 +239,29 @@ func defaultPortStr(scheme string) string {
 
 // dispatchRequest sends the request via fasthttp and emits response/error events.
 func (ci *clientInternal) dispatchRequest(this *jsvalue.JSValue) {
-	req := fasthttp.AcquireRequest()
-	resp := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseRequest(req)
-	defer fasthttp.ReleaseResponse(resp)
-
-	req.Header.SetMethod(ci.method)
-	for k, v := range ci.headers {
-		req.Header.Set(k, v)
-	}
-
-	uri := req.URI()
-	uri.SetScheme(ci.scheme)
-	if ci.host != "" {
-		uri.SetHost(ci.host)
-	}
-	if ci.path != "" {
-		if i := strings.IndexByte(ci.path, '?'); i >= 0 {
-			uri.SetPath(ci.path[:i])
-			uri.SetQueryString(ci.path[i+1:])
-		} else {
-			uri.SetPath(ci.path)
-		}
-	}
-	if len(ci.body) > 0 {
-		req.SetBody(ci.body)
-	}
-
-	timeout := time.Duration(ci.timeoutMsec) * time.Millisecond
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
-
-	var doErr error
-	switch {
-	case ci.socketPath != "":
-		c := unixClientFor(ci.socketPath)
-		// fasthttp requires a host header; default to localhost when caller didn't set one.
-		if req.URI().Host() == nil || len(req.URI().Host()) == 0 {
-			uri.SetHost("localhost")
-		}
-		doErr = c.DoTimeout(req, resp, timeout)
-	case ci.agent != nil && !ci.noAgent:
-		hc := ci.agent.hostClient(ci.addr, ci.scheme == "https")
-		if ci.tlsCfg != nil {
-			hc.TLSConfig = ci.tlsCfg
-		}
-		doErr = hc.DoTimeout(req, resp, timeout)
-	default:
-		c := &fasthttp.Client{}
-		if ci.tlsCfg != nil {
-			c.TLSConfig = ci.tlsCfg
-		}
-		doErr = c.DoTimeout(req, resp, timeout)
-	}
-
-	if doErr != nil {
-		errVal := jserror.Error.Call(jsvalue.NewString(doErr.Error()))
-		errVal.Set("code", jsvalue.NewString(classifyClientErr(doErr)))
-		this.MethodCall("emit", jsvalue.NewString("error"), errVal)
-		clientRegistryMu.Lock()
-		delete(clientRegistry, this)
-		clientRegistryMu.Unlock()
-		eventloop.Default.UnregisterHandle()
-		return
-	}
-
-	respMsg := newClientResponseMessage(resp)
-	body := append([]byte(nil), resp.Body()...)
-
-	this.MethodCall("emit", jsvalue.NewString("response"), respMsg)
-
-	go func() {
+	spec := transportRequestFromClient(ci)
+	DoTransportAsync(spec, func(resp *TransportResponse, doErr error) {
 		defer eventloop.Default.UnregisterHandle()
-		if len(body) > 0 {
-			respMsg.MethodCall("emit", jsvalue.NewString("data"), jsvalue.NewString(string(body)))
+		defer func() {
+			clientRegistryMu.Lock()
+			delete(clientRegistry, this)
+			clientRegistryMu.Unlock()
+		}()
+
+		if doErr != nil {
+			errVal := jserror.Error.Call(jsvalue.NewString(doErr.Error()))
+			errVal.Set("code", jsvalue.NewString(classifyClientErr(doErr)))
+			this.MethodCall("emit", jsvalue.NewString("error"), errVal)
+			return
+		}
+
+		respMsg := newTransportResponseMessage(resp)
+		this.MethodCall("emit", jsvalue.NewString("response"), respMsg)
+		if len(resp.Body) > 0 {
+			respMsg.MethodCall("emit", jsvalue.NewString("data"), jsvalue.NewString(string(resp.Body)))
 		}
 		respMsg.MethodCall("emit", jsvalue.NewString("end"))
-		clientRegistryMu.Lock()
-		delete(clientRegistry, this)
-		clientRegistryMu.Unlock()
-	}()
+	})
 }
 
 func classifyClientErr(err error) string {

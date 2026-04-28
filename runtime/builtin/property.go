@@ -106,7 +106,7 @@ func (v *JSValue) Get(name string) *JSValue {
 			if curExt == nil {
 				continue
 			}
-			meta := curExt.meta
+			meta := curExt.meta.Load()
 			if meta == nil {
 				meta = cur.ensureMeta()
 			}
@@ -123,7 +123,7 @@ func (v *JSValue) Get(name string) *JSValue {
 		return NewUndefined()
 	}
 
-	meta := ext.meta
+	meta := ext.meta.Load()
 	if meta == nil {
 		meta = v.ensureMeta()
 	}
