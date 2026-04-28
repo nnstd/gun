@@ -236,7 +236,7 @@ func setupSocketPrototype() {
 		state.mu.Lock()
 		if state.closed {
 			state.mu.Unlock()
-			panic(jserror.InvalidArgType("Socket is closed"))
+			panic(jserror.InvalidArgType("Not running"))
 		}
 		if state.conn != nil {
 			state.mu.Unlock()
@@ -301,7 +301,7 @@ func setupSocketPrototype() {
 		state.mu.Unlock()
 
 		if closed {
-			errVal := newSocketError(fmt.Errorf("Socket is closed"))
+			errVal := newSocketNotRunningError()
 			this.MethodCall("emit", jsvalue.NewString("error"), errVal)
 			if opts.callback != nil {
 				opts.callback.Call(errVal)
@@ -309,7 +309,7 @@ func setupSocketPrototype() {
 			return jsvalue.NewUndefined()
 		}
 		if conn == nil {
-			errVal := newSocketError(fmt.Errorf("Socket must be bound before send() in Gun dgram v1"))
+			errVal := newSocketError(fmt.Errorf("socket must be bound before send() in Gun dgram v1"))
 			this.MethodCall("emit", jsvalue.NewString("error"), errVal)
 			if opts.callback != nil {
 				opts.callback.Call(errVal)
@@ -496,6 +496,12 @@ func udpAddrValue(addr *net.UDPAddr) *jsvalue.JSValue {
 		"family", jsvalue.NewString(family),
 		"port", jsvalue.NewNumber(float64(addr.Port)),
 	)
+}
+
+func newSocketNotRunningError() *jsvalue.JSValue {
+	errVal := jserror.Error.Call(jsvalue.NewString("Not running"))
+	errVal.Set("code", jsvalue.NewString("ERR_SOCKET_DGRAM_NOT_RUNNING"))
+	return errVal
 }
 
 func newSocketError(err error) *jsvalue.JSValue {
