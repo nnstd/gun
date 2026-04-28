@@ -9,31 +9,22 @@ var PromisesAsJSValue = func() *jsvalue.JSValue {
 	resolve := promise.Promise.Get("resolve")
 	obj := jsvalue.NewObject()
 	obj.Set("readFile", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
-		var out *jsvalue.JSValue
-		if len(args) >= 1 {
-			out = ReadFile(args[0])
-		} else {
-			out = jsvalue.NewUndefined()
+		if len(args) < 1 {
+			return resolve.Call(jsvalue.NewUndefined())
 		}
-		return resolve.Call(out)
+		return promiseResult(func() *jsvalue.JSValue { return ReadFile(args[0], args[1:]...) })
 	}))
 	obj.Set("writeFile", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
-		var out *jsvalue.JSValue
-		if len(args) >= 2 {
-			out = WriteFile(args[0], args[1])
-		} else {
-			out = jsvalue.NewUndefined()
+		if len(args) < 2 {
+			return resolve.Call(jsvalue.NewUndefined())
 		}
-		return resolve.Call(out)
+		return promiseResult(func() *jsvalue.JSValue { return WriteFile(args[0], args[1], args[2:]...) })
 	}))
 	obj.Set("appendFile", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
-		var out *jsvalue.JSValue
-		if len(args) >= 2 {
-			out = AppendFile(args[0], args[1])
-		} else {
-			out = jsvalue.NewUndefined()
+		if len(args) < 2 {
+			return resolve.Call(jsvalue.NewUndefined())
 		}
-		return resolve.Call(out)
+		return promiseResult(func() *jsvalue.JSValue { return AppendFile(args[0], args[1], args[2:]...) })
 	}))
 	obj.Set("copyFile", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		var out *jsvalue.JSValue
@@ -127,3 +118,20 @@ var PromisesAsJSValue = func() *jsvalue.JSValue {
 	}))
 	return obj
 }()
+
+func promiseResult(fn func() *jsvalue.JSValue) *jsvalue.JSValue {
+	var out *jsvalue.JSValue
+	var errVal *jsvalue.JSValue
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				errVal = jsvalue.From(r)
+			}
+		}()
+		out = fn()
+	}()
+	if errVal != nil {
+		return promise.Promise.Get("reject").Call(errVal)
+	}
+	return promise.Promise.Get("resolve").Call(out)
+}

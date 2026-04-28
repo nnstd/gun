@@ -1,21 +1,144 @@
 package fs
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 
-	"github.com/nnstd/gun/runtime/builtin"
+	"github.com/nnstd/gun/runtime/buffer"
+	jsvalue "github.com/nnstd/gun/runtime/builtin"
+	jserror "github.com/nnstd/gun/runtime/builtin/error"
+	"github.com/nnstd/gun/runtime/eventloop"
+	"github.com/nnstd/gun/runtime/stream"
+	"github.com/nnstd/gun/runtime/web"
 )
 
-// ReadFileSync reads the entire contents of a file.
-// Returns the file content as a JSValue string.
-func ReadFileSync(path *jsvalue.JSValue, opts ...*jsvalue.JSValue) *jsvalue.JSValue {
-	p := ""
-	if path != nil {
-		p = path.String()
+var ReadStream *jsvalue.JSValue
+var WriteStream *jsvalue.JSValue
+
+func init() {
+	ensureFSStreamClasses()
+}
+
+func ensureFSStreamClasses() {
+	if ReadStream != nil && WriteStream != nil {
+		return
 	}
-	data, _ := os.ReadFile(p)
-	return jsvalue.NewString(string(data))
+	ReadStream = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		initReadStream(this, args...)
+		return nil
+	}, stream.Readable)
+	WriteStream = jsvalue.NewClass(func(this *jsvalue.JSValue, args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		initWriteStream(this, args...)
+		return nil
+	}, stream.Writable)
+	initFSStreamPrototypes()
+}
+
+func pathString(path *jsvalue.JSValue) string {
+	if path == nil {
+		return ""
+	}
+	if jsvalue.InstanceOf(path, buffer.Buffer).Bool() {
+		return path.Get("_data").String()
+	}
+	return path.String()
+}
+
+func dataBytes(data *jsvalue.JSValue) []byte {
+	if data == nil {
+		return nil
+	}
+	if jsvalue.InstanceOf(data, buffer.Buffer).Bool() {
+		return []byte(data.Get("_data").String())
+	}
+	return []byte(data.String())
+}
+
+func bufferFromBytes(data []byte) *jsvalue.JSValue {
+	return buffer.Buffer.Get("from").Call(jsvalue.NewString(string(data)))
+}
+
+func readEncoding(opts ...*jsvalue.JSValue) (string, bool) {
+	if len(opts) == 0 || opts[0] == nil || opts[0].TypeString() == "undefined" || opts[0].TypeString() == "null" {
+		return "", false
+	}
+	opt := opts[0]
+	if opt.TypeString() == "string" {
+		enc := opt.String()
+		return enc, enc != ""
+	}
+	if opt.TypeString() == "object" {
+		enc := opt.Get("encoding")
+		if enc != nil && enc.TypeString() == "string" && enc.String() != "" {
+			return enc.String(), true
+		}
+	}
+	return "", false
+}
+
+func optionSignal(opts ...*jsvalue.JSValue) *jsvalue.JSValue {
+	if len(opts) == 0 {
+		return nil
+	}
+	return web.AbortSignalFromOptions(opts[0])
+}
+
+func abortErrFromSignal(signal *jsvalue.JSValue) *jsvalue.JSValue {
+	if !web.IsAbortSignal(signal) || !signal.Get("aborted").Bool() {
+		return nil
+	}
+	errVal := web.NewAbortError("The operation was aborted")
+	errVal.Set("code", jsvalue.NewString("ABORT_ERR"))
+	return errVal
+}
+
+func nodeFSError(err error, syscallName, path string) *jsvalue.JSValue {
+	if err == nil {
+		return nil
+	}
+	code := "EIO"
+	errno := 0
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		code = "ENOENT"
+		errno = int(syscall.ENOENT)
+	case errors.Is(err, os.ErrPermission):
+		code = "EACCES"
+		errno = int(syscall.EACCES)
+	case errors.Is(err, os.ErrExist):
+		code = "EEXIST"
+		errno = int(syscall.EEXIST)
+	case errors.Is(err, syscall.EISDIR):
+		code = "EISDIR"
+		errno = int(syscall.EISDIR)
+	case errors.Is(err, syscall.ENOTDIR):
+		code = "ENOTDIR"
+		errno = int(syscall.ENOTDIR)
+	}
+	msg := fmt.Sprintf("%s: %s, %s '%s'", code, err.Error(), syscallName, path)
+	errVal := jserror.Error.Call(jsvalue.NewString(msg))
+	errVal.Set("code", jsvalue.NewString(code))
+	errVal.Set("errno", jsvalue.NewNumber(float64(-errno)))
+	errVal.Set("syscall", jsvalue.NewString(syscallName))
+	errVal.Set("path", jsvalue.NewString(path))
+	return errVal
+}
+
+// ReadFileSync reads the entire contents of a file.
+// It returns a Buffer by default and a string when an encoding is requested.
+func ReadFileSync(path *jsvalue.JSValue, opts ...*jsvalue.JSValue) *jsvalue.JSValue {
+	p := pathString(path)
+	data, err := os.ReadFile(p)
+	if err != nil {
+		panic(nodeFSError(err, "open", p))
+	}
+	if _, ok := readEncoding(opts...); ok {
+		return jsvalue.NewString(string(data))
+	}
+	return bufferFromBytes(data)
 }
 
 // Realpath resolves a path to its canonical absolute pathname.
@@ -37,15 +160,10 @@ func Realpath(path *jsvalue.JSValue) *jsvalue.JSValue {
 
 // WriteFileSync writes data to a file, replacing it if it already exists.
 func WriteFileSync(path *jsvalue.JSValue, data *jsvalue.JSValue) *jsvalue.JSValue {
-	p := ""
-	if path != nil {
-		p = path.String()
+	p := pathString(path)
+	if err := os.WriteFile(p, dataBytes(data), 0644); err != nil {
+		panic(nodeFSError(err, "open", p))
 	}
-	d := ""
-	if data != nil {
-		d = data.String()
-	}
-	os.WriteFile(p, []byte(d), 0644)
 	return jsvalue.NewUndefined()
 }
 
@@ -129,20 +247,15 @@ func RmdirSync(path *jsvalue.JSValue) *jsvalue.JSValue {
 
 // AppendFileSync appends data to a file, creating it if it doesn't exist.
 func AppendFileSync(path *jsvalue.JSValue, data *jsvalue.JSValue) *jsvalue.JSValue {
-	p := ""
-	if path != nil {
-		p = path.String()
-	}
-	d := ""
-	if data != nil {
-		d = data.String()
-	}
+	p := pathString(path)
 	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return jsvalue.NewUndefined()
+		panic(nodeFSError(err, "open", p))
 	}
 	defer f.Close()
-	f.Write([]byte(d))
+	if _, err := f.Write(dataBytes(data)); err != nil {
+		panic(nodeFSError(err, "write", p))
+	}
 	return jsvalue.NewUndefined()
 }
 
@@ -180,16 +293,137 @@ func RenameSync(oldPath, newPath *jsvalue.JSValue) *jsvalue.JSValue {
 
 // --- fs/promises equivalents ---
 
-func ReadFile(path *jsvalue.JSValue) *jsvalue.JSValue {
-	return ReadFileSync(path)
+func ReadFile(path *jsvalue.JSValue, opts ...*jsvalue.JSValue) *jsvalue.JSValue {
+	if errVal := abortErrFromSignal(optionSignal(opts...)); errVal != nil {
+		panic(errVal)
+	}
+	return ReadFileSync(path, opts...)
 }
 
-func WriteFile(path *jsvalue.JSValue, data *jsvalue.JSValue) *jsvalue.JSValue {
+func WriteFile(path *jsvalue.JSValue, data *jsvalue.JSValue, opts ...*jsvalue.JSValue) *jsvalue.JSValue {
+	if errVal := abortErrFromSignal(optionSignal(opts...)); errVal != nil {
+		panic(errVal)
+	}
 	return WriteFileSync(path, data)
 }
 
-func AppendFile(path *jsvalue.JSValue, data *jsvalue.JSValue) *jsvalue.JSValue {
+func AppendFile(path *jsvalue.JSValue, data *jsvalue.JSValue, opts ...*jsvalue.JSValue) *jsvalue.JSValue {
+	if errVal := abortErrFromSignal(optionSignal(opts...)); errVal != nil {
+		panic(errVal)
+	}
 	return AppendFileSync(path, data)
+}
+
+func initReadStream(this *jsvalue.JSValue, args ...*jsvalue.JSValue) {
+	this.Set("_events", jsvalue.NewObject())
+	this.Set("_chunks", jsvalue.NewArray())
+	if len(args) > 0 {
+		this.Set("path", jsvalue.NewString(pathString(args[0])))
+	}
+	if len(args) > 1 {
+		this.Set("_options", args[1])
+	}
+	this.Set("_started", jsvalue.NewBool(false))
+}
+
+func initWriteStream(this *jsvalue.JSValue, args ...*jsvalue.JSValue) {
+	this.Set("_events", jsvalue.NewObject())
+	this.Set("_written", jsvalue.NewArray())
+	this.Set("_fsChunks", jsvalue.NewArray())
+	if len(args) > 0 {
+		this.Set("path", jsvalue.NewString(pathString(args[0])))
+	}
+	if len(args) > 1 {
+		this.Set("_options", args[1])
+	}
+}
+
+func initFSStreamPrototypes() {
+	ReadStream.Get("prototype").Set("on", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		stream.Readable.Get("prototype").Get("on").Call(args...)
+		if len(args) >= 2 && args[0] != nil {
+			startReadStream(args[0])
+		}
+		return args[0]
+	}).MarkAsMethod())
+	ReadStream.Get("prototype").Set("pipe", stream.Readable.Get("prototype").Get("pipe"))
+	ReadStream.Get("prototype").Set("push", stream.Readable.Get("prototype").Get("push"))
+
+	WriteStream.Get("prototype").Set("on", stream.Writable.Get("prototype").Get("on"))
+	WriteStream.Get("prototype").Set("emit", stream.Writable.Get("prototype").Get("emit"))
+	WriteStream.Get("prototype").Set("write", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		if len(args) >= 2 && args[0] != nil {
+			args[0].Get("_fsChunks").MethodCall("push", args[1])
+		}
+		return jsvalue.NewBool(true)
+	}).MarkAsMethod())
+	WriteStream.Get("prototype").Set("end", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		if len(args) >= 2 && args[1] != nil {
+			args[0].MethodCall("write", args[1])
+		}
+		finishWriteStream(args[0])
+		return jsvalue.NewUndefined()
+	}).MarkAsMethod())
+}
+
+func startReadStream(rs *jsvalue.JSValue) {
+	if rs.Get("_started").Bool() {
+		return
+	}
+	rs.Set("_started", jsvalue.NewBool(true))
+	eventloop.SetImmediate(jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		options := rs.Get("_options")
+		if errVal := abortErrFromSignal(web.AbortSignalFromOptions(options)); errVal != nil {
+			rs.MethodCall("emit", jsvalue.NewString("error"), errVal)
+			return jsvalue.NewUndefined()
+		}
+		p := rs.Get("path").String()
+		data, err := os.ReadFile(p)
+		if err != nil {
+			rs.MethodCall("emit", jsvalue.NewString("error"), nodeFSError(err, "open", p))
+			return jsvalue.NewUndefined()
+		}
+		if _, ok := readEncoding(options); ok {
+			rs.MethodCall("push", jsvalue.NewString(string(data)))
+		} else {
+			rs.MethodCall("push", bufferFromBytes(data))
+		}
+		rs.MethodCall("emit", jsvalue.NewString("end"))
+		return jsvalue.NewUndefined()
+	}))
+}
+
+func finishWriteStream(ws *jsvalue.JSValue) {
+	if errVal := abortErrFromSignal(web.AbortSignalFromOptions(ws.Get("_options"))); errVal != nil {
+		ws.MethodCall("emit", jsvalue.NewString("error"), errVal)
+		return
+	}
+	var data []byte
+	for _, chunk := range ws.Get("_fsChunks").Array() {
+		data = append(data, dataBytes(chunk)...)
+	}
+	p := ws.Get("path").String()
+	if err := os.WriteFile(p, data, 0644); err != nil {
+		ws.MethodCall("emit", jsvalue.NewString("error"), nodeFSError(err, "open", p))
+		return
+	}
+	ws.MethodCall("emit", jsvalue.NewString("finish"))
+}
+
+func CreateReadStream(path *jsvalue.JSValue, opts ...*jsvalue.JSValue) *jsvalue.JSValue {
+	args := []*jsvalue.JSValue{path}
+	if len(opts) > 0 {
+		args = append(args, opts[0])
+	}
+	return ReadStream.Call(args...)
+}
+
+func CreateWriteStream(path *jsvalue.JSValue, opts ...*jsvalue.JSValue) *jsvalue.JSValue {
+	args := []*jsvalue.JSValue{path}
+	if len(opts) > 0 {
+		args = append(args, opts[0])
+	}
+	return WriteStream.Call(args...)
 }
 
 func CopyFile(src, dst *jsvalue.JSValue) *jsvalue.JSValue {

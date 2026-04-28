@@ -56,6 +56,8 @@ func init() {
 	jsvalue.RegisterGlobal("Response", Response)
 	jsvalue.RegisterGlobal("URL", URL)
 	jsvalue.RegisterGlobal("File", File)
+	jsvalue.RegisterGlobal("AbortController", AbortController)
+	jsvalue.RegisterGlobal("AbortSignal", AbortSignal)
 	jsvalue.RegisterGlobal("fetch", Fetch)
 }
 
