@@ -1,42 +1,54 @@
 ---
 title: CLI Reference
-lead: Gun ships a small CLI surface focused on transpilation, watch mode, checking, and pipeline debugging.
+lead: Use the Gun CLI to check, build, watch, and inspect projects.
 sections:
+  - gun check
   - gun transpile
   - gun watch
-  - gun check
   - gun debug
 ---
 
-## gun transpile
+## gun check
+
+Validate an entrypoint:
 
 ```bash
-gun transpile <input> [flags]
+gun check src/index.ts
+```
 
-Flags:
-  -o, --out <path>    Output file or directory
-  -w, --watch         Watch for changes
-  --source-maps       Emit source maps
-  --config <path>     Path to gun.config.js
+Use it in pull requests and before dependency upgrades. It reports unsupported APIs, dynamic module patterns, and dependency issues before a full build.
+
+## gun transpile
+
+Build an entrypoint into an output directory:
+
+```bash
+gun transpile src/index.ts -o build/gun
+```
+
+Common flags:
+
+```bash
+-o, --out <path>       Output directory
+--source-maps          Write source maps
 ```
 
 ## gun watch
 
-```bash
-gun watch src/ -o go/
-# -> Watching 142 files
-# -> Changed: src/server.js (re-transpiled in 12ms)
-```
-
-## gun check
+Rebuild on file changes:
 
 ```bash
-gun check src/
-# -> ✓ 142 files OK
+gun watch src/index.ts -o build/gun
 ```
+
+Use watch mode locally. Use `gun transpile` from a clean checkout for release builds.
 
 ## gun debug
 
+Inspect how Gun sees a file or project:
+
 ```bash
-gun debug src/server.js --stage=analyze
+gun debug src/index.ts
 ```
+
+Use debug output when a compatibility error is unclear or a dependency behaves differently than expected.

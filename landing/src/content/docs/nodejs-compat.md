@@ -1,10 +1,46 @@
 ---
 title: Node.js Compat
-lead: This section is being rewritten from the latest landing HTML and will expand as the compiler surface settles.
+lead: Gun supports the Node.js APIs most backend services reach for first, with compatibility checked during build.
 sections:
-  - Status
+  - Supported areas
+  - HTTP example
+  - Filesystem example
+  - Compatibility strategy
 ---
 
-## Status
+## Supported areas
 
-Node.js Compat documentation is not filled out yet, but the page shell and navigation are now aligned with the refreshed docs variant.
+Gun focuses on practical backend coverage:
+
+- `http` and `https` servers and clients.
+- `fs` and `fs/promises` file operations.
+- `path`, `url`, `os`, and `process` helpers.
+- `events` and stream-style APIs.
+- `buffer`, `crypto`, `zlib`, and timers.
+
+Coverage expands based on real packages and applications, not a checklist alone.
+
+## HTTP example
+
+```ts
+import { createServer } from 'http'
+
+createServer((req, res) => {
+  res.writeHead(200, { 'content-type': 'application/json' })
+  res.end(JSON.stringify({ ok: true, path: req.url }))
+}).listen(8080)
+```
+
+## Filesystem example
+
+```ts
+import { readFile } from 'fs/promises'
+
+const config = JSON.parse(await readFile('config.json', 'utf8'))
+```
+
+## Compatibility strategy
+
+Run `gun check` in CI. It flags unsupported APIs and dynamic usage before the build reaches production.
+
+If a package uses a native addon or engine-specific behavior, isolate it behind a small adapter module.

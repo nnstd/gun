@@ -1,43 +1,90 @@
 ---
 title: Installation
-lead: Gun ships as an npm package. You need Node.js 18+ or Bun 1.x for the CLI and Go 1.21+ to compile the output.
+lead: Install the Gun CLI with npm or Bun, then verify it from your terminal.
 sections:
-  - Prerequisites
-  - Install the CLI
-  - Verify installation
-  - Go runtime module
+  - Requirements
+  - npm
+  - Bun
+  - Verify
+  - Add scripts
 ---
 
-## Prerequisites
+## Requirements
+
+Check the local tools:
 
 ```bash
-node --version    # -> v20.x or higher
-go version        # -> 1.21+
+node --version
+npm --version
+go version
 ```
 
-## Install the CLI
+Recommended versions:
 
-Pick your package manager. The CLI is pure JavaScript and does not ship as a native binary.
+- Node.js 18 or newer, or Bun 1.x.
+- Go 1.21 or newer.
+- A project entrypoint such as `src/index.ts`, `src/server.ts`, or `server.js`.
+
+## npm
+
+Install globally:
 
 ```bash
 npm i -g gun-transpiler
-# or
-bun add -g gun-transpiler
 ```
 
-## Verify installation
+Install per project:
+
+```bash
+npm i -D gun-transpiler
+```
+
+Use `npx` when the CLI is local:
+
+```bash
+npx gun check src/index.ts
+```
+
+## Bun
+
+Install per project:
+
+```bash
+bun add -d gun-transpiler
+```
+
+Use `bunx` when needed:
+
+```bash
+bunx gun check src/index.ts
+```
+
+## Verify
 
 ```bash
 gun --version
-# -> gun v1.0.2
+gun help
 ```
 
-> Gun also works as a local dependency. Run it with `npx gun` or through package scripts if you prefer a locked CLI version.
-
-## Go runtime module
-
-The transpiled output imports Gun's Go runtime, so you should add it to your Go module up front.
+If `gun` is not found, use the package runner for your install style:
 
 ```bash
-go get github.com/nnstd/gun/runtime
+npx gun --version
+bunx gun --version
 ```
+
+## Add scripts
+
+Add repeatable commands to `package.json`:
+
+```json
+{
+  "scripts": {
+    "gun:check": "gun check src/index.ts",
+    "gun:build": "gun transpile src/index.ts -o build/gun",
+    "gun:watch": "gun watch src/index.ts -o build/gun"
+  }
+}
+```
+
+Run the scripts in CI and during local development so every environment uses the same entrypoint and output path.

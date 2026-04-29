@@ -1,27 +1,52 @@
 ---
 title: npm Dependencies
-lead: Gun transpiles your dependencies along with your source so the final Go binary stays self-contained.
+lead: Gun follows your dependency graph and includes packages that can be checked and built ahead of time.
 sections:
-  - Why this matters
-  - Handling edge cases
+  - What works best
+  - Native packages
+  - Adapters
+  - Dependency hygiene
 ---
 
-## Why this matters
+## What works best
 
-If Gun only transpiled your own code, the output would still need a JavaScript runtime for the rest of the graph. Full dependency transpilation is what lets the final binary stand alone.
+Packages work best when they use:
+
+- Static imports.
+- Plain JavaScript or TypeScript.
+- Standard Node.js, Bun, or Web APIs.
+- Runtime configuration through environment variables or explicit options.
+
+Run this before adopting a package in a Gun-built service:
 
 ```bash
-gun transpile src/index.js -o go/
+gun check src/index.ts
 ```
 
-## Handling edge cases
+## Native packages
 
-Packages with native addons can be mapped to hand-written Go equivalents through `gun.config.js` aliases.
+Packages with native addons need special handling. Examples include some database drivers, password hashing packages, image libraries, and compression tools.
 
-```js
-export default {
-  aliases: {
-    bcrypt: 'github.com/my/bcrypt-go',
-  },
+Use a pure JavaScript package when it is acceptable, or put the package behind an adapter so it can be replaced with a supported implementation.
+
+## Adapters
+
+Wrap compatibility-sensitive packages in a local module:
+
+```ts
+// src/adapters/passwords.ts
+import bcrypt from 'bcryptjs'
+
+export async function hashPassword(value: string) {
+  return bcrypt.hash(value, 12)
 }
 ```
+
+Import the adapter from application code instead of importing the package everywhere. If you need to change the implementation later, the change stays local.
+
+## Dependency hygiene
+
+- Prefer direct dependencies over transitive reach-through imports.
+- Keep package versions pinned in lockfiles.
+- Run compatibility checks on dependency updates.
+- Add smoke tests for code paths that cross package boundaries.

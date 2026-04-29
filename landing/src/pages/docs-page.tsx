@@ -12,10 +12,10 @@ type DocPage = {
 
 const SIDEBAR = [
   { label: 'Getting Started', icon: '01', items: ['Introduction', 'Installation', 'Quick Start'] },
-  { label: 'Core Concepts', icon: '02', items: ['How It Works', 'JSValue Runtime', 'Event Loop'] },
+  { label: 'Core Concepts', icon: '02', items: ['How It Works', 'Runtime Semantics', 'Event Loop'] },
   { label: 'Language', icon: '03', items: ['Variables', 'Functions', 'Classes', 'Async / Await', 'Modules'] },
   { label: 'APIs', icon: '04', items: ['Node.js Compat', 'Bun Compat', 'npm Dependencies'] },
-  { label: 'Configuration', icon: '05', items: ['gun.config.js', 'CLI Reference', 'Source Maps'] },
+  { label: 'Configuration', icon: '05', items: ['Project Scripts', 'CLI Reference', 'Source Maps'] },
   { label: 'Advanced', icon: '06', items: ['Incremental Builds', 'CI Integration', 'Debugging'] },
 ] as const
 

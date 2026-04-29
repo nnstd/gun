@@ -1,46 +1,68 @@
 ---
 title: Quick Start
-lead: Transpile your first file in under a minute.
+lead: Build a small HTTP server with Gun.
 sections:
-  - Write some JavaScript
-  - Transpile
-  - Run
+  - Create a server
+  - Check compatibility
+  - Build with Gun
+  - Run locally
   - Build a binary
 ---
 
-## Write some JavaScript
+## Create a server
 
-```js
+Create `server.ts`:
+
+```ts
 import { createServer } from 'http'
 
-const port = 8080
+const port = Number(process.env.PORT ?? 8080)
 
 createServer((req, res) => {
-  res.writeHead(200)
-  res.end('Hello from Go!\n')
+  res.writeHead(200, { 'content-type': 'text/plain' })
+  res.end(`hello from ${req.url}\n`)
 }).listen(port)
 
-console.log(`Listening on :${port}`)
+console.log(`listening on :${port}`)
 ```
 
-## Transpile
+## Check compatibility
 
 ```bash
-gun transpile server.js -o server.go
+gun check server.ts
 ```
 
-## Run
+Fix check errors before building. They usually point to unsupported APIs, dynamic imports, or dependency behavior that needs an adapter.
+
+## Build with Gun
 
 ```bash
-go run server.go
-# -> Listening on :8080
+gun transpile server.ts -o build/gun
 ```
 
-> Use `gun watch` during development to auto-transpile on file changes.
+Use the same pattern for a project entrypoint:
+
+```bash
+gun transpile src/index.ts -o build/gun
+```
+
+## Run locally
+
+```bash
+go run ./build/gun
+```
+
+For a faster edit loop, keep watch mode running:
+
+```bash
+gun watch server.ts -o build/gun
+```
 
 ## Build a binary
 
 ```bash
-go build -o server ./...
-./server
+go build -o app ./build/gun
+./app
 ```
+
+The binary is the deployable artifact. Build it from a clean checkout in CI for release.

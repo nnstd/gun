@@ -1,24 +1,70 @@
 ---
 title: Introduction
-lead: Gun is a JavaScript-to-Go transpiler. It converts your JS or TS source and its npm dependencies into valid Go code that runs natively without Node.js in production.
+lead: Gun builds server-side JavaScript and TypeScript projects into deployable applications.
 sections:
-  - Why Gun?
-  - When not to use Gun
+  - Install
+  - Build
+  - Run
+  - When to use Gun
 ---
 
-Unlike source-to-source translators that try to produce idiomatic Go, Gun preserves JavaScript semantics through a lightweight runtime called `jsvalue`. Dynamic typing, prototype chains, and the event loop stay intact.
+## Install
 
-> Gun is not trying to turn your JS into hand-written Go. It is trying to make your JS run as Go, compiled and deployment-friendly.
+Install the CLI globally:
 
-## Why Gun?
+```bash
+npm i -g gun-transpiler
+```
 
-JavaScript is fast to write. Go is fast to run. Gun gives you both without the rewrite tax of porting a production codebase by hand.
+Or keep it local to a project:
 
-- **10x faster runtime**: Go compiled runtime versus Node.js V8.
-- **Zero runtime deps**: No Node.js or Bun required on servers.
-- **Node and Bun APIs**: Common built-ins stay available.
-- **npm deps included**: Dependencies are transpiled with your app.
+```bash
+npm i -D gun-transpiler
+```
 
-## When not to use Gun
+With Bun:
 
-Gun is best for server-side JS that wants to ship as a static Go binary. It is not a front-end bundler, and it is not the right fit for runtime `eval` heavy workloads or V8-specific behavior you cannot model statically.
+```bash
+bun add -d gun-transpiler
+```
+
+## Build
+
+Pass an entrypoint to `gun transpile`:
+
+```bash
+gun transpile src/index.ts -o build/gun
+```
+
+Run `gun check` first when you are testing a new project or dependency:
+
+```bash
+gun check src/index.ts
+```
+
+## Run
+
+Run the built app locally:
+
+```bash
+go run ./build/gun
+```
+
+Build a release binary:
+
+```bash
+go build -o dist/app ./build/gun
+./dist/app
+```
+
+## When to use Gun
+
+Gun is a good fit for:
+
+- HTTP APIs and webhooks.
+- Background workers.
+- Internal CLIs.
+- Services with ordinary npm dependencies.
+- Deployments that should not install Node.js or Bun on the target host.
+
+Run compatibility checks before adopting Gun for code that depends on native addons, runtime-created modules, or engine-specific behavior.

@@ -22,16 +22,19 @@ describe('landing routes', () => {
     expect(files).toContain('introduction.md')
     expect(ALL_PAGES[0]).toBe('Introduction')
     expect(ALL_PAGES).toContain('CLI Reference')
-    expect(DOC_PAGES.Installation?.lead).toMatch(/npm package/i)
+    expect(ALL_PAGES).toContain('Project Scripts')
+    expect(DOC_PAGES.Installation?.lead).toMatch(/Install the Gun CLI/i)
     expect(DOC_PAGES['Quick Start']?.sections).toContain('Build a binary')
+    expect(ALL_PAGES).toContain('Runtime Semantics')
   })
 
   it('keeps blog metadata and featured post selection intact', () => {
     const blogDir = join(process.cwd(), 'src/content/blog')
     const files = readdirSync(blogDir).filter((file) => file.endsWith('.md'))
 
-    expect(files).toHaveLength(6)
+    expect(files).toHaveLength(3)
     expect(files).toContain('introducing-gun.md')
+    expect(files).toContain('runtime-fast-paths.md')
 
     const introPost = readFileSync(join(blogDir, 'introducing-gun.md'), 'utf8')
     expect(introPost).toMatch(/slug: introducing-gun/)
