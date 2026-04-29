@@ -5,6 +5,66 @@ import (
 	"strings"
 )
 
+func stringFast(v *JSValue) string {
+	if v != nil {
+		if u := v.unboxed(); u != nil && u.typ == TypeString {
+			return u.strVal
+		}
+	}
+	return fmt.Sprint(v)
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+func runeLenFast(s string) int {
+	if isASCII(s) {
+		return len(s)
+	}
+	return len([]rune(s))
+}
+
+func runeSliceFast(s string, start, end int) string {
+	if start < 0 {
+		start = 0
+	}
+	if isASCII(s) {
+		if start > len(s) {
+			start = len(s)
+		}
+		if end < 0 {
+			end = 0
+		}
+		if end > len(s) {
+			end = len(s)
+		}
+		if end < start {
+			end = start
+		}
+		return s[start:end]
+	}
+	runes := []rune(s)
+	if start > len(runes) {
+		start = len(runes)
+	}
+	if end < 0 {
+		end = 0
+	}
+	if end > len(runes) {
+		end = len(runes)
+	}
+	if end < start {
+		end = start
+	}
+	return string(runes[start:end])
+}
+
 // _emptyString is the interned "" singleton. Prototype is patched in
 // prototype.init() to avoid init-order dependency.
 var _emptyString = &JSValue{typ: TypeString, strVal: "", frozen: true}
@@ -19,22 +79,22 @@ func NewString(s string) *JSValue {
 
 // ToLowerCase converts a JSValue to lowercase string and wraps it.
 func ToLowerCase(val *JSValue) *JSValue {
-	return NewString(strings.ToLower(fmt.Sprint(val)))
+	return NewString(strings.ToLower(stringFast(val)))
 }
 
 // ToUpperCase converts a JSValue to uppercase string and wraps it.
 func ToUpperCase(val *JSValue) *JSValue {
-	return NewString(strings.ToUpper(fmt.Sprint(val)))
+	return NewString(strings.ToUpper(stringFast(val)))
 }
 
 // Trim trims whitespace from a JSValue string.
 func Trim(val *JSValue) *JSValue {
-	return NewString(strings.TrimSpace(fmt.Sprint(val)))
+	return NewString(strings.TrimSpace(stringFast(val)))
 }
 
 // Split splits a JSValue string by separator.
 func Split(val *JSValue, sep *JSValue) *JSValue {
-	s := fmt.Sprint(val)
+	s := stringFast(val)
 	// Regex separator: use GoRegex.Split
 	if sep != nil && sep.typ == TypeRegex && sep.regexValue() != nil {
 		if re, ok := sep.regexValue().(GoRegex); ok {
@@ -54,7 +114,7 @@ func Split(val *JSValue, sep *JSValue) *JSValue {
 // Replace replaces occurrences of pattern with replacement in a JSValue string.
 // pattern can be a string JSValue or a regex JSValue.
 func Replace(val *JSValue, pattern, replacement *JSValue) *JSValue {
-	s := fmt.Sprint(val)
+	s := stringFast(val)
 	repl := ""
 	if replacement != nil {
 		repl = replacement.String()
@@ -75,13 +135,22 @@ func Replace(val *JSValue, pattern, replacement *JSValue) *JSValue {
 
 // CharAt returns the character at the given index.
 func CharAt(val *JSValue, index *JSValue) *JSValue {
-	s := fmt.Sprint(val)
-	runes := []rune(s)
+	s := stringFast(val)
 	idx := 0
 	if index != nil {
 		idx = int(index.Number())
 	}
-	if idx < 0 || idx >= len(runes) {
+	if idx < 0 {
+		return NewString("")
+	}
+	if isASCII(s) {
+		if idx >= len(s) {
+			return NewString("")
+		}
+		return NewString(s[idx : idx+1])
+	}
+	runes := []rune(s)
+	if idx >= len(runes) {
 		return NewString("")
 	}
 	return NewString(string(runes[idx]))
@@ -93,7 +162,7 @@ func StartsWith(val *JSValue, prefix *JSValue) *JSValue {
 	if prefix != nil {
 		p = prefix.String()
 	}
-	return NewBool(strings.HasPrefix(fmt.Sprint(val), p))
+	return NewBool(strings.HasPrefix(stringFast(val), p))
 }
 
 // EndsWith checks if a JSValue string ends with suffix.
@@ -102,7 +171,7 @@ func EndsWith(val *JSValue, suffix *JSValue) *JSValue {
 	if suffix != nil {
 		s = suffix.String()
 	}
-	return NewBool(strings.HasSuffix(fmt.Sprint(val), s))
+	return NewBool(strings.HasSuffix(stringFast(val), s))
 }
 
 // Repeat repeats a JSValue string count times.
@@ -111,13 +180,13 @@ func Repeat(val *JSValue, count *JSValue) *JSValue {
 	if count != nil {
 		n = int(count.Number())
 	}
-	return NewString(strings.Repeat(fmt.Sprint(val), n))
+	return NewString(strings.Repeat(stringFast(val), n))
 }
 
 // LastIndexOf returns the last index of search in str, starting from position.
 func LastIndexOf(str *JSValue, search *JSValue, position ...*JSValue) *JSValue {
-	s := fmt.Sprint(str)
-	sub := fmt.Sprint(search)
+	s := stringFast(str)
+	sub := stringFast(search)
 	if len(position) > 0 && position[0] != nil {
 		pos := int(position[0].Number())
 		if pos < len(s) {
@@ -129,7 +198,8 @@ func LastIndexOf(str *JSValue, search *JSValue, position ...*JSValue) *JSValue {
 
 // Substring returns the part of the string between start and end indices.
 func Substring(str *JSValue, start *JSValue, end ...*JSValue) *JSValue {
-	s := []rune(fmt.Sprint(str))
+	s := stringFast(str)
+	length := runeLenFast(s)
 	st := 0
 	if start != nil {
 		st = int(start.Number())
@@ -137,29 +207,29 @@ func Substring(str *JSValue, start *JSValue, end ...*JSValue) *JSValue {
 	if st < 0 {
 		st = 0
 	}
-	if st > len(s) {
-		st = len(s)
+	if st > length {
+		st = length
 	}
-	e := len(s)
+	e := length
 	if len(end) > 0 && end[0] != nil {
 		e = int(end[0].Number())
 	}
 	if e < 0 {
 		e = 0
 	}
-	if e > len(s) {
-		e = len(s)
+	if e > length {
+		e = length
 	}
 	if st > e {
 		st, e = e, st
 	}
-	return NewString(string(s[st:e]))
+	return NewString(runeSliceFast(s, st, e))
 }
 
 // StringSlice implements JavaScript String.prototype.slice semantics.
 func StringSlice(str *JSValue, start *JSValue, end ...*JSValue) *JSValue {
-	s := []rune(fmt.Sprint(str))
-	length := len(s)
+	s := stringFast(str)
+	length := runeLenFast(s)
 	st := 0
 	if start != nil {
 		st = int(start.Number())
@@ -189,7 +259,7 @@ func StringSlice(str *JSValue, start *JSValue, end ...*JSValue) *JSValue {
 	if e < st {
 		e = st
 	}
-	return NewString(string(s[st:e]))
+	return NewString(runeSliceFast(s, st, e))
 }
 
 func initStringPrototype() {
@@ -307,10 +377,20 @@ func initStringPrototype() {
 		if len(args) > 2 && args[2] != nil {
 			start = int(args[2].Number())
 		}
-		runes := []rune(s)
 		if start < 0 {
 			start = 0
 		}
+		if isASCII(s) {
+			if start >= len(s) {
+				return NewNumber(-1)
+			}
+			idx := strings.Index(s[start:], sub)
+			if idx < 0 {
+				return NewNumber(-1)
+			}
+			return NewNumber(float64(start + idx))
+		}
+		runes := []rune(s)
 		if start >= len(runes) {
 			return NewNumber(-1)
 		}
@@ -387,14 +467,23 @@ func initStringPrototype() {
 		}
 		s := args[0].String()
 		targetLen := int(args[1].Number())
+		curLen := runeLenFast(s)
+		if targetLen <= curLen {
+			return NewString(runeSliceFast(s, 0, targetLen))
+		}
 		pad := " "
 		if len(args) > 2 && args[2] != nil {
 			pad = args[2].String()
 		}
-		for len([]rune(s)) < targetLen {
-			s = pad + s
+		if pad == "" {
+			return NewString(s)
 		}
-		return NewString(string([]rune(s)[:targetLen]))
+		needed := targetLen - curLen
+		padLen := runeLenFast(pad)
+		repeats := (needed + padLen - 1) / padLen
+		prefix := strings.Repeat(pad, repeats)
+		prefix = runeSliceFast(prefix, 0, needed)
+		return NewString(prefix + s)
 	})
 	defMethod(StringPrototype, "padEnd", func(args ...*JSValue) *JSValue {
 		if len(args) < 2 || args[0] == nil {
@@ -402,25 +491,44 @@ func initStringPrototype() {
 		}
 		s := args[0].String()
 		targetLen := int(args[1].Number())
+		curLen := runeLenFast(s)
+		if targetLen <= curLen {
+			return NewString(runeSliceFast(s, 0, targetLen))
+		}
 		pad := " "
 		if len(args) > 2 && args[2] != nil {
 			pad = args[2].String()
 		}
-		for len([]rune(s)) < targetLen {
-			s = s + pad
+		if pad == "" {
+			return NewString(s)
 		}
-		return NewString(string([]rune(s)[:targetLen]))
+		needed := targetLen - curLen
+		padLen := runeLenFast(pad)
+		repeats := (needed + padLen - 1) / padLen
+		suffix := strings.Repeat(pad, repeats)
+		suffix = runeSliceFast(suffix, 0, needed)
+		return NewString(s + suffix)
 	})
 	defMethod(StringPrototype, "codePointAt", func(args ...*JSValue) *JSValue {
 		if len(args) < 1 || args[0] == nil {
 			return NewUndefined()
 		}
-		runes := []rune(args[0].String())
+		s := args[0].String()
 		idx := 0
 		if len(args) > 1 && args[1] != nil {
 			idx = int(args[1].Number())
 		}
-		if idx < 0 || idx >= len(runes) {
+		if idx < 0 {
+			return NewUndefined()
+		}
+		if isASCII(s) {
+			if idx >= len(s) {
+				return NewUndefined()
+			}
+			return NewNumber(float64(s[idx]))
+		}
+		runes := []rune(s)
+		if idx >= len(runes) {
 			return NewUndefined()
 		}
 		return NewNumber(float64(runes[idx]))
@@ -429,12 +537,22 @@ func initStringPrototype() {
 		if len(args) < 1 || args[0] == nil {
 			return NewNumber(0)
 		}
-		runes := []rune(args[0].String())
+		s := args[0].String()
 		idx := 0
 		if len(args) > 1 && args[1] != nil {
 			idx = int(args[1].Number())
 		}
-		if idx < 0 || idx >= len(runes) {
+		if idx < 0 {
+			return NewNumber(0)
+		}
+		if isASCII(s) {
+			if idx >= len(s) {
+				return NewNumber(0)
+			}
+			return NewNumber(float64(s[idx]))
+		}
+		runes := []rune(s)
+		if idx >= len(runes) {
 			return NewNumber(0)
 		}
 		return NewNumber(float64(runes[idx]))
@@ -443,17 +561,18 @@ func initStringPrototype() {
 		if len(args) < 1 || args[0] == nil {
 			return NewUndefined()
 		}
-		s := []rune(args[0].String())
+		s := args[0].String()
 		idx := 0
 		if len(args) > 1 && args[1] != nil {
 			idx = int(args[1].Number())
 		}
+		length := runeLenFast(s)
 		if idx < 0 {
-			idx = len(s) + idx
+			idx = length + idx
 		}
-		if idx < 0 || idx >= len(s) {
+		if idx < 0 || idx >= length {
 			return NewUndefined()
 		}
-		return NewString(string(s[idx]))
+		return NewString(runeSliceFast(s, idx, idx+1))
 	})
 }

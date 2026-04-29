@@ -4,13 +4,44 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/nnstd/gun/runtime/profile"
 )
+
+// goroutineID returns a stable goroutine identifier.
+// Uses runtime.Stack on first call per goroutine, then cached via stack-page key.
+func goroutineID() uint64 {
+	// Cheap fingerprint: stack page of a local variable.
+	// Each goroutine has a unique stack, so upper bits differ.
+	var tmp byte
+	key := uint64(uintptr(unsafe.Pointer(&tmp))) >> 13
+
+	if id, ok := goroutineIDCache.Load(key); ok {
+		return id.(uint64)
+	}
+
+	// Expensive: parse goroutine ID from runtime.Stack
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	id := uint64(0)
+	for i := 10; i < n; i++ {
+		if buf[i] >= '0' && buf[i] <= '9' {
+			id = id*10 + uint64(buf[i]-'0')
+		} else {
+			break
+		}
+	}
+	goroutineIDCache.Store(key, id)
+	return id
+}
+
+var goroutineIDCache sync.Map // uint64(stack page) → uint64(goroutine ID)
 
 // ValueType represents the JavaScript type tag.
 type ValueType int
@@ -44,14 +75,15 @@ type cacheEntry struct {
 }
 
 type jsValueExt struct {
-	properties SmallPropMap
-	arrayVal   SmallValueList
-	regexVal   any
-	mapVal     *jsMap
-	setVal     *jsSet
-	classInit  func(this *JSValue, args ...*JSValue) *JSValue
-	meta       atomic.Pointer[jsValueMeta]
-	metaInit   sync.Mutex
+	properties      SmallPropMap
+	arrayVal        SmallValueList
+	regexVal        any
+	mapVal          *jsMap
+	setVal          *jsSet
+	classInit       func(this *JSValue, args ...*JSValue) *JSValue
+	meta            atomic.Pointer[jsValueMeta]
+	metaInit        sync.Mutex
+	sharedOverrides sync.Map // uint64(goroutineID) → *map[string]*PropertyDescriptor
 }
 
 type jsValueMeta struct {
@@ -76,7 +108,9 @@ type JSValue struct {
 	isArr            bool // true when this JSValue has array semantics (even if empty)
 	isMethod         bool // true for class methods that expect this as _args[0]
 	isAsyncFunction  bool
-	frozen           bool // true for interned singletons; Set/DefineProperty no-op
+	shared           atomic.Bool  // accessed by multiple goroutines
+	activeWrites     atomic.Int32 // concurrent write detection
+	frozen           bool         // true for interned singletons; Set/DefineProperty no-op
 	isArenaAllocated bool
 	ext              atomic.Pointer[jsValueExt]
 }
@@ -364,8 +398,24 @@ func NewSymbol(description string) *JSValue {
 // For all other types, returns the standard string representation.
 // Accepts any type for convenience — non-JSValue values use fmt.Sprint.
 func PropertyKey(v any) string {
-	if jsv, ok := v.(*JSValue); ok && jsv != nil && jsv.typ == TypeSymbol {
-		return fmt.Sprintf("@@sym%d:%s", jsv.symbolID, jsv.symbolDesc)
+	if jsv, ok := v.(*JSValue); ok && jsv != nil {
+		jsv = jsv.unboxed()
+		switch jsv.typ {
+		case TypeString:
+			return jsv.strVal
+		case TypeNumber:
+			if jsv.numVal == float64(int64(jsv.numVal)) {
+				return strconv.FormatInt(int64(jsv.numVal), 10)
+			}
+			return strconv.FormatFloat(jsv.numVal, 'g', -1, 64)
+		case TypeBoolean:
+			if jsv.boolVal {
+				return "true"
+			}
+			return "false"
+		case TypeSymbol:
+			return fmt.Sprintf("@@sym%d:%s", jsv.symbolID, jsv.symbolDesc)
+		}
 	}
 	return fmt.Sprint(v)
 }
@@ -678,6 +728,12 @@ func (v *JSValue) Index(i int) *JSValue {
 		}
 	}
 	if v.typ == TypeString && i >= 0 {
+		if isASCII(v.strVal) {
+			if i < len(v.strVal) {
+				return NewString(v.strVal[i : i+1])
+			}
+			return NewUndefined()
+		}
 		runes := []rune(v.strVal)
 		if i < len(runes) {
 			return NewString(string(runes[i]))
@@ -796,13 +852,8 @@ func (v *JSValue) MethodCall(method string, args ...*JSValue) *JSValue {
 		return v.Call()
 	}
 	if v.typ == TypeFunction && method == "call" && len(args) >= 1 {
-		// .call(thisArg, ...args) — invoke function with thisArg as receiver
-		// For methods (isMethod=true), prepend thisArg so it becomes _args[0]
 		if v.isMethod {
-			allArgs := make([]*JSValue, 0, len(args))
-			allArgs = append(allArgs, args[0]) // thisArg
-			allArgs = append(allArgs, args[1:]...)
-			return v.Call(allArgs...)
+			return v.Call(args...)
 		}
 		return v.Call(args[1:]...)
 	}
@@ -812,9 +863,19 @@ func (v *JSValue) MethodCall(method string, args ...*JSValue) *JSValue {
 	}
 	// Only prepend 'this' for functions that expect it (class methods)
 	if fn.isMethod {
-		allArgs := make([]*JSValue, 0, 1+len(args))
-		allArgs = append(allArgs, v)
-		allArgs = append(allArgs, args...)
+		// Stack-allocate for up to 8 args to avoid heap allocation
+		var buf [8]*JSValue
+		var allArgs []*JSValue
+		n := 1 + len(args)
+		if n <= len(buf) {
+			allArgs = buf[:n]
+			allArgs[0] = v
+			copy(allArgs[1:], args)
+		} else {
+			allArgs = make([]*JSValue, n)
+			allArgs[0] = v
+			copy(allArgs[1:], args)
+		}
 		return fn.Call(allArgs...)
 	}
 	return fn.Call(args...)

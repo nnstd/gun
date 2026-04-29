@@ -7,8 +7,9 @@ import (
 	"net"
 	"runtime/debug"
 	"strconv"
-	"sync"
 	"syscall"
+
+
 
 	"github.com/valyala/fasthttp"
 
@@ -21,13 +22,6 @@ import (
 
 var (
 	listenFn = net.Listen
-
-	// fetchMu serializes the fetch handler call to prevent concurrent
-	// mutation of shared router state (Hono's trie router mutates handlerSet
-	// objects during match). In JS this is safe (single-threaded), but Go's
-	// fasthttp spawns a goroutine per request. The mutex covers only the
-	// synchronous dispatch; async promise resolution runs after unlock.
-	fetchMu sync.Mutex
 
 	AsJSValue = func() *jsvalue.JSValue {
 		obj := jsvalue.NewObject()
@@ -107,25 +101,14 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 				}
 			}()
 
-			// Serialize the fetch dispatch to prevent concurrent mutation
-			// of shared router state (handlerSet.params writes in Hono's
-			// trie router). For sync handlers, the mutex is held only for
-			// the brief routing + handler execution. For async handlers,
-			// we capture the promise result before unlocking.
-			fetchMu.Lock()
 			req := web.RequestFromFastHTTP(ctx)
 			res := fetch.Call(req, serverObj)
 
 			if !promise.IsPromise(res) {
-				fetchMu.Unlock()
 				web.WriteResponseFastHTTP(ctx, res)
 				return
 			}
 
-			// For async handlers: the promise's .then() callbacks are
-			// scheduled as microtasks on the event loop. We must unlock
-			// before awaiting so the event loop can process them.
-			fetchMu.Unlock()
 			res = promise.Await(res)
 			web.WriteResponseFastHTTP(ctx, res)
 		},

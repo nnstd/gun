@@ -83,12 +83,37 @@ func Values(obj *JSValue) *JSValue {
 	if obj.isPrimitiveValue() {
 		obj = boxedPrimitiveOf(obj)
 	}
-	keys := obj.EnumerableOwnKeys()
-	result := make([]*JSValue, 0, len(keys))
-	for _, key := range keys {
-		result = append(result, obj.Get(key))
+	props := obj.propertiesOrNil()
+	if props == nil {
+		return NewArray()
+	}
+	obj.rlock()
+	descs := make([]PropertyDescriptor, 0, props.Len())
+	props.ForEach(func(key string, desc *PropertyDescriptor) {
+		if desc == nil || !desc.Enumerable {
+			return
+		}
+		descs = append(descs, *desc)
+	})
+	obj.runlock()
+	result := make([]*JSValue, 0, len(descs))
+	for i := range descs {
+		desc := &descs[i]
+		if desc.Get != nil {
+			result = append(result, desc.Get(obj))
+			continue
+		}
+		result = append(result, desc.Value)
 	}
 	return NewArray(result...)
+}
+
+func enumerableEntryFromDescriptor(obj *JSValue, key string, desc *PropertyDescriptor) *JSValue {
+	val := desc.Value
+	if desc.Get != nil {
+		val = desc.Get(obj)
+	}
+	return NewArray(NewString(key), val)
 }
 
 // OwnPropertyNames returns all own property names, including non-enumerable ones.
@@ -116,10 +141,25 @@ func Entries(obj *JSValue) *JSValue {
 	if obj.isPrimitiveValue() {
 		obj = boxedPrimitiveOf(obj)
 	}
-	keys := obj.EnumerableOwnKeys()
-	result := make([]*JSValue, 0, len(keys))
-	for _, key := range keys {
-		result = append(result, NewArray(NewString(key), obj.Get(key)))
+	props := obj.propertiesOrNil()
+	if props == nil {
+		return NewArray()
+	}
+	obj.rlock()
+	type entryDesc struct {
+		key  string
+		desc PropertyDescriptor
+	}
+	descs := make([]entryDesc, 0, props.Len())
+	props.ForEach(func(key string, desc *PropertyDescriptor) {
+		if desc != nil && desc.Enumerable {
+			descs = append(descs, entryDesc{key: key, desc: *desc})
+		}
+	})
+	obj.runlock()
+	result := make([]*JSValue, 0, len(descs))
+	for i := range descs {
+		result = append(result, enumerableEntryFromDescriptor(obj, descs[i].key, &descs[i].desc))
 	}
 	return NewArray(result...)
 }
@@ -275,6 +315,53 @@ func DefineProperties(obj any, props any) *JSValue {
 		DefineProperty(o, key, p.Get(key))
 	}
 	return o
+}
+
+// ShallowClone creates a new object with the same own properties as v.
+// The clone gets a fresh property map and its own mutex, so concurrent
+// mutations to the clone do not affect the original. Prototype chain
+// is preserved. Property descriptors are value-copied (not pointer-aliased)
+// so in-place Set() on the clone's descriptors won't mutate the original.
+// If the original is marked shared, the clone inherits the shared flag so
+// that Get() on the clone also returns shallow clones of property values
+// (which still alias the original's children).
+func (v *JSValue) ShallowClone() *JSValue {
+	if v == nil {
+		return NewObject()
+	}
+	// Primitives are immutable — return as-is
+	if v.typ != TypeObject && v.typ != TypeFunction {
+		return v
+	}
+	v.rlock()
+	defer v.runlock()
+	clone := NewObjectWithPrototype(v.prototype)
+	// Clone is NOT marked shared — it's private to one goroutine.
+	// Its property Values may alias the original's, but the clone's
+	// own property map is independent.
+	if v.isArr {
+		clone.isArr = true
+		if arr := v.arrayListOrNil(); arr != nil {
+			dst := clone.arrayListOrZero()
+			for i := 0; i < arr.Len(); i++ {
+				dst.Push(arr.Get(i))
+			}
+		}
+	}
+	if props := v.propertiesOrNil(); props != nil {
+		dst := clone.propertiesOrZero()
+		props.ForEach(func(k string, desc *PropertyDescriptor) {
+			if desc == nil {
+				return
+			}
+			// Value-copy the descriptor so Set() on the clone
+			// does not mutate the original's desc via in-place
+			// desc.Value = value (property.go:229).
+			cp := *desc
+			dst.Set(k, &cp)
+		})
+	}
+	return clone
 }
 
 // NewClass creates a JS class: a constructor function with a prototype object.

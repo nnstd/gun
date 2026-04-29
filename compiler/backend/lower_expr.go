@@ -576,7 +576,11 @@ func (l *Lowerer) lowerObjectPropertyValue(prop *hir.Property) ast.Expr {
 		if fn.IsAsync {
 			methodVal = callExpr(selectorExpr(methodVal, "MarkAsAsync"))
 		}
-		return callExpr(selectorExpr(methodVal, "MarkAsMethod"))
+		methodVal = callExpr(selectorExpr(methodVal, "MarkAsMethod"))
+		if hirBodyAssignsThisProperty(body, prop.KeyName) {
+			methodVal = callExpr(selectorExpr(methodVal, "MarkSynchronized"), stringLit(prop.KeyName))
+		}
+		return methodVal
 	case *hir.FuncExpr:
 		var methodBody *ast.BlockStmt
 		if fn.IsAsync {
@@ -590,7 +594,11 @@ func (l *Lowerer) lowerObjectPropertyValue(prop *hir.Property) ast.Expr {
 		if fn.IsAsync {
 			methodVal = callExpr(selectorExpr(methodVal, "MarkAsAsync"))
 		}
-		return callExpr(selectorExpr(methodVal, "MarkAsMethod"))
+		methodVal = callExpr(selectorExpr(methodVal, "MarkAsMethod"))
+		if hirBodyAssignsThisProperty(fn.Body, prop.KeyName) {
+			methodVal = callExpr(selectorExpr(methodVal, "MarkSynchronized"), stringLit(prop.KeyName))
+		}
+		return methodVal
 	default:
 		return l.lowerExpr(prop.Value)
 	}
@@ -1499,6 +1507,10 @@ func (l *Lowerer) lowerComputedPropertyKeyExpr(e hir.Expr) ast.Expr {
 	if key, ok := staticComputedPropertyKey(e); ok {
 		return stringLit(key)
 	}
+	if l.exprIsJSValue(e) {
+		l.jsvalueImport()
+		return callExpr(selectorExpr(goIdent("jsvalue"), "PropertyKey"), l.lowerExpr(e))
+	}
 	l.addImport("fmt")
 	return callExpr(selectorExpr(goIdent("fmt"), "Sprint"), l.lowerExpr(e))
 }
@@ -1891,6 +1903,18 @@ func (l *Lowerer) arenaBinaryHelperName(op hir.BinaryOp) string {
 		return "ADiv"
 	case hir.OpMod:
 		return "AMod"
+	case hir.OpEq:
+		return "AEq"
+	case hir.OpNEq:
+		return "ANEq"
+	case hir.OpLt:
+		return "ALt"
+	case hir.OpGt:
+		return "AGt"
+	case hir.OpLtE:
+		return "ALtE"
+	case hir.OpGtE:
+		return "AGtE"
 	default:
 		return ""
 	}

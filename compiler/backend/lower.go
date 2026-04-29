@@ -395,6 +395,9 @@ func (l *Lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 	}
 	if methodLike {
 		fnVal = callExpr(selectorExpr(fnVal, "MarkAsMethod"))
+		if hirBodyAssignsThisProperty(d.Body, name) {
+			fnVal = callExpr(selectorExpr(fnVal, "MarkSynchronized"), stringLit(name))
+		}
 	}
 	l.decls = append(l.decls, setDeclPos(varDecl(name, nil, fnVal), d.Span))
 }
@@ -691,7 +694,11 @@ func (l *Lowerer) lowerClassMethodValue(m *hir.ClassMethod) ast.Expr {
 	if m.IsAsync {
 		methodVal = callExpr(selectorExpr(methodVal, "MarkAsAsync"))
 	}
-	return callExpr(selectorExpr(methodVal, "MarkAsMethod"))
+	methodVal = callExpr(selectorExpr(methodVal, "MarkAsMethod"))
+	if !m.IsStatic && hirBodyAssignsThisProperty(m.Body, m.Name) {
+		methodVal = callExpr(selectorExpr(methodVal, "MarkSynchronized"), stringLit(m.Name))
+	}
+	return methodVal
 }
 
 func (l *Lowerer) defineHiddenProperty(target, key, value ast.Expr) ast.Stmt {
@@ -1717,8 +1724,8 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 		stmts = append(stmts, &ast.DeclStmt{Decl: varDecl("_arena", ptrType(selectorExpr(goIdent("jsvalue"), "Arena")), nil)})
 		stmts = append(stmts, assignStmt([]ast.Expr{goIdent("_arena")}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "GetArena"))}))
 		stmts = append(stmts, exprStmt(callExpr(selectorExpr(goIdent("_arena"), "PushScope"))))
-		stmts = append(stmts, &ast.DeferStmt{Call: callExpr(selectorExpr(goIdent("_arena"), "PopScope"))})
 		stmts = append(stmts, &ast.DeferStmt{Call: callExpr(selectorExpr(goIdent("jsvalue"), "ReleaseArena"), goIdent("_arena"))})
+		stmts = append(stmts, &ast.DeferStmt{Call: callExpr(selectorExpr(goIdent("_arena"), "PopScope"))})
 	}
 
 	// Unpack _args into named parameters
@@ -1884,8 +1891,8 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 		stmts = append(stmts, &ast.DeclStmt{Decl: varDecl("_arena", ptrType(selectorExpr(goIdent("jsvalue"), "Arena")), nil)})
 		stmts = append(stmts, assignStmt([]ast.Expr{goIdent("_arena")}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "GetArena"))}))
 		stmts = append(stmts, exprStmt(callExpr(selectorExpr(goIdent("_arena"), "PushScope"))))
-		stmts = append(stmts, &ast.DeferStmt{Call: callExpr(selectorExpr(goIdent("_arena"), "PopScope"))})
 		stmts = append(stmts, &ast.DeferStmt{Call: callExpr(selectorExpr(goIdent("jsvalue"), "ReleaseArena"), goIdent("_arena"))})
+		stmts = append(stmts, &ast.DeferStmt{Call: callExpr(selectorExpr(goIdent("_arena"), "PopScope"))})
 	}
 
 	// Only declare `this` if the method body references it
@@ -2866,6 +2873,160 @@ func hirBodyContainsNestedClosure(body *hir.BlockStmt) bool {
 }
 
 // hirBodyUsesThis checks if an HIR block references `this`.
+func hirBodyAssignsThisProperty(body *hir.BlockStmt, property string) bool {
+	if body == nil || property == "" {
+		return false
+	}
+	found := false
+	var walkExpr func(hir.Expr)
+	var walkStmt func(hir.Stmt)
+	walkExpr = func(e hir.Expr) {
+		if found || e == nil {
+			return
+		}
+		switch e := e.(type) {
+		case *hir.AssignExpr:
+			if member, ok := e.Left.(*hir.MemberExpr); ok && !member.Private && member.Property == property {
+				if _, ok := member.Object.(*hir.ThisExpr); ok {
+					found = true
+					return
+				}
+			}
+			walkExpr(e.Left)
+			walkExpr(e.Right)
+		case *hir.BinaryExpr:
+			walkExpr(e.Left)
+			walkExpr(e.Right)
+		case *hir.UnaryExpr:
+			walkExpr(e.Operand)
+		case *hir.CallExpr:
+			walkExpr(e.Func)
+			for _, a := range e.Args {
+				walkExpr(a)
+			}
+		case *hir.MemberExpr:
+			walkExpr(e.Object)
+		case *hir.ComputedMemberExpr:
+			walkExpr(e.Object)
+			walkExpr(e.Property)
+		case *hir.TernaryExpr:
+			walkExpr(e.Cond)
+			walkExpr(e.Then)
+			walkExpr(e.Else)
+		case *hir.ArrayLiteral:
+			for _, el := range e.Elements {
+				walkExpr(el)
+			}
+		case *hir.ObjectLiteral:
+			for _, p := range e.Properties {
+				walkExpr(p.Value)
+				if p.Computed {
+					walkExpr(p.Key)
+				}
+			}
+		case *hir.SpreadExpr:
+			walkExpr(e.Value)
+		case *hir.NewExpr:
+			walkExpr(e.Callee)
+			for _, a := range e.Args {
+				walkExpr(a)
+			}
+		case *hir.UpdateExpr:
+			walkExpr(e.Operand)
+		case *hir.AwaitExpr:
+			walkExpr(e.Value)
+		case *hir.TemplateLiteral:
+			for _, p := range e.Parts {
+				walkExpr(p)
+			}
+		case *hir.SequenceExpr:
+			for _, ex := range e.Exprs {
+				walkExpr(ex)
+			}
+		case *hir.ParenExpr:
+			walkExpr(e.Expr)
+		case *hir.ArrowFunc, *hir.FuncExpr, *hir.ClassExpr:
+			return
+		}
+	}
+	walkStmt = func(s hir.Stmt) {
+		if found || s == nil {
+			return
+		}
+		switch s := s.(type) {
+		case *hir.ExprStmt:
+			walkExpr(s.Expr)
+		case *hir.ReturnStmt:
+			walkExpr(s.Value)
+		case *hir.VarDecl:
+			for _, d := range s.Declarators {
+				walkExpr(d.Init)
+			}
+		case *hir.IfStmt:
+			walkExpr(s.Cond)
+			if s.Then != nil {
+				for _, st := range s.Then.Stmts {
+					walkStmt(st)
+				}
+			}
+			if s.Else != nil {
+				walkStmt(s.Else)
+			}
+		case *hir.ForStmt:
+			walkStmt(s.Init)
+			walkExpr(s.Cond)
+			walkExpr(s.Post)
+			if s.Body != nil {
+				for _, st := range s.Body.Stmts {
+					walkStmt(st)
+				}
+			}
+		case *hir.WhileStmt:
+			walkExpr(s.Cond)
+			if s.Body != nil {
+				for _, st := range s.Body.Stmts {
+					walkStmt(st)
+				}
+			}
+		case *hir.BlockStmt:
+			for _, st := range s.Stmts {
+				walkStmt(st)
+			}
+		case *hir.ThrowStmt:
+			walkExpr(s.Value)
+		case *hir.SwitchStmt:
+			walkExpr(s.Tag)
+			for _, c := range s.Cases {
+				for _, st := range c.Body {
+					walkStmt(st)
+				}
+			}
+		case *hir.TryCatchStmt:
+			if s.Try != nil {
+				for _, st := range s.Try.Stmts {
+					walkStmt(st)
+				}
+			}
+			if s.Catch != nil && s.Catch.Body != nil {
+				for _, st := range s.Catch.Body.Stmts {
+					walkStmt(st)
+				}
+			}
+		case *hir.DoWhileStmt:
+			walkExpr(s.Cond)
+			if s.Body != nil {
+				for _, st := range s.Body.Stmts {
+					walkStmt(st)
+				}
+			}
+		}
+	}
+	for _, st := range body.Stmts {
+		walkStmt(st)
+	}
+	return found
+}
+
 func hirBodyUsesThis(body *hir.BlockStmt) bool {
 	if body == nil {
 		return false
@@ -3294,15 +3455,33 @@ func (l *Lowerer) wrapAsJSValueFunc(params []*hir.Param, body *ast.BlockStmt) *a
 	}
 }
 
-func (l *Lowerer) generatedFunctionCtorName() string {
-	if l.arenaEnabled && l.disableArenaCount == 0 && l.hasArenaVar > 0 {
+func (l *Lowerer) generatedFunctionCtorName(fnLit *ast.FuncLit) string {
+	if l.arenaEnabled && l.disableArenaCount == 0 && funcLitUsesArena(fnLit) {
 		return "NewArenaFunction"
 	}
 	return "NewFunction"
 }
 
 func (l *Lowerer) generatedFunctionValue(name string, span *hir.SourceSpan, fnLit *ast.FuncLit) ast.Expr {
-	return callExpr(selectorExpr(goIdent("jsvalue"), l.generatedFunctionCtorName()), fnLit)
+	return callExpr(selectorExpr(goIdent("jsvalue"), l.generatedFunctionCtorName(fnLit)), fnLit)
+}
+
+func funcLitUsesArena(fnLit *ast.FuncLit) bool {
+	if fnLit == nil || fnLit.Body == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(fnLit.Body, func(n ast.Node) bool {
+		if found || n == nil {
+			return false
+		}
+		if id, ok := n.(*ast.Ident); ok && id.Name == "_arena" {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 func (l *Lowerer) instrumentProfiledBody(name string, span *hir.SourceSpan, body *ast.BlockStmt) *ast.BlockStmt {
