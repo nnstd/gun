@@ -142,6 +142,67 @@ func TestFetchRejectsNetworkFailure(t *testing.T) {
 	}
 }
 
+func TestFetchRejectsPreAbortedSignal(t *testing.T) {
+	srv := newLocalServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("should not matter"))
+	}))
+	defer srv.Close()
+
+	controller := AbortController.Call()
+	controller.MethodCall("abort")
+	value, errVal := awaitPromise(t, Fetch.Call(jsvalue.NewString(srv.URL), jsvalue.ObjectFrom(
+		"signal", controller.Get("signal"),
+	)))
+	if value != nil {
+		t.Fatalf("expected abort rejection, got resolution: %v", value)
+	}
+	if errVal == nil {
+		t.Fatal("expected abort rejection value")
+	}
+	if got := errVal.Get("name").String(); got != "AbortError" {
+		t.Fatalf("error name = %q, want AbortError", got)
+	}
+}
+
+func TestFetchRejectsWhenSignalAbortsWhilePending(t *testing.T) {
+	closed := make(chan struct{}, 1)
+	srv := newLocalServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+			closed <- struct{}{}
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
+		_, _ = w.Write([]byte("late"))
+	}))
+	defer srv.Close()
+
+	controller := AbortController.Call()
+	p := Fetch.Call(jsvalue.NewString(srv.URL), jsvalue.ObjectFrom(
+		"signal", controller.Get("signal"),
+	))
+	eventloop.SetTimeout(jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		controller.MethodCall("abort")
+		return jsvalue.NewUndefined()
+	}), jsvalue.NewNumber(1))
+
+	value, errVal := awaitPromise(t, p)
+	if value != nil {
+		t.Fatalf("expected abort rejection, got resolution: %v", value)
+	}
+	if errVal == nil {
+		t.Fatal("expected abort rejection value")
+	}
+	if got := errVal.Get("name").String(); got != "AbortError" {
+		t.Fatalf("error name = %q, want AbortError", got)
+	}
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not observe transport connection close after abort")
+	}
+}
+
 func TestFetchAcceptsURLObjectAndRegistersGlobal(t *testing.T) {
 	srv := newLocalServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))

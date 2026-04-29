@@ -3,6 +3,7 @@ package web
 import (
 	"net/url"
 	"strings"
+	"sync"
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
 	jserror "github.com/nnstd/gun/runtime/builtin/error"
@@ -36,19 +37,85 @@ var Fetch = jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue 
 			reject.Call(errVal)
 			return jsvalue.NewUndefined()
 		}
+		signal := AbortSignalFromOptions(init)
+		if errVal := fetchAbortReason(signal); errVal != nil {
+			reject.Call(errVal)
+			return jsvalue.NewUndefined()
+		}
+		var cancelTransport chan struct{}
+		var cancelTransportOnce sync.Once
+		if IsAbortSignal(signal) {
+			cancelTransport = make(chan struct{})
+			spec.Cancel = cancelTransport
+		}
+
+		var mu sync.Mutex
+		settled := false
+		var abortListener *jsvalue.JSValue
+		isSettled := func() bool {
+			mu.Lock()
+			defer mu.Unlock()
+			return settled
+		}
+		settle := func(fn func()) {
+			mu.Lock()
+			if settled {
+				mu.Unlock()
+				return
+			}
+			settled = true
+			mu.Unlock()
+			if IsAbortSignal(signal) && abortListener != nil {
+				signal.MethodCall("removeEventListener", jsvalue.NewString("abort"), abortListener)
+			}
+			fn()
+		}
+
+		if IsAbortSignal(signal) {
+			abortListener = jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+				if cancelTransport != nil {
+					cancelTransportOnce.Do(func() { close(cancelTransport) })
+				}
+				settle(func() { reject.Call(fetchAbortReason(signal)) })
+				return jsvalue.NewUndefined()
+			})
+			signal.MethodCall("addEventListener", jsvalue.NewString("abort"), abortListener)
+			if errVal := fetchAbortReason(signal); errVal != nil {
+				settle(func() { reject.Call(errVal) })
+				return jsvalue.NewUndefined()
+			}
+		}
 
 		nodehttp.DoTransportAsync(spec, func(resp *nodehttp.TransportResponse, err error) {
+			if isSettled() {
+				return
+			}
 			eventloop.Default.ScheduleCallback(func() {
 				if err != nil {
-					reject.Call(jserror.TypeError.Call(jsvalue.NewString(err.Error())))
+					if err == nodehttp.ErrTransportCanceled {
+						settle(func() { reject.Call(fetchAbortReason(signal)) })
+						return
+					}
+					settle(func() { reject.Call(jserror.TypeError.Call(jsvalue.NewString(err.Error()))) })
 					return
 				}
-				resolve.Call(responseFromTransport(resp))
+				settle(func() { resolve.Call(responseFromTransport(resp)) })
 			})
 		})
 		return jsvalue.NewUndefined()
 	}))
 })
+
+func fetchAbortReason(signal *jsvalue.JSValue) *jsvalue.JSValue {
+	if !IsAborted(signal) {
+		return nil
+	}
+	reason := AbortReason(signal)
+	if reason != nil && reason.TypeString() != "undefined" {
+		return reason
+	}
+	return NewAbortError("The operation was aborted")
+}
 
 func init() {
 	jsvalue.RegisterGlobal("Headers", Headers)

@@ -1,14 +1,17 @@
 package nodehttp
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"maps"
 	"net"
 	stdhttp "net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -27,6 +30,7 @@ type TransportRequest struct {
 	RejectUnauthorized *bool
 	CA                 string
 	ServerName         string
+	Cancel             <-chan struct{}
 
 	scheme  string
 	host    string
@@ -35,6 +39,112 @@ type TransportRequest struct {
 	tlsCfg  *tls.Config
 	agent   *agentInternal
 	noAgent bool
+}
+
+var ErrTransportCanceled = errors.New("transport request canceled")
+
+type cancelableConn struct {
+	net.Conn
+	once sync.Once
+	done chan struct{}
+}
+
+func newCancelableConn(conn net.Conn, cancel <-chan struct{}) net.Conn {
+	if cancel == nil {
+		return conn
+	}
+	cc := &cancelableConn{Conn: conn, done: make(chan struct{})}
+	go func() {
+		select {
+		case <-cancel:
+			cc.Close()
+		case <-cc.done:
+		}
+	}()
+	return cc
+}
+
+func (c *cancelableConn) Close() error {
+	c.once.Do(func() { close(c.done) })
+	return c.Conn.Close()
+}
+
+func isCancelClosed(cancel <-chan struct{}) bool {
+	if cancel == nil {
+		return false
+	}
+	select {
+	case <-cancel:
+		return true
+	default:
+		return false
+	}
+}
+
+func cancelableTCPDialTimeout(cancel <-chan struct{}) fasthttp.DialFuncWithTimeout {
+	return func(addr string, timeout time.Duration) (net.Conn, error) {
+		if isCancelClosed(cancel) {
+			return nil, ErrTransportCanceled
+		}
+		ctx := context.Background()
+		var stop context.CancelFunc
+		if timeout > 0 {
+			ctx, stop = context.WithTimeout(ctx, timeout)
+		} else {
+			ctx, stop = context.WithCancel(ctx)
+		}
+		defer stop()
+
+		done := make(chan struct{})
+		go func() {
+			select {
+			case <-cancel:
+				stop()
+			case <-done:
+			}
+		}()
+		conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+		close(done)
+		if err != nil {
+			if isCancelClosed(cancel) {
+				return nil, ErrTransportCanceled
+			}
+			return nil, err
+		}
+		return newCancelableConn(conn, cancel), nil
+	}
+}
+
+func unixClientForTransport(path string, cancel <-chan struct{}) *fasthttp.Client {
+	if cancel == nil {
+		return unixClientFor(path)
+	}
+	return &fasthttp.Client{
+		Dial: func(_ string) (net.Conn, error) {
+			if isCancelClosed(cancel) {
+				return nil, ErrTransportCanceled
+			}
+			ctx, stop := context.WithCancel(context.Background())
+			defer stop()
+			done := make(chan struct{})
+			go func() {
+				select {
+				case <-cancel:
+					stop()
+				case <-done:
+				}
+			}()
+			conn, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
+			close(done)
+			if err != nil {
+				if isCancelClosed(cancel) {
+					return nil, ErrTransportCanceled
+				}
+				return nil, err
+			}
+			return newCancelableConn(conn, cancel), nil
+		},
+	}
 }
 
 // TransportResponse is the buffered response returned by the shared transport.
@@ -134,7 +244,7 @@ func DoTransport(req *TransportRequest) (*TransportResponse, error) {
 	var doErr error
 	switch {
 	case cfg.SocketPath != "":
-		c := unixClientFor(cfg.SocketPath)
+		c := unixClientForTransport(cfg.SocketPath, cfg.Cancel)
 		if freq.URI().Host() == nil || len(freq.URI().Host()) == 0 {
 			uri.SetHost("localhost")
 		}
@@ -150,7 +260,13 @@ func DoTransport(req *TransportRequest) (*TransportResponse, error) {
 		if cfg.TLSConfig != nil {
 			c.TLSConfig = cfg.TLSConfig
 		}
+		if cfg.Cancel != nil {
+			c.DialTimeout = cancelableTCPDialTimeout(cfg.Cancel)
+		}
 		doErr = c.DoTimeout(freq, fresp, timeout)
+	}
+	if cfg.Cancel != nil && isCancelClosed(cfg.Cancel) {
+		return nil, ErrTransportCanceled
 	}
 	if doErr != nil {
 		return nil, doErr
@@ -193,6 +309,7 @@ type normalizedTransportRequest struct {
 	TLSConfig   *tls.Config
 	Agent       *agentInternal
 	NoAgent     bool
+	Cancel      <-chan struct{}
 }
 
 func normalizeTransportRequest(req *TransportRequest) (*normalizedTransportRequest, error) {
@@ -207,6 +324,7 @@ func normalizeTransportRequest(req *TransportRequest) (*normalizedTransportReque
 		TimeoutMsec: req.TimeoutMsec,
 		Agent:       req.agent,
 		NoAgent:     req.noAgent,
+		Cancel:      req.Cancel,
 	}
 	if cfg.Method == "" {
 		cfg.Method = "GET"
