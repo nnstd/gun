@@ -38,6 +38,7 @@ func RegisterBuiltins() {
 	ModuleRegistry["path"] = path.AsJSValue
 	ModuleRegistry["os"] = nodeos.AsJSValue
 	ModuleRegistry["url"] = url.AsJSValue
+	ModuleRegistry["node:url"] = url.AsJSValue
 	ModuleRegistry["assert"] = assert.AsJSValue
 	ModuleRegistry["module"] = AsJSValue
 	ModuleRegistry["crypto"] = crypto.AsJSValue

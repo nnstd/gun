@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"go/ast"
 	"strings"
 	"testing"
 
@@ -929,8 +930,8 @@ func TestComputedMemberAugmentedAssignUsesCurrentValue(t *testing.T) {
 			rows[i] += word;
 		}
 	`)
-	assertContains(t, out, `rows.Set(fmt.Sprint(i), jsvalue.Add(`)
-	assertContains(t, out, `rows.Get(fmt.Sprint(i))`)
+	assertContains(t, out, `rows.Set(jsvalue.PropertyKey(i), jsvalue.Add(`)
+	assertContains(t, out, `rows.Get(jsvalue.PropertyKey(i))`)
 }
 
 // --- Function hoisting tests ---
@@ -1143,7 +1144,7 @@ func TestComputedMemberCall(t *testing.T) {
 		}
 	`)
 	assertContains(t, out, "MethodCall")
-	assertContains(t, out, "fmt.Sprint")
+	assertContains(t, out, "jsvalue.PropertyKey")
 }
 
 // --- Module.exports detection ---
@@ -1243,4 +1244,38 @@ func TestNoTopLevelAwaitPlainMain(t *testing.T) {
 	if strings.Contains(out, "promise.Promise") {
 		t.Error("non-async module should not reference promise.Promise")
 	}
+}
+
+func TestURLConstructorsUseNodeURLRuntime(t *testing.T) {
+	source := `
+const u = new URL('/a?b=1', 'https://example.com/base')
+const p = new URLSearchParams('x=1')
+console.log(u.href, p.get('x'))
+`
+	tree := parseTS(t, source)
+	defer tree.Close()
+	mod := hir.BuildModule(tree.RootNode(), []byte(source), "main")
+	ctx := context.New()
+	for _, ctorName := range []string{"URL", "URLSearchParams"} {
+		name := ctorName
+		ctx.RegisterConstructor(&context.Constructor{
+			Name: name,
+			Transform: func(args []ast.Expr, imp context.Imports) ast.Expr {
+				imp.AddImport("github.com/nnstd/gun/runtime/url")
+				for i, arg := range args {
+					args[i] = jsvalueWrapLit(arg)
+				}
+				return callExpr(selectorExpr(selectorExpr(goIdent("url"), name+"Constructor"), "Call"), args...)
+			},
+		})
+	}
+	file := Lower(mod, ctx, "", false, context.O0)
+	outBytes, err := Generate(file)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	out := string(outBytes)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/url"`)
+	assertContains(t, out, `url.URLConstructor.Call`)
+	assertContains(t, out, `url.URLSearchParamsConstructor.Call`)
 }

@@ -19,6 +19,7 @@ func RegisterDefaultBuiltins(ctx *tcontext.TranspilerContext) {
 	registerIdentifierMappings(ctx)
 	registerModules(ctx)
 	registerKnownGlobals(ctx)
+
 }
 
 // registerGlobalObjects registers objects like console, Math, JSON, Object, etc.
@@ -84,12 +85,14 @@ func registerGlobalObjects(ctx *tcontext.TranspilerContext) {
 			switch method {
 			case "serve":
 				if len(args) > 0 {
+					opts := args[0]
+					// If opts is ObjectFrom("fetch", X.Get("fetch"), ...),
 					return callExpr(
 						selectorExpr(
 							callExpr(selectorExpr(selectorExpr(ident("bun"), "AsJSValue"), "Get"), stringLit("serve")),
 							"Call",
 						),
-						jsvalueWrapLit(args[0]),
+						jsvalueWrapLit(opts),
 					)
 				}
 				return callExpr(
@@ -442,18 +445,26 @@ func registerConstructors(ctx *tcontext.TranspilerContext) {
 		},
 	})
 
-	for _, ctorName := range []string{"Headers", "Request", "Response", "URL", "File"} {
+	for _, ctorName := range []string{"URL", "URLSearchParams"} {
+		name := ctorName
+		ctx.RegisterConstructor(&tcontext.Constructor{
+			Name: name,
+			Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+				imp.AddImport("github.com/nnstd/gun/runtime/url")
+				for i, arg := range args {
+					args[i] = jsvalueWrapLit(arg)
+				}
+				return callExpr(selectorExpr(selectorExpr(ident("url"), name+"Constructor"), "Call"), args...)
+			},
+		})
+	}
+
+	for _, ctorName := range []string{"Headers", "Request", "Response", "File"} {
 		name := ctorName
 		ctx.RegisterConstructor(&tcontext.Constructor{
 			Name: name,
 			Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
 				imp.AddImport("github.com/nnstd/gun/runtime/web")
-				if name == "URL" {
-					if len(args) > 0 {
-						return callExpr(selectorExpr(ident("web"), "ParseURL"), jsvalueWrapLit(args[0]))
-					}
-					return callExpr(selectorExpr(ident("web"), "ParseURL"), callExpr(selectorExpr(ident("jsvalue"), "NewString"), stringLit("")))
-				}
 				return callExpr(selectorExpr(selectorExpr(ident("web"), name), "Call"), args...)
 			},
 		})
@@ -631,7 +642,18 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		},
 	})
 
-	for _, identName := range []string{"Headers", "Request", "Response", "URL", "File", "RegExp", "fetch"} {
+	for _, identName := range []string{"URL", "URLSearchParams"} {
+		name := identName
+		ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+			Name: name,
+			Transform: func(imp tcontext.Imports) ast.Expr {
+				imp.AddImport("github.com/nnstd/gun/runtime/url")
+				return selectorExpr(ident("url"), name+"Constructor")
+			},
+		})
+	}
+
+	for _, identName := range []string{"Headers", "Request", "Response", "File", "RegExp", "fetch"} {
 		name := identName
 		ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 			Name: name,
@@ -641,9 +663,6 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 					return selectorExpr(ident("jsvalue"), "RegexpCtor")
 				}
 				imp.AddImport("github.com/nnstd/gun/runtime/web")
-				if name == "URL" {
-					return selectorExpr(ident("web"), "URL")
-				}
 				if name == "fetch" {
 					return selectorExpr(ident("web"), "Fetch")
 				}
@@ -1021,6 +1040,7 @@ func registerKnownGlobals(ctx *tcontext.TranspilerContext) {
 	ctx.MarkKnownGlobal("Request")
 	ctx.MarkKnownGlobal("Response")
 	ctx.MarkKnownGlobal("URL")
+	ctx.MarkKnownGlobal("URLSearchParams")
 	ctx.MarkKnownGlobal("File")
 	ctx.MarkKnownGlobal("fetch")
 	ctx.MarkKnownGlobal("Symbol")

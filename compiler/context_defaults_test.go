@@ -42,3 +42,20 @@ func TestRegisterDefaultBuiltinsIncludesFetch(t *testing.T) {
 		t.Fatal("expected fetch global call transform")
 	}
 }
+
+func TestRegisterDefaultBuiltinsIncludesURLGlobals(t *testing.T) {
+	ctx := tcontext.New()
+	RegisterDefaultBuiltins(ctx)
+
+	for _, name := range []string{"URL", "URLSearchParams"} {
+		if !ctx.IsKnownGlobal(name) {
+			t.Fatalf("expected %s to be a known global", name)
+		}
+		if ctx.LookupIdentifier(name) == nil {
+			t.Fatalf("expected %s identifier mapping", name)
+		}
+		if expr := ctx.TransformBuiltinNew(name, []ast.Expr{}, testImports{}); expr == nil {
+			t.Fatalf("expected %s constructor transform", name)
+		}
+	}
+}
