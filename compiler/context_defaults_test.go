@@ -23,6 +23,24 @@ func TestRegisterDefaultBuiltinsIncludesDgram(t *testing.T) {
 	}
 }
 
+func TestDefaultContextRegistersBunFFI(t *testing.T) {
+	ctx := tcontext.New()
+	RegisterDefaultBuiltins(ctx)
+	mod := ctx.LookupModule("bun:ffi")
+	if mod == nil {
+		t.Fatal("bun:ffi module not registered")
+	}
+	if mod.GoImportPath != "github.com/nnstd/gun/runtime/ffi" {
+		t.Fatalf("GoImportPath = %q", mod.GoImportPath)
+	}
+	if mod.GoPkgName != "ffi" {
+		t.Fatalf("GoPkgName = %q", mod.GoPkgName)
+	}
+	if !mod.UseAsJSValue {
+		t.Fatal("bun:ffi should use AsJSValue imports")
+	}
+}
+
 type testImports struct{}
 
 func (testImports) AddImport(path string)               {}

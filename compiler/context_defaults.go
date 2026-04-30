@@ -997,6 +997,11 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 		GoPkgName:    "dgram",
 		UseAsJSValue: true,
 	})
+	ctx.RegisterModule("net", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/net",
+		GoPkgName:    "nodenet",
+		UseAsJSValue: true,
+	})
 	ctx.RegisterModule("dns/promises", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/dns",
 		GoPkgName:    "dns",
@@ -1023,6 +1028,11 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterModule("perf_hooks", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/perf_hooks",
 		GoPkgName:    "perf_hooks",
+		UseAsJSValue: true,
+	})
+	ctx.RegisterModule("bun:ffi", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/ffi",
+		GoPkgName:    "ffi",
 		UseAsJSValue: true,
 	})
 }

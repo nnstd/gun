@@ -8,6 +8,7 @@ import (
 	"github.com/nnstd/gun/runtime/dgram"
 	"github.com/nnstd/gun/runtime/dns"
 	"github.com/nnstd/gun/runtime/events"
+	"github.com/nnstd/gun/runtime/ffi"
 	"github.com/nnstd/gun/runtime/fs"
 	nodehttp "github.com/nnstd/gun/runtime/http"
 	nodeos "github.com/nnstd/gun/runtime/os"
@@ -61,4 +62,5 @@ func RegisterBuiltins() {
 	ModuleRegistry["process"] = process.AsJSValueCached
 	ModuleRegistry["v8"] = v8.AsJSValue
 	ModuleRegistry["perf_hooks"] = perf_hooks.AsJSValue
+	ModuleRegistry["bun:ffi"] = ffi.AsJSValue
 }

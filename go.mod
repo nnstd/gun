@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/alecthomas/kong v1.14.0
 	github.com/dlclark/regexp2 v1.12.0
+	github.com/ebitengine/purego v0.10.0
 	github.com/goccy/go-yaml v1.19.2
 	github.com/tree-sitter/go-tree-sitter v0.25.0
 	github.com/tree-sitter/tree-sitter-typescript v0.23.2
