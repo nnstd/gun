@@ -1002,6 +1002,11 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 		GoPkgName:    "nodenet",
 		UseAsJSValue: true,
 	})
+	ctx.RegisterModule("tty", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/tty",
+		GoPkgName:    "nodetty",
+		UseAsJSValue: true,
+	})
 	ctx.RegisterModule("dns/promises", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/dns",
 		GoPkgName:    "dns",

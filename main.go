@@ -408,6 +408,11 @@ func findRelativeImports(source []byte) []string {
 		if idx < 0 {
 			continue
 		}
+		// Verify this is an import statement, not the word "from" in a string
+		prefix := strings.TrimSpace(line[:idx])
+		if !strings.HasSuffix(prefix, "import") && !strings.Contains(prefix, " import ") && prefix != "import" && !strings.HasPrefix(line, "import ") {
+			continue
+		}
 		rest := strings.TrimSpace(line[idx+5:])
 		if len(rest) < 3 {
 			continue
@@ -672,6 +677,11 @@ func findNodeModuleImports(source []byte) []string {
 		}
 		idx := strings.Index(line, "from ")
 		if idx < 0 {
+			continue
+		}
+		// Verify this is an import statement, not the word "from" in a string
+		prefix := strings.TrimSpace(line[:idx])
+		if !strings.HasSuffix(prefix, "import") && !strings.Contains(prefix, " import ") && prefix != "import" && !strings.HasPrefix(line, "import ") {
 			continue
 		}
 		rest := strings.TrimSpace(line[idx+5:])
