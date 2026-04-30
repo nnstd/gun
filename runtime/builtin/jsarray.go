@@ -288,8 +288,6 @@ func initArrayPrototype() {
 			if len(args) < 1 || args[0] == nil || !args[0].isArr {
 				return NewArray()
 			}
-			args[0].lock()
-			defer args[0].unlock()
 			n := args[0].arrayListOrZero().Len()
 			for i, j := 0, n-1; i < j; i, j = i+1, j-1 {
 				a := args[0].arrayListOrZero().Get(i)
@@ -311,8 +309,6 @@ func initArrayPrototype() {
 			if this == nil || !this.isArr {
 				return NewArray()
 			}
-			this.lock()
-			defer this.unlock()
 			n := this.arrayListOrZero().Len()
 			for i := range n {
 				this.arrayListOrZero().Set(i, args[1])
@@ -349,8 +345,6 @@ func initArrayPrototype() {
 				return NewArray()
 			}
 			this := args[0]
-			this.lock()
-			defer this.unlock()
 			var compareFn *JSValue
 			if len(args) >= 2 {
 				compareFn = args[1]
@@ -395,8 +389,6 @@ func initArrayPrototype() {
 			return NewNumber(0)
 		}
 		this := args[0]
-		this.lock()
-		defer this.unlock()
 		for _, a := range args[1:] {
 			this.arrayListOrZero().Push(a)
 		}
@@ -408,8 +400,6 @@ func initArrayPrototype() {
 			return NewUndefined()
 		}
 		this := args[0]
-		this.lock()
-		defer this.unlock()
 		last := this.arrayListOrZero().Get(this.arrayListOrZero().Len() - 1)
 		this.arrayListOrZero().Truncate()
 		this.genAdd(1)
@@ -420,8 +410,6 @@ func initArrayPrototype() {
 			return NewUndefined()
 		}
 		this := args[0]
-		this.lock()
-		defer this.unlock()
 		first := this.arrayListOrZero().Get(0)
 		this.arrayListOrZero().RemoveFirst()
 		this.genAdd(1)
@@ -432,8 +420,6 @@ func initArrayPrototype() {
 			return NewNumber(0)
 		}
 		this := args[0]
-		this.lock()
-		defer this.unlock()
 		this.arrayListOrZero().Prepend(args[1:]...)
 		this.genAdd(1)
 		return NewNumber(float64(this.arrayListOrZero().Len()))
@@ -443,8 +429,6 @@ func initArrayPrototype() {
 			return NewArray()
 		}
 		this := args[0]
-		this.lock()
-		defer this.unlock()
 		rest := args[1:]
 		length := this.arrayListOrZero().Len()
 		start := 0

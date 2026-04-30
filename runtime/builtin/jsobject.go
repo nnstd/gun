@@ -87,7 +87,6 @@ func Values(obj *JSValue) *JSValue {
 	if props == nil {
 		return NewArray()
 	}
-	obj.rlock()
 	descs := make([]PropertyDescriptor, 0, props.Len())
 	props.ForEach(func(key string, desc *PropertyDescriptor) {
 		if desc == nil || !desc.Enumerable {
@@ -95,7 +94,6 @@ func Values(obj *JSValue) *JSValue {
 		}
 		descs = append(descs, *desc)
 	})
-	obj.runlock()
 	result := make([]*JSValue, 0, len(descs))
 	for i := range descs {
 		desc := &descs[i]
@@ -145,7 +143,6 @@ func Entries(obj *JSValue) *JSValue {
 	if props == nil {
 		return NewArray()
 	}
-	obj.rlock()
 	type entryDesc struct {
 		key  string
 		desc PropertyDescriptor
@@ -156,7 +153,6 @@ func Entries(obj *JSValue) *JSValue {
 			descs = append(descs, entryDesc{key: key, desc: *desc})
 		}
 	})
-	obj.runlock()
 	result := make([]*JSValue, 0, len(descs))
 	for i := range descs {
 		result = append(result, enumerableEntryFromDescriptor(obj, descs[i].key, &descs[i].desc))
@@ -333,8 +329,6 @@ func (v *JSValue) ShallowClone() *JSValue {
 	if v.typ != TypeObject && v.typ != TypeFunction {
 		return v
 	}
-	v.rlock()
-	defer v.runlock()
 	clone := NewObjectWithPrototype(v.prototype)
 	// Clone is NOT marked shared — it's private to one goroutine.
 	// Its property Values may alias the original's, but the clone's

@@ -27,7 +27,6 @@ func parseArrayIndex(name string) (int, bool) {
 	return n, true
 }
 
-
 // PropertyDescriptor describes a single property on a JSValue.
 type PropertyDescriptor struct {
 	Value        *JSValue
@@ -51,8 +50,8 @@ func newWritableEnumerableDataDescriptor(value *JSValue) *PropertyDescriptor {
 	return newDataDescriptor(value, true, true, true)
 }
 
-// Uses double-checked locking: RLock for cache hits, Lock for cache misses.
-// Array/string fast paths run before any locking to reduce contention.
+// Get retrieves a property by name. All JS code runs on the event loop
+// goroutine, so no locking is needed for property access.
 func (v *JSValue) Get(name string) *JSValue {
 	if v == nil {
 		return NewUndefined()
@@ -63,7 +62,7 @@ func (v *JSValue) Get(name string) *JSValue {
 				if desc.Get != nil {
 					return desc.Get(v)
 				}
-								return desc.Value
+				return desc.Value
 			}
 		}
 	}
@@ -74,10 +73,7 @@ func (v *JSValue) Get(name string) *JSValue {
 		return NewUndefined()
 	}
 
-	// Array/string fast paths before locking — these access only
-	// the array/string data which is protected by the receiver lock
-	// during writes, but reads are safe without locking because
-	// the fetchMu serializes all JS execution.
+	// Array/string fast paths
 	if v.isArr {
 		if len(name) == 1 {
 			c := name[0]
@@ -107,117 +103,54 @@ func (v *JSValue) Get(name string) *JSValue {
 		return v.prototypeGet(name)
 	}
 
-	// Shared objects: skip cache (Set() invalidates it per-request).
-	// Use RLock for concurrent property reads — multiple readers allowed.
-	if v.shared.Load() {
-		return v.sharedGet(name)
-	}
-	// Non-shared: RLock-protected cache check. RLock allows concurrent
-	// readers while lockedGet() writes cache under write lock. Eliminates
-	// the race window during initial shared detection.
+	// Inline cache check (lock-free: event loop serializes access)
 	meta := ext.meta.Load()
 	if meta != nil {
-		meta.mu.RLock()
 		recvGen := meta.gen.Load()
 		cache := &meta.cache
 		for i := range cache {
 			e := &cache[i]
 			if e.key == name && e.source != nil && e.recvGen == recvGen && e.gen == e.source.genLoad() {
-				val := e.value
-				getter := e.getter
-				meta.mu.RUnlock()
-				if getter != nil {
-					return getter(v)
+				if e.getter != nil {
+					return e.getter(v)
 				}
-				return val
+				return e.value
 			}
 		}
-		meta.mu.RUnlock()
 	}
-	return v.lockedGet(name)
+
+	// Cache miss: walk property chain and cache result
+	return v.lookupAndCache(name, ext, meta)
 }
 
-// sharedGet reads a property from a shared object using only RLock.
-// No cache — Set() on shared objects invalidates cache per-request anyway.
-// RLock allows concurrent reads from multiple goroutines.
-func (v *JSValue) sharedGet(name string) *JSValue {
-	for cur := v; cur != nil; cur = cur.prototype {
+// lookupAndCache walks the prototype chain, caches the result, and returns the value.
+func (v *JSValue) lookupAndCache(name string, ext *jsValueExt, meta *jsValueMeta) *JSValue {
+	var next *JSValue
+	for cur := v; cur != nil; cur = next {
+		next = cur.prototype
 		curExt := cur.extOrNil()
 		if curExt == nil {
 			continue
 		}
-		meta := curExt.meta.Load()
-		if meta == nil {
-			meta = cur.ensureMeta()
-		}
-		meta.mu.RLock()
-		desc, ok := curExt.properties.Get(name)
-		meta.mu.RUnlock()
-		if ok {
+		if desc, ok := curExt.properties.Get(name); ok {
+			if meta != nil {
+				cache := &meta.cache
+				copy(cache[1:], cache[:3])
+				cache[0] = cacheEntry{
+					key:     name,
+					value:   desc.Value,
+					getter:  desc.Get,
+					source:  cur,
+					gen:     cur.genLoad(),
+					recvGen: meta.gen.Load(),
+				}
+			}
 			if desc.Get != nil {
 				return desc.Get(v)
 			}
 			return desc.Value
 		}
 	}
-	return NewUndefined()
-}
-
-// lockedGet performs a cache-miss property lookup under write lock.
-func (v *JSValue) lockedGet(name string) *JSValue {
-	v.lock()
-	recvGen := v.genLoad()
-	cache := v.cacheEntries()
-	for i := range cache {
-		e := &cache[i]
-		if e.key == name && e.source != nil && e.recvGen == recvGen && e.gen == e.source.genLoad() {
-			val := e.value
-			getter := e.getter
-			v.unlock()
-			if getter != nil {
-				return getter(v)
-			}
-						return val
-		}
-	}
-	var next *JSValue
-	for cur := v; cur != nil; cur = next {
-		if cur != v {
-			cur.rlock()
-		}
-		next = cur.prototype
-		props := cur.propertiesOrNil()
-		if props == nil {
-			if cur != v {
-				cur.runlock()
-			}
-			continue
-		}
-		if desc, ok := props.Get(name); ok {
-			copy(cache[1:], cache[:3])
-			cache[0] = cacheEntry{
-				key:     name,
-				value:   desc.Value,
-				getter:  desc.Get,
-				source:  cur,
-				gen:     cur.genLoad(),
-				recvGen: recvGen,
-			}
-			val := desc.Value
-			if cur != v {
-				cur.runlock()
-			}
-			v.unlock()
-			if desc.Get != nil {
-				return desc.Get(v)
-			}
-						return val
-		}
-		if cur != v {
-			cur.runlock()
-		}
-	}
-	v.unlock()
 	return NewUndefined()
 }
 
@@ -230,26 +163,17 @@ func (v *JSValue) prototypeGet(name string) *JSValue {
 		if curExt == nil {
 			continue
 		}
-		meta := curExt.meta.Load()
-		if meta == nil {
-			meta = cur.ensureMeta()
-		}
-		meta.mu.RLock()
-		desc, ok := curExt.properties.Get(name)
-		meta.mu.RUnlock()
-		if ok {
+		if desc, ok := curExt.properties.Get(name); ok {
 			if desc.Get != nil {
 				return desc.Get(v)
 			}
-						return desc.Value
+			return desc.Value
 		}
 	}
 	return NewUndefined()
 }
 
-// Set sets an own property with Lock protection. If an accessor (getter/setter) descriptor
-// already exists on this object or its prototype chain, the setter is invoked instead.
-// Nil-safe: does nothing for nil, undefined, or null receivers.
+// Set sets an own property. No locking needed: event loop serializes all JS execution.
 func (v *JSValue) Set(name string, value *JSValue) {
 	if v == nil || v.typ == TypeUndefined || v.typ == TypeNull {
 		return
@@ -260,41 +184,35 @@ func (v *JSValue) Set(name string, value *JSValue) {
 	if v.frozen {
 		panicPrimitivePropertySet()
 	}
-	// Detect concurrent writes via atomic counter.
-	// activeWrites > 1 means another goroutine is writing simultaneously.
-	if !v.shared.Load() {
-		if v.activeWrites.Add(1) > 1 {
-			v.shared.Store(true)
+
+	// Invalidate inline cache
+	ext := v.extOrNil()
+	if ext != nil {
+		if meta := ext.meta.Load(); meta != nil {
+			meta.gen.Add(1)
 		}
 	}
-	v.lock()
-	if !v.shared.Load() {
-		v.genAdd(1)
-		v.activeWrites.Add(-1)
-	}
+
 	// Fast path: own-property exists as data descriptor
-	if desc, ok := v.propertiesOrZero().Get(name); ok {
+	props := v.propertiesOrZero()
+	if desc, ok := props.Get(name); ok {
 		if desc.Set != nil {
 			desc.Set(v, value)
-			v.unlock()
 			return
 		}
 		desc.Value = value
-		v.unlock()
 		return
 	}
 	// Walk prototype chain for inherited accessor descriptors
-	var next *JSValue
-	for proto := v.prototype; proto != nil; proto = next {
-		proto.rlock()
-		next = proto.prototype
-		if desc, ok := proto.propertiesOrZero().Get(name); ok && desc.Set != nil {
-			proto.runlock()
-			v.unlock()
+	for proto := v.prototype; proto != nil; proto = proto.prototype {
+		protoExt := proto.extOrNil()
+		if protoExt == nil {
+			continue
+		}
+		if desc, ok := protoExt.properties.Get(name); ok && desc.Set != nil {
 			desc.Set(v, value)
 			return
 		}
-		proto.runlock()
 	}
 	// Array index fast path
 	if v.isArr {
@@ -304,13 +222,11 @@ func (v *JSValue) Set(name string, value *JSValue) {
 				arr.Push(nil)
 			}
 			arr.Set(idx, value)
-			v.unlock()
 			return
 		}
 	}
 	// Create new data descriptor
-	v.propertiesOrZero().Set(name, newWritableEnumerableDataDescriptor(value))
-	v.unlock()
+	props.Set(name, newWritableEnumerableDataDescriptor(value))
 }
 
 // GetOwnProperty returns the property descriptor for an own property, or nil.
@@ -319,13 +235,11 @@ func (v *JSValue) GetOwnProperty(name string) *PropertyDescriptor {
 	if props == nil {
 		return nil
 	}
-	v.rlock()
 	desc, _ := props.Get(name)
-	v.runlock()
 	return desc
 }
 
-// DefineProperty sets a property descriptor directly with Lock protection.
+// DefineProperty sets a property descriptor directly.
 // Type guard: no-op for undefined/null receivers (protects singletons).
 func (v *JSValue) DefineProperty(name string, desc *PropertyDescriptor) {
 	if v == nil || v.typ == TypeUndefined || v.typ == TypeNull {
@@ -337,16 +251,12 @@ func (v *JSValue) DefineProperty(name string, desc *PropertyDescriptor) {
 	if v.frozen {
 		panicPrimitiveDefineProperty()
 	}
-	if !v.shared.Load() {
-		if v.activeWrites.Add(1) > 1 {
-			v.shared.Store(true)
+	// Invalidate inline cache
+	ext := v.extOrNil()
+	if ext != nil {
+		if meta := ext.meta.Load(); meta != nil {
+			meta.gen.Add(1)
 		}
-	}
-	v.lock()
-	defer v.unlock()
-	if !v.shared.Load() {
-		v.genAdd(1)
-		v.activeWrites.Add(-1)
 	}
 	v.propertiesOrZero().Set(name, desc)
 }
@@ -367,10 +277,7 @@ func (v *JSValue) HasOwnProperty(name string) bool {
 	if props == nil {
 		return false
 	}
-	v.rlock()
-	ok := props.Has(name)
-	v.runlock()
-	return ok
+	return props.Has(name)
 }
 
 // OwnKeys returns the names of all own properties.
@@ -385,10 +292,7 @@ func (v *JSValue) OwnKeys() []string {
 	if props == nil {
 		return nil
 	}
-	v.rlock()
-	keys := props.Keys()
-	v.runlock()
-	return keys
+	return props.Keys()
 }
 
 // EnumerableOwnKeys returns the names of enumerable own properties only.
@@ -403,13 +307,11 @@ func (v *JSValue) EnumerableOwnKeys() []string {
 	if props == nil {
 		return nil
 	}
-	v.rlock()
 	keys := make([]string, 0, props.Len())
 	props.ForEach(func(k string, desc *PropertyDescriptor) {
 		if desc != nil && desc.Enumerable {
 			keys = append(keys, k)
 		}
 	})
-	v.runlock()
 	return keys
 }

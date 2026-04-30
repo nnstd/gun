@@ -128,7 +128,6 @@ func (l *Lowerer) lowerExpr(e hir.Expr) ast.Expr {
 	}
 	return setExprPos(out, span)
 }
-
 func (l *Lowerer) lowerIdentifier(e *hir.Identifier) ast.Expr {
 	// JS `arguments` keyword → jsvalue.NewArray(_args...)
 	name := e.Name
@@ -245,7 +244,6 @@ func (l *Lowerer) lowerIdentifier(e *hir.Identifier) ast.Expr {
 	}
 	return goIdent(symbol.Sanitize(e.Name))
 }
-
 func (l *Lowerer) lowerLiteral(e *hir.Literal) ast.Expr {
 	l.jsvalueImport()
 	switch e.Kind {
@@ -273,7 +271,6 @@ func (l *Lowerer) lowerLiteral(e *hir.Literal) ast.Expr {
 		return goIdent(e.Value)
 	}
 }
-
 func (l *Lowerer) lowerTemplateLiteral(e *hir.TemplateLiteral) ast.Expr {
 	l.addImport("fmt")
 	l.jsvalueImport()
@@ -314,7 +311,6 @@ func (l *Lowerer) lowerTemplateLiteral(e *hir.TemplateLiteral) ast.Expr {
 	formatted := callExpr(selectorExpr(goIdent("fmt"), "Sprintf"), sprintfArgs...)
 	return callExpr(selectorExpr(goIdent("jsvalue"), "NewString"), formatted)
 }
-
 func (l *Lowerer) lowerTaggedTemplate(e *hir.TaggedTemplateLiteral) ast.Expr {
 	l.jsvalueImport()
 	tag := l.lowerExpr(e.Tag)
@@ -338,7 +334,6 @@ func (l *Lowerer) lowerTaggedTemplate(e *hir.TaggedTemplateLiteral) ast.Expr {
 	args := append([]ast.Expr{stringsArr}, exprParts...)
 	return callExpr(tag, args...)
 }
-
 func (l *Lowerer) lowerArrayLiteral(e *hir.ArrayLiteral) ast.Expr {
 	l.jsvalueImport()
 	hasSpread := false
@@ -403,7 +398,6 @@ func (l *Lowerer) lowerArrayLiteral(e *hir.ArrayLiteral) ast.Expr {
 	}
 	return callExpr(selectorExpr(goIdent("jsvalue"), "NewArray"), args...)
 }
-
 func (l *Lowerer) lowerObjectLiteral(e *hir.ObjectLiteral) ast.Expr {
 	l.jsvalueImport()
 
@@ -450,7 +444,6 @@ func (l *Lowerer) lowerObjectLiteral(e *hir.ObjectLiteral) ast.Expr {
 	}
 	return callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), args...)
 }
-
 // lowerObjectWithAccessors handles object literals with getter/setter properties.
 // Uses DefineProperty with get/set descriptors.
 func (l *Lowerer) lowerObjectWithAccessors(e *hir.ObjectLiteral) ast.Expr {
@@ -484,7 +477,6 @@ func (l *Lowerer) lowerObjectWithAccessors(e *hir.ObjectLiteral) ast.Expr {
 	}
 	return result
 }
-
 // lowerObjectWithComputed handles object literals with computed property names
 // like {[expr]: value}. Uses IIFE: func() *JSValue { obj := NewObject(); obj.Set(Sprint(expr), val); return obj }()
 func (l *Lowerer) lowerObjectWithComputed(e *hir.ObjectLiteral) ast.Expr {
@@ -518,7 +510,6 @@ func (l *Lowerer) lowerObjectWithComputed(e *hir.ObjectLiteral) ast.Expr {
 		},
 	}
 }
-
 // lowerObjectWithSpreads handles object literals with spread properties:
 // {a: 1, ...obj, b: 2} → jsvalue.Assign(jsvalue.ObjectFrom("a", 1), obj, jsvalue.ObjectFrom("b", 2))
 func (l *Lowerer) lowerObjectWithSpreads(e *hir.ObjectLiteral) ast.Expr {
@@ -550,7 +541,6 @@ func (l *Lowerer) lowerObjectWithSpreads(e *hir.ObjectLiteral) ast.Expr {
 	}
 	return callExpr(selectorExpr(goIdent("jsvalue"), "Assign"), args...)
 }
-
 func (l *Lowerer) lowerObjectPropertyValue(prop *hir.Property) ast.Expr {
 	if prop == nil || prop.Value == nil {
 		return callExpr(selectorExpr(goIdent("jsvalue"), "NewUndefined"))
@@ -577,9 +567,6 @@ func (l *Lowerer) lowerObjectPropertyValue(prop *hir.Property) ast.Expr {
 			methodVal = callExpr(selectorExpr(methodVal, "MarkAsAsync"))
 		}
 		methodVal = callExpr(selectorExpr(methodVal, "MarkAsMethod"))
-		if hirBodyAssignsThisProperty(body, prop.KeyName) {
-			methodVal = callExpr(selectorExpr(methodVal, "MarkSynchronized"), stringLit(prop.KeyName))
-		}
 		return methodVal
 	case *hir.FuncExpr:
 		var methodBody *ast.BlockStmt
@@ -595,15 +582,11 @@ func (l *Lowerer) lowerObjectPropertyValue(prop *hir.Property) ast.Expr {
 			methodVal = callExpr(selectorExpr(methodVal, "MarkAsAsync"))
 		}
 		methodVal = callExpr(selectorExpr(methodVal, "MarkAsMethod"))
-		if hirBodyAssignsThisProperty(fn.Body, prop.KeyName) {
-			methodVal = callExpr(selectorExpr(methodVal, "MarkSynchronized"), stringLit(prop.KeyName))
-		}
 		return methodVal
 	default:
 		return l.lowerExpr(prop.Value)
 	}
 }
-
 func (l *Lowerer) lowerBinaryExpr(e *hir.BinaryExpr) ast.Expr {
 	l.jsvalueImport()
 
@@ -670,7 +653,6 @@ func (l *Lowerer) lowerBinaryExpr(e *hir.BinaryExpr) ast.Expr {
 	return callExpr(selectorExpr(goIdent("jsvalue"), helperName),
 		jsvalueWrapLit(left), jsvalueWrapLit(right))
 }
-
 // hirExprHasSideEffects returns true when evaluating e could have an
 // observable side effect (a call, assignment, new, await, etc.). Used to
 // decide whether short-circuit operators need lazy IIFE lowering.
@@ -733,7 +715,6 @@ func hirExprHasSideEffects(e hir.Expr) bool {
 	}
 	return false
 }
-
 // lowerShortCircuitBinary emits a lazy IIFE for ||, &&, ??. The RHS is only
 // evaluated when the LHS cannot determine the result, matching JS semantics.
 func (l *Lowerer) lowerShortCircuitBinary(e *hir.BinaryExpr) ast.Expr {
@@ -779,7 +760,6 @@ func (l *Lowerer) lowerShortCircuitBinary(e *hir.BinaryExpr) ast.Expr {
 		},
 	}
 }
-
 func (l *Lowerer) lowerUnaryExpr(e *hir.UnaryExpr) ast.Expr {
 	l.jsvalueImport()
 	operand := l.lowerExpr(e.Operand)
@@ -804,7 +784,6 @@ func (l *Lowerer) lowerUnaryExpr(e *hir.UnaryExpr) ast.Expr {
 
 	return operand
 }
-
 func (l *Lowerer) lowerUpdateExpr(e *hir.UpdateExpr) ast.Expr {
 	l.jsvalueImport()
 	operand := l.lowerExpr(e.Operand)
@@ -820,7 +799,6 @@ func (l *Lowerer) lowerUpdateExpr(e *hir.UpdateExpr) ast.Expr {
 	}
 	return callExpr(selectorExpr(goIdent("jsvalue"), "Dec"), operand)
 }
-
 func (l *Lowerer) lowerAssignExpr(e *hir.AssignExpr) ast.Expr {
 	// Destructuring assignment in expression context → IIFE with destructuring stmts
 	if e.LeftPattern != nil {
@@ -927,7 +905,6 @@ func (l *Lowerer) lowerAssignExpr(e *hir.AssignExpr) ast.Expr {
 		},
 	}
 }
-
 func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 	// super(args) in class constructor → ClassName.CallSuper(this, args...)
 	if _, ok := e.Func.(*hir.SuperExpr); ok && l.currentClassName != "" {
@@ -1120,7 +1097,6 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 
 	return buildCallWithSpread(fn, args, hasSpread)
 }
-
 // lowerCallArgs lowers call arguments, handling spread expressions.
 // Returns the lowered args and whether the last arg has spread (Ellipsis).
 func (l *Lowerer) lowerCallArgs(hirArgs []hir.Expr, wrap bool) ([]ast.Expr, bool) {
@@ -1171,7 +1147,6 @@ func (l *Lowerer) lowerCallArgs(hirArgs []hir.Expr, wrap bool) ([]ast.Expr, bool
 	}
 	return args, hasTrailingSpread
 }
-
 // buildCallWithSpread creates a call expression, setting Ellipsis if the last arg is spread.
 func buildCallWithSpread(fun ast.Expr, args []ast.Expr, hasSpread bool) *ast.CallExpr {
 	c := callExpr(fun, args...)
@@ -1180,7 +1155,6 @@ func buildCallWithSpread(fun ast.Expr, args []ast.Expr, hasSpread bool) *ast.Cal
 	}
 	return c
 }
-
 // wrapAsJSValue wraps an expression to ensure it's *jsvalue.JSValue.
 func (l *Lowerer) wrapAsJSValue(expr ast.Expr) ast.Expr {
 	if isAlreadyJSValue(expr) {
@@ -1188,7 +1162,6 @@ func (l *Lowerer) wrapAsJSValue(expr ast.Expr) ast.Expr {
 	}
 	return jsvalueWrapLit(expr)
 }
-
 // isSimpleExpr returns true if the expression is safe to duplicate (ident or selector).
 func (l *Lowerer) isSimpleExpr(expr ast.Expr) bool {
 	switch expr.(type) {
@@ -1199,7 +1172,6 @@ func (l *Lowerer) isSimpleExpr(expr ast.Expr) bool {
 	}
 	return false
 }
-
 func (l *Lowerer) lowerNewExpr(e *hir.NewExpr) ast.Expr {
 	l.jsvalueImport()
 
@@ -1245,7 +1217,6 @@ func (l *Lowerer) lowerNewExpr(e *hir.NewExpr) ast.Expr {
 	}
 	return callExpr(selectorExpr(callee, "New"), args...)
 }
-
 func (l *Lowerer) lowerClassExpr(e *hir.ClassExpr) ast.Expr {
 	l.jsvalueImport()
 
@@ -1314,7 +1285,6 @@ func (l *Lowerer) lowerClassExpr(e *hir.ClassExpr) ast.Expr {
 		},
 	}
 }
-
 func (l *Lowerer) lowerPrivateGet(mem *hir.MemberExpr) ast.Expr {
 	l.jsvalueImport()
 	key := l.lowerClassMemberKey(mem.Property, true, nil)
@@ -1362,7 +1332,6 @@ func (l *Lowerer) lowerPrivateGet(mem *hir.MemberExpr) ast.Expr {
 		Body: blockStmt(body...),
 	}, objExpr)
 }
-
 func (l *Lowerer) lowerPrivateAssignExpr(mem *hir.MemberExpr, op hir.AssignOp, rhsHIR hir.Expr, rhs ast.Expr) ast.Expr {
 	l.jsvalueImport()
 	key := l.lowerClassMemberKey(mem.Property, true, nil)
@@ -1431,7 +1400,6 @@ func (l *Lowerer) lowerPrivateAssignExpr(mem *hir.MemberExpr, op hir.AssignOp, r
 		}(),
 	}, objExpr)
 }
-
 func (l *Lowerer) lowerPrivateMethodCall(mem *hir.MemberExpr, args []ast.Expr, hasSpread bool) ast.Expr {
 	l.jsvalueImport()
 	key := l.lowerClassMemberKey(mem.Property, true, nil)
@@ -1474,12 +1442,10 @@ func (l *Lowerer) lowerPrivateMethodCall(mem *hir.MemberExpr, args []ast.Expr, h
 		Body: blockStmt(body...),
 	}, objExpr)
 }
-
 func (l *Lowerer) isThisExpr(e hir.Expr) bool {
 	_, ok := e.(*hir.ThisExpr)
 	return ok
 }
-
 func staticComputedPropertyKey(e hir.Expr) (string, bool) {
 	switch e := e.(type) {
 	case *hir.Literal:
@@ -1502,7 +1468,6 @@ func staticComputedPropertyKey(e hir.Expr) (string, bool) {
 	}
 	return "", false
 }
-
 func (l *Lowerer) lowerComputedPropertyKeyExpr(e hir.Expr) ast.Expr {
 	if key, ok := staticComputedPropertyKey(e); ok {
 		return stringLit(key)
@@ -1514,7 +1479,6 @@ func (l *Lowerer) lowerComputedPropertyKeyExpr(e hir.Expr) ast.Expr {
 	l.addImport("fmt")
 	return callExpr(selectorExpr(goIdent("fmt"), "Sprint"), l.lowerExpr(e))
 }
-
 func describeHIRExpr(e hir.Expr) string {
 	switch e := e.(type) {
 	case *hir.Identifier:
@@ -1543,7 +1507,6 @@ func describeHIRExpr(e hir.Expr) string {
 		return "value"
 	}
 }
-
 func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 	// Optional chaining: a?.b → IIFE with null check
 	if e.Optional {
@@ -1629,7 +1592,6 @@ func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 	l.jsvalueImport()
 	return callExpr(selectorExpr(obj, "Get"), key)
 }
-
 // lowerOptionalMember handles a?.b → IIFE with jsvalue.Eq null check.
 func (l *Lowerer) lowerOptionalMember(e *hir.MemberExpr) ast.Expr {
 	l.jsvalueImport()
@@ -1670,7 +1632,6 @@ func (l *Lowerer) lowerOptionalMember(e *hir.MemberExpr) ast.Expr {
 		},
 	}
 }
-
 // exprIsJSValue returns true if the HIR expression is known to produce *jsvalue.JSValue.
 func (l *Lowerer) exprIsJSValue(e hir.Expr) bool {
 	switch e := e.(type) {
@@ -1713,7 +1674,6 @@ func (l *Lowerer) exprIsJSValue(e hir.Expr) bool {
 		return true
 	}
 }
-
 func (l *Lowerer) lowerTernaryExpr(e *hir.TernaryExpr) ast.Expr {
 	cond := l.lowerExpr(e.Cond)
 	cond = l.ensureBool(cond)
@@ -1738,7 +1698,6 @@ func (l *Lowerer) lowerTernaryExpr(e *hir.TernaryExpr) ast.Expr {
 		},
 	}
 }
-
 func (l *Lowerer) lowerArrowFunc(e *hir.ArrowFunc) ast.Expr {
 	l.jsvalueImport()
 
@@ -1772,7 +1731,6 @@ func (l *Lowerer) lowerArrowFunc(e *hir.ArrowFunc) ast.Expr {
 	}
 	return fnVal
 }
-
 func (l *Lowerer) lowerFuncExpr(e *hir.FuncExpr) ast.Expr {
 	l.jsvalueImport()
 
@@ -1799,7 +1757,6 @@ func (l *Lowerer) lowerFuncExpr(e *hir.FuncExpr) ast.Expr {
 	}
 	return newFunc
 }
-
 func (l *Lowerer) lowerSequenceExpr(e *hir.SequenceExpr) ast.Expr {
 	if len(e.Exprs) == 0 {
 		return goIdent("nil")
@@ -1828,17 +1785,14 @@ func (l *Lowerer) lowerSequenceExpr(e *hir.SequenceExpr) ast.Expr {
 		},
 	}
 }
-
 // Lowerer implements context.Imports so it can be passed to TranspilerContext methods.
 
 func (l *Lowerer) AddImport(pkg string) {
 	l.addImport(pkg)
 }
-
 func (l *Lowerer) AddAliasedImport(pkg, alias string) {
 	l.addAliasedImport(pkg, alias)
 }
-
 // isValidGoIdent checks if a string is a valid Go identifier.
 func isValidGoIdent(s string) bool {
 	if s == "" {
@@ -1857,7 +1811,6 @@ func isValidGoIdent(s string) bool {
 	}
 	return true
 }
-
 // lowercaseFirst returns the string with the first character lowercased.
 // Used to convert Go capitalized names back to JS camelCase for .Get() lookups.
 func lowercaseFirst(s string) string {
@@ -1870,7 +1823,6 @@ func lowercaseFirst(s string) string {
 	}
 	return string(r)
 }
-
 // parseRegexLiteral splits /pattern/flags into pattern and flags.
 func parseRegexLiteral(s string) (pattern, flags string) {
 	if len(s) < 2 || s[0] != '/' {
@@ -1883,14 +1835,12 @@ func parseRegexLiteral(s string) (pattern, flags string) {
 	lastSlash++
 	return s[1:lastSlash], s[lastSlash+1:]
 }
-
 func (l *Lowerer) arenaWrapNumber(expr ast.Expr) ast.Expr {
 	if l.arenaEnabled && l.insideFunc > 0 && l.disableArenaCount == 0 && l.hasArenaVar > 0 {
 		return callExpr(selectorExpr(goIdent("_arena"), "NewNumber"), expr)
 	}
 	return callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), expr)
 }
-
 func (l *Lowerer) arenaBinaryHelperName(op hir.BinaryOp) string {
 	switch op {
 	case hir.OpAdd:

@@ -38,8 +38,6 @@ func detach(v *JSValue) {
 	if v == nil {
 		return
 	}
-	v.lock()
-	defer v.unlock()
 	switch v.typ {
 	case TypeObject:
 		if v.isArr {

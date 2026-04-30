@@ -4,44 +4,13 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"unsafe"
 
 	"github.com/nnstd/gun/runtime/profile"
 )
-
-// goroutineID returns a stable goroutine identifier.
-// Uses runtime.Stack on first call per goroutine, then cached via stack-page key.
-func goroutineID() uint64 {
-	// Cheap fingerprint: stack page of a local variable.
-	// Each goroutine has a unique stack, so upper bits differ.
-	var tmp byte
-	key := uint64(uintptr(unsafe.Pointer(&tmp))) >> 13
-
-	if id, ok := goroutineIDCache.Load(key); ok {
-		return id.(uint64)
-	}
-
-	// Expensive: parse goroutine ID from runtime.Stack
-	var buf [64]byte
-	n := runtime.Stack(buf[:], false)
-	id := uint64(0)
-	for i := 10; i < n; i++ {
-		if buf[i] >= '0' && buf[i] <= '9' {
-			id = id*10 + uint64(buf[i]-'0')
-		} else {
-			break
-		}
-	}
-	goroutineIDCache.Store(key, id)
-	return id
-}
-
-var goroutineIDCache sync.Map // uint64(stack page) → uint64(goroutine ID)
 
 // ValueType represents the JavaScript type tag.
 type ValueType int
@@ -75,19 +44,16 @@ type cacheEntry struct {
 }
 
 type jsValueExt struct {
-	properties      SmallPropMap
-	arrayVal        SmallValueList
-	regexVal        any
-	mapVal          *jsMap
-	setVal          *jsSet
-	classInit       func(this *JSValue, args ...*JSValue) *JSValue
-	meta            atomic.Pointer[jsValueMeta]
-	metaInit        sync.Mutex
-	sharedOverrides sync.Map // uint64(goroutineID) → *map[string]*PropertyDescriptor
+	properties SmallPropMap
+	arrayVal   SmallValueList
+	regexVal   any
+	mapVal     *jsMap
+	setVal     *jsSet
+	classInit  func(this *JSValue, args ...*JSValue) *JSValue
+	meta       atomic.Pointer[jsValueMeta]
 }
 
 type jsValueMeta struct {
-	mu    sync.RWMutex
 	gen   atomic.Uint64
 	cache [4]cacheEntry
 }
@@ -108,8 +74,6 @@ type JSValue struct {
 	isArr            bool // true when this JSValue has array semantics (even if empty)
 	isMethod         bool // true for class methods that expect this as _args[0]
 	isAsyncFunction  bool
-	shared           atomic.Bool  // accessed by multiple goroutines
-	activeWrites     atomic.Int32 // concurrent write detection
 	frozen           bool         // true for interned singletons; Set/DefineProperty no-op
 	isArenaAllocated bool
 	ext              atomic.Pointer[jsValueExt]
@@ -212,30 +176,6 @@ func (v *JSValue) MarkAsAsync() *JSValue {
 	return v
 }
 
-// MarkSynchronized wraps a JS function with a per-function mutex. This is for
-// JS methods that intentionally rewrite shared object state during lazy setup
-// and must not be entered concurrently by Go HTTP handlers.
-func (v *JSValue) MarkSynchronized(methodName string) *JSValue {
-	if v == nil || v.funcVal == nil {
-		return v
-	}
-	var mu sync.Mutex
-	original := v.funcVal
-	v.funcVal = func(args ...*JSValue) *JSValue {
-		mu.Lock()
-		defer mu.Unlock()
-		if methodName != "" && len(args) > 0 && args[0] != nil {
-			if desc := args[0].GetOwnProperty(methodName); desc != nil && desc.Value != nil && desc.Value != v {
-				if v.isMethod {
-					return desc.Value.Call(args[1:]...)
-				}
-				return desc.Value.Call(args...)
-			}
-		}
-		return original(args...)
-	}
-	return v
-}
 
 func (v *JSValue) IsAsyncFunction() bool {
 	return v != nil && v.isAsyncFunction
@@ -264,11 +204,6 @@ func (v *JSValue) ensureExt() *jsValueExt {
 
 func (v *JSValue) ensureMeta() *jsValueMeta {
 	ext := v.ensureExt()
-	if meta := ext.meta.Load(); meta != nil {
-		return meta
-	}
-	ext.metaInit.Lock()
-	defer ext.metaInit.Unlock()
 	if meta := ext.meta.Load(); meta != nil {
 		return meta
 	}
@@ -343,9 +278,6 @@ func (v *JSValue) setClassInitializer(fn func(this *JSValue, args ...*JSValue) *
 	v.ensureExt().classInit = fn
 }
 
-func (v *JSValue) cacheEntries() *[4]cacheEntry {
-	return &v.ensureMeta().cache
-}
 
 func (v *JSValue) genLoad() uint64 {
 	if ext := v.extOrNil(); ext != nil {
@@ -359,14 +291,6 @@ func (v *JSValue) genLoad() uint64 {
 func (v *JSValue) genAdd(delta uint64) {
 	v.ensureMeta().gen.Add(delta)
 }
-
-// lock acquires a write lock on the JSValue's RWMutex.
-func (v *JSValue) lock()   { v.ensureMeta().mu.Lock() }
-func (v *JSValue) unlock() { v.ensureMeta().mu.Unlock() }
-
-// rlock acquires a read lock on the JSValue's RWMutex.
-func (v *JSValue) rlock()   { v.ensureMeta().mu.RLock() }
-func (v *JSValue) runlock() { v.ensureMeta().mu.RUnlock() }
 
 var symbolCounter uint64
 
@@ -688,10 +612,8 @@ func (v *JSValue) SymbolDesc() string {
 // This is the ONLY way to change the prototype chain. Set("__proto__", v)
 // creates an own property — it does NOT modify the chain (prototype pollution safe).
 func (v *JSValue) SetPrototype(proto *JSValue) {
-	v.lock()
 	v.prototype = proto
 	v.genAdd(1)
-	v.unlock()
 }
 
 // GetPrototype returns the [[Prototype]] internal slot.

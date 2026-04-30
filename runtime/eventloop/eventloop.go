@@ -7,6 +7,12 @@ import (
 	"github.com/nnstd/gun/runtime/profile"
 )
 
+// jsMu serializes all JS execution. Goroutines acquire this lock before
+// running any JSValue operations, replacing channel-based scheduling for
+// the common request path. Mutex fast path is an atomic CAS — orders of
+// magnitude cheaper than pthread_cond_signal/wait round-trips.
+var jsMu sync.Mutex
+
 // activeJob tracks a scheduled timer/interval for cancellation.
 // Stored in EventLoop.jobs as jobID -> *activeJob.
 type activeJob struct {
@@ -105,12 +111,35 @@ func (el *EventLoop) ScheduleCallback(fn func()) {
 
 func (el *EventLoop) scheduleCallback(ctx *profile.ContextToken, fn func()) {
 	el.jobCount.Add(1)
-	el.jobChan <- func() {
-		defer func() { recover() }()
-		profile.WithContext(ctx, fn)
-		el.jobCount.Add(-1)
-		el.wake()
+	if ctx == nil {
+		el.jobChan <- func() {
+			jsMu.Lock()
+			defer jsMu.Unlock()
+			defer func() { recover() }()
+			fn()
+			el.jobCount.Add(-1)
+			el.wake()
+		}
+	} else {
+		el.jobChan <- func() {
+			jsMu.Lock()
+			defer jsMu.Unlock()
+			defer func() { recover() }()
+			profile.WithContext(ctx, fn)
+			el.jobCount.Add(-1)
+			el.wake()
+		}
 	}
+}
+
+// RunSync locks the JS execution mutex, runs fn, and unlocks.
+// Use for the common request path where a goroutine needs to run JS code
+// without the overhead of channel-based scheduling. The mutex ensures
+// only one goroutine executes JS at a time (single-threaded JS semantics).
+func (el *EventLoop) RunSync(fn func()) {
+	jsMu.Lock()
+	defer jsMu.Unlock()
+	fn()
 }
 
 // Pump starts a background goroutine that drains the event loop's job channel.

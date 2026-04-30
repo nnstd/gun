@@ -24,14 +24,12 @@ type importResolution struct {
 	jsExportName string
 	modulePath   string
 }
-
 // CrossFileExport describes a symbol exported from another file in the same package.
 type CrossFileExport struct {
 	OriginalName string
 	GoName       string
 	IsJSValue    bool
 }
-
 // Lowerer converts an HIR Module into a go/ast.File.
 type Lowerer struct {
 	symtab              *symbol.Table
@@ -73,24 +71,20 @@ type Lowerer struct {
 	cpuProfile          *CPUProfileConfig
 	profileRuntimeAlias string
 }
-
 // Lower converts an HIR module to a Go AST file.
 func Lower(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, optLevel context.OptLevel) *ast.File {
 	return LowerWithCPUProfile(mod, ctx, moduleName, samePackageImports, nil, optLevel)
 }
-
 // LowerWithCPUProfile converts an HIR module to a Go AST file with optional
 // generated-main CPU profiling support.
 func LowerWithCPUProfile(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, cpuProfile *CPUProfileConfig, optLevel context.OptLevel) *ast.File {
 	return LowerWithExportsAndCPUProfile(mod, ctx, moduleName, samePackageImports, nil, nil, nil, nil, nil, "", nil, cpuProfile, optLevel)
 }
-
 // LowerWithExports converts an HIR module to a Go AST file with knowledge of
 // symbols exported from other files in the same package.
 func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string, localAliasMap map[symbol.ID]string, namespaceAlias string, namespaceEntries map[string]string, optLevel context.OptLevel) *ast.File {
 	return LowerWithExportsAndCPUProfile(mod, ctx, moduleName, samePackageImports, crossFileExports, reservedNames, importNameMap, exportAliasMap, localAliasMap, namespaceAlias, namespaceEntries, nil, optLevel)
 }
-
 // LowerWithExportsAndCPUProfile converts an HIR module to a Go AST file with
 // knowledge of same-package exports plus optional generated-main CPU profiling support.
 func LowerWithExportsAndCPUProfile(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string, localAliasMap map[symbol.ID]string, namespaceAlias string, namespaceEntries map[string]string, cpuProfile *CPUProfileConfig, optLevel context.OptLevel) *ast.File {
@@ -245,7 +239,6 @@ func LowerWithExportsAndCPUProfile(mod *hir.Module, ctx *context.TranspilerConte
 
 	return file
 }
-
 func (l *Lowerer) findMainFunc() *ast.FuncDecl {
 	for _, d := range l.decls {
 		if fd, ok := d.(*ast.FuncDecl); ok && fd.Name != nil && fd.Name.Name == "main" {
@@ -254,21 +247,17 @@ func (l *Lowerer) findMainFunc() *ast.FuncDecl {
 	}
 	return nil
 }
-
 func (l *Lowerer) addImport(pkg string) {
 	if _, ok := l.imports[pkg]; !ok {
 		l.imports[pkg] = ""
 	}
 }
-
 func (l *Lowerer) addAliasedImport(pkg, alias string) {
 	l.imports[pkg] = alias
 }
-
 func (l *Lowerer) jsvalueImport() {
 	l.addAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 }
-
 func (l *Lowerer) emitName(sym *symbol.Symbol) string {
 	if sym == nil {
 		return "_"
@@ -278,14 +267,12 @@ func (l *Lowerer) emitName(sym *symbol.Symbol) string {
 	}
 	return l.symtab.EmitName(sym)
 }
-
 func (l *Lowerer) registerTopLevelName(sym *symbol.Symbol) {
 	if sym == nil {
 		return
 	}
 	l.topLevelNames[sym.OriginalName] = l.emitName(sym)
 }
-
 // --------------------------------------------------------------------
 // Declarations
 // --------------------------------------------------------------------
@@ -316,7 +303,6 @@ func (l *Lowerer) lowerDecl(d hir.Decl) {
 		l.lowerTopLevelStmt(d)
 	}
 }
-
 func (l *Lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 	name := l.emitName(d.Symbol)
 
@@ -395,13 +381,9 @@ func (l *Lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 	}
 	if methodLike {
 		fnVal = callExpr(selectorExpr(fnVal, "MarkAsMethod"))
-		if hirBodyAssignsThisProperty(d.Body, name) {
-			fnVal = callExpr(selectorExpr(fnVal, "MarkSynchronized"), stringLit(name))
 		}
-	}
 	l.decls = append(l.decls, setDeclPos(varDecl(name, nil, fnVal), d.Span))
 }
-
 func (l *Lowerer) lowerVarDecl(d *hir.VarDecl) {
 	for _, decl := range d.Declarators {
 		if decl.Symbol == nil {
@@ -436,7 +418,6 @@ func (l *Lowerer) lowerVarDecl(d *hir.VarDecl) {
 		}
 	}
 }
-
 func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 	l.jsvalueImport()
 	name := l.emitName(d.Symbol)
@@ -468,7 +449,6 @@ func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 
 	l.initStmts = append(l.initStmts, l.lowerClassSetups(goIdent(name), goIdent(brandKey), d.Properties, d.Methods, d.StaticInits)...)
 }
-
 func (l *Lowerer) collectPrivateKeys(className string, props []*hir.ClassProperty, methods []*hir.ClassMethod) map[string]string {
 	keys := make(map[string]string)
 	add := func(member string) {
@@ -492,7 +472,6 @@ func (l *Lowerer) collectPrivateKeys(className string, props []*hir.ClassPropert
 	}
 	return keys
 }
-
 func (l *Lowerer) lowerPrivateKeyDecls(className string, keys map[string]string) []ast.Decl {
 	if len(keys) == 0 {
 		return nil
@@ -509,7 +488,6 @@ func (l *Lowerer) lowerPrivateKeyDecls(className string, keys map[string]string)
 	}
 	return decls
 }
-
 func (l *Lowerer) brandKeyValue(className string) ast.Expr {
 	l.jsvalueImport()
 	desc := fmt.Sprintf("%s.#brand", className)
@@ -518,21 +496,18 @@ func (l *Lowerer) brandKeyValue(className string) ast.Expr {
 		callExpr(selectorExpr(goIdent("jsvalue"), "NewSymbol"), stringLit(desc)),
 	)
 }
-
 func (l *Lowerer) privateBrandCheck(target ast.Expr) ast.Expr {
 	if l.currentClassBrand == "" {
 		return goIdent("false")
 	}
 	return callExpr(selectorExpr(target, "HasOwnProperty"), goIdent(l.currentClassBrand))
 }
-
 func (l *Lowerer) nextSyntheticName(base string) string {
 	l.syntheticCounter++
 	name := fmt.Sprintf("%s_%d", base, l.syntheticCounter)
 	l.symtab.ReserveNameStr(name)
 	return name
 }
-
 func (l *Lowerer) lowerClassConstructor(className string, hasParent bool, ctor *hir.ClassConstructor, props []*hir.ClassProperty, methods []*hir.ClassMethod) *ast.FuncLit {
 	var ctorBody *ast.BlockStmt
 	if ctor != nil {
@@ -575,7 +550,6 @@ func (l *Lowerer) lowerClassConstructor(className string, hasParent bool, ctor *
 		Body: ctorBody,
 	}, span)
 }
-
 func isCallSuperStmt(stmt ast.Stmt, className string) bool {
 	exprStmt, ok := stmt.(*ast.ExprStmt)
 	if !ok {
@@ -592,7 +566,6 @@ func isCallSuperStmt(stmt ast.Stmt, className string) bool {
 	id, ok := sel.X.(*ast.Ident)
 	return ok && id.Name == className
 }
-
 func (l *Lowerer) lowerClassInstanceInits(props []*hir.ClassProperty, methods []*hir.ClassMethod) []ast.Stmt {
 	var stmts []ast.Stmt
 	if l.currentClassBrand != "" {
@@ -616,7 +589,6 @@ func (l *Lowerer) lowerClassInstanceInits(props []*hir.ClassProperty, methods []
 	}
 	return stmts
 }
-
 func (l *Lowerer) lowerClassSetups(classRef ast.Expr, brandKey ast.Expr, props []*hir.ClassProperty, methods []*hir.ClassMethod, staticInits []hir.Expr) []ast.Stmt {
 	var stmts []ast.Stmt
 	if brandKey != nil {
@@ -674,7 +646,6 @@ func (l *Lowerer) lowerClassSetups(classRef ast.Expr, brandKey ast.Expr, props [
 	}
 	return stmts
 }
-
 func (l *Lowerer) lowerClassMethodValue(m *hir.ClassMethod) ast.Expr {
 	var methodBody *ast.BlockStmt
 	if m.IsAsync {
@@ -695,12 +666,8 @@ func (l *Lowerer) lowerClassMethodValue(m *hir.ClassMethod) ast.Expr {
 		methodVal = callExpr(selectorExpr(methodVal, "MarkAsAsync"))
 	}
 	methodVal = callExpr(selectorExpr(methodVal, "MarkAsMethod"))
-	if !m.IsStatic && hirBodyAssignsThisProperty(m.Body, m.Name) {
-		methodVal = callExpr(selectorExpr(methodVal, "MarkSynchronized"), stringLit(m.Name))
-	}
 	return methodVal
 }
-
 func (l *Lowerer) defineHiddenProperty(target, key, value ast.Expr) ast.Stmt {
 	l.jsvalueImport()
 	desc := callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"),
@@ -711,7 +678,6 @@ func (l *Lowerer) defineHiddenProperty(target, key, value ast.Expr) ast.Stmt {
 	)
 	return exprStmt(callExpr(selectorExpr(goIdent("jsvalue"), "DefineProperty"), target, key, desc))
 }
-
 func (l *Lowerer) lowerClassMemberKey(name string, isPrivate bool, computed hir.Expr) ast.Expr {
 	if isPrivate {
 		return l.privateKeyExpr(name)
@@ -722,14 +688,12 @@ func (l *Lowerer) lowerClassMemberKey(name string, isPrivate bool, computed hir.
 	}
 	return stringLit(name)
 }
-
 func (l *Lowerer) privateKeyExpr(name string) ast.Expr {
 	if key, ok := l.privateKeys[name]; ok {
 		return goIdent(key)
 	}
 	return stringLit("#" + name)
 }
-
 func (l *Lowerer) lowerEnumDecl(d *hir.EnumDecl) {
 	l.jsvalueImport()
 	name := l.emitName(d.Symbol)
@@ -754,7 +718,6 @@ func (l *Lowerer) lowerEnumDecl(d *hir.EnumDecl) {
 		l.initStmts = append(l.initStmts, exprStmt(setCall))
 	}
 }
-
 func (l *Lowerer) lowerInterfaceDecl(d *hir.InterfaceDecl) {
 	name := l.emitName(d.Symbol)
 	l.jsvalueImport()
@@ -807,7 +770,6 @@ func (l *Lowerer) lowerInterfaceDecl(d *hir.InterfaceDecl) {
 		})
 	}
 }
-
 func (l *Lowerer) lowerTypeAliasDecl(d *hir.TypeAliasDecl) {
 	name := l.emitName(d.Symbol)
 	l.jsvalueImport()
@@ -820,7 +782,6 @@ func (l *Lowerer) lowerTypeAliasDecl(d *hir.TypeAliasDecl) {
 		}},
 	})
 }
-
 func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 	if d.IsDefault {
 		l.lowerExportDefault(d)
@@ -930,7 +891,6 @@ func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 		l.emittedExportNames[goName] = true
 	}
 }
-
 func (l *Lowerer) maybeEmitExportAlias(sym *symbol.Symbol, localGoName string) {
 	if l.exportAliasMap == nil {
 		return
@@ -948,7 +908,6 @@ func (l *Lowerer) maybeEmitExportAlias(sym *symbol.Symbol, localGoName string) {
 	}
 	l.decls = append(l.decls, varDecl(goName, nil, goIdent(localGoName)))
 }
-
 // deferVarToInit emits a forward declaration for goName and defers the
 // assignment to init(). Used for exports that reference variables whose
 // value may not be available at package level (cross-file references,
@@ -962,7 +921,6 @@ func (l *Lowerer) deferVarToInit(goName string, rhs ast.Expr) {
 	l.initStmts = append(l.initStmts, assignStmt([]ast.Expr{goIdent(goName)}, []ast.Expr{rhs}))
 	l.emittedExportNames[goName] = true
 }
-
 // lowerExportDefault handles `export default ...` declarations.
 func (l *Lowerer) lowerExportDefault(d *hir.ExportDecl) {
 	if d.Decl == nil {
@@ -1030,7 +988,6 @@ func (l *Lowerer) lowerExportDefault(d *hir.ExportDecl) {
 		l.lowerDecl(d.Decl)
 	}
 }
-
 // synthesizeDefaultExport creates var Default = PrimaryExport when a module
 // has named exports but no default export. This matches SWC's interop behavior:
 // `import X from 'module'` resolves to the primary named export.
@@ -1236,7 +1193,6 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 		}
 	}
 }
-
 // resolveModule resolves a TS module path to Go import path and package name.
 func (l *Lowerer) resolveModule(modulePath string) (goImportPath, goPkgName string, isKnown bool) {
 	// Check context-registered known modules
@@ -1270,7 +1226,6 @@ func (l *Lowerer) resolveModule(modulePath string) (goImportPath, goPkgName stri
 	}
 	return pkgName, pkgName, false
 }
-
 // collectUsedIdents walks Go AST declarations and returns all identifier names used.
 func collectUsedIdents(decls []ast.Decl) map[string]bool {
 	used := make(map[string]bool)
@@ -1284,22 +1239,18 @@ func collectUsedIdents(decls []ast.Decl) map[string]bool {
 	}
 	return used
 }
-
 func isGunRuntimePkg(importPath string) bool {
 	return strings.HasPrefix(importPath, "github.com/nnstd/gun/runtime/")
 }
-
 func isRelativeImport(p string) bool {
 	return strings.HasPrefix(p, ".")
 }
-
 func sanitizeGoPkgName(npmName string) string {
 	name := strings.TrimPrefix(npmName, "@")
 	name = strings.ReplaceAll(name, "/", "_")
 	name = strings.ReplaceAll(name, "-", "_")
 	return name
 }
-
 func fileSpecificDefaultName(modulePath string) string {
 	base := path.Base(modulePath)
 	base = strings.TrimSuffix(base, path.Ext(base))
@@ -1316,7 +1267,6 @@ func fileSpecificDefaultName(modulePath string) string {
 	}
 	return strings.ToUpper(name[:1]) + name[1:] + "Default"
 }
-
 func (l *Lowerer) lowerTopLevelStmt(d *hir.TopLevelStmt) {
 	if l.hasTopLevelAwait && l.pkgName == "main" {
 		l.topLevelAwaitStmts = append(l.topLevelAwaitStmts, d.Stmt)
@@ -1334,7 +1284,6 @@ func (l *Lowerer) lowerTopLevelStmt(d *hir.TopLevelStmt) {
 		l.initStmts = l.appendWithLineMarker(l.initStmts, d.Span, gs)
 	}
 }
-
 // getOrCreateMain returns the main() function declaration, creating it if needed.
 func (l *Lowerer) getOrCreateMain() *ast.FuncDecl {
 	// Look for existing main func
@@ -1350,7 +1299,6 @@ func (l *Lowerer) getOrCreateMain() *ast.FuncDecl {
 	l.decls = append(l.decls, fd)
 	return fd
 }
-
 func (l *Lowerer) ensureMainRecover(fd *ast.FuncDecl) {
 	if fd == nil || fd.Name == nil || fd.Name.Name != "main" || fd.Body == nil {
 		return
@@ -1371,7 +1319,6 @@ func (l *Lowerer) ensureMainRecover(fd *ast.FuncDecl) {
 		&ast.DeferStmt{Call: callExpr(selectorExpr(goIdent("error"), "RecoverMain"))},
 	}, fd.Body.List...)
 }
-
 func (l *Lowerer) injectCPUProfileMain() {
 	if l.cpuProfile == nil || l.pkgName != "main" {
 		return
@@ -1407,7 +1354,6 @@ func (l *Lowerer) injectCPUProfileMain() {
 	body = append(body, stmts...)
 	mainFn.Body.List = append(body, mainFn.Body.List[insertAt:]...)
 }
-
 func (l *Lowerer) uniqueInternalImportAlias(base string) string {
 	candidate := base
 	for suffix := 1; l.internalImportAliasTaken(candidate); suffix++ {
@@ -1416,7 +1362,6 @@ func (l *Lowerer) uniqueInternalImportAlias(base string) string {
 	l.symtab.ReserveNameStr(candidate)
 	return candidate
 }
-
 func (l *Lowerer) internalImportAliasTaken(alias string) bool {
 	if l.crossFileExports[alias] || l.reservedNames[alias] {
 		return true
@@ -1433,7 +1378,6 @@ func (l *Lowerer) internalImportAliasTaken(alias string) bool {
 	}
 	return false
 }
-
 // prescan collects metadata from HIR declarations before lowering.
 // Records function param counts and marks exported names.
 func (l *Lowerer) prescan(mod *hir.Module) {
@@ -1493,7 +1437,6 @@ func (l *Lowerer) prescan(mod *hir.Module) {
 		}
 	}
 }
-
 // markCrossFileExported marks symbols whose capitalized name matches a cross-file export,
 // but ONLY if the original name itself would capitalize to that export name AND no other
 // symbol in the same file already has that capitalized name.
@@ -1549,7 +1492,6 @@ func (l *Lowerer) markCrossFileExported(mod *hir.Module) {
 		}
 	}
 }
-
 // fixInitCycles detects package-level variable initializer cycles
 // and splits the participating vars into forward declarations + init() assignments.
 func (l *Lowerer) fixInitCycles(decls []ast.Decl) []ast.Decl {
@@ -1676,7 +1618,6 @@ func (l *Lowerer) fixInitCycles(decls []ast.Decl) []ast.Decl {
 
 	return result
 }
-
 func exprReferencedIdents(expr ast.Expr) map[string]bool {
 	refs := make(map[string]bool)
 	var stack []ast.Node
@@ -1703,7 +1644,6 @@ func exprReferencedIdents(expr ast.Expr) map[string]bool {
 	})
 	return refs
 }
-
 // --------------------------------------------------------------------
 // Function helpers
 // --------------------------------------------------------------------
@@ -1849,7 +1789,6 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 
 	return &ast.BlockStmt{List: stmts}
 }
-
 // endsWithReturn checks if a statement list ends with a return statement.
 func endsWithReturn(stmts []ast.Stmt) bool {
 	if len(stmts) == 0 {
@@ -1873,7 +1812,6 @@ func endsWithReturn(stmts []ast.Stmt) bool {
 	}
 	return false
 }
-
 // lowerMethodBody is like lowerFuncBody but prepends `this := _args[0]`
 // and unpacks remaining params from _args[1:] offset.
 func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast.BlockStmt {
@@ -2007,7 +1945,6 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 
 	return &ast.BlockStmt{List: stmts}
 }
-
 // forwardDeclareVars scans Go statements for variables used before their :=
 // declaration. Adds `var name *jsvalue.JSValue` at top and changes := to =.
 // Also hoists function-valued assignments to the top (JS function hoisting).
@@ -2308,7 +2245,6 @@ func forwardDeclareVars(stmts []ast.Stmt, hoistBarrier int) []ast.Stmt {
 
 	return append(fwd, stmts...)
 }
-
 func inspectWithoutNestedFuncLits(root ast.Node, fn func(ast.Node) bool) {
 	first := true
 	ast.Inspect(root, func(n ast.Node) bool {
@@ -2322,7 +2258,6 @@ func inspectWithoutNestedFuncLits(root ast.Node, fn func(ast.Node) bool) {
 		return fn(n)
 	})
 }
-
 // eliminateUnusedVars performs SWC-style write/read analysis on an entire
 // function body. Variables that are written (declared or assigned) but never
 // read are eliminated: var decls are removed, := becomes _ =, = becomes _ =.
@@ -2357,7 +2292,6 @@ func eliminateUnusedVars(stmts []ast.Stmt) []ast.Stmt {
 	// Phase 4: Remove bare `var x *T` DeclStmts for unused vars
 	return filterUnusedDecls(stmts, unused)
 }
-
 func collectLocalDecls(stmts []ast.Stmt, locals map[string]bool) {
 	for _, s := range stmts {
 		ast.Inspect(s, func(n ast.Node) bool {
@@ -2389,7 +2323,6 @@ func collectLocalDecls(stmts []ast.Stmt, locals map[string]bool) {
 		})
 	}
 }
-
 // collectWritesAndReads walks a statement recursively, recording which
 // identifiers appear in write positions (LHS of assignment, var decl names)
 // vs read positions (everything else).
@@ -2434,7 +2367,6 @@ func collectWritesAndReads(node ast.Node, writes, reads, locals map[string]bool)
 		return true
 	})
 }
-
 // eliminateUnusedInStmts walks statements recursively and blanks out
 // unused variable references in assignment LHS positions.
 func eliminateUnusedInStmts(stmts []ast.Stmt, unused map[string]bool) {
@@ -2458,7 +2390,6 @@ func eliminateUnusedInStmts(stmts []ast.Stmt, unused map[string]bool) {
 		})
 	}
 }
-
 // filterUnusedDecls removes `var x *T` DeclStmts where x is unused.
 // Works recursively on nested BlockStmts.
 func filterUnusedDecls(stmts []ast.Stmt, unused map[string]bool) []ast.Stmt {
@@ -2493,7 +2424,6 @@ func filterUnusedDecls(stmts []ast.Stmt, unused map[string]bool) []ast.Stmt {
 	}
 	return result
 }
-
 // isFuncValuedAssign checks if an assignment's RHS is a jsvalue.NewFunction() call
 // (possibly with .MarkAsMethod() chained).
 func isFuncValuedAssign(assign *ast.AssignStmt) bool {
@@ -2517,7 +2447,6 @@ func isFuncValuedAssign(assign *ast.AssignStmt) bool {
 	}
 	return false
 }
-
 func assignRHSReferencesIdent(assign *ast.AssignStmt, name string) bool {
 	for _, rhs := range assign.Rhs {
 		found := false
@@ -2534,7 +2463,6 @@ func assignRHSReferencesIdent(assign *ast.AssignStmt, name string) bool {
 	}
 	return false
 }
-
 func stmtReferencesIdent(s ast.Stmt, name string) bool {
 	found := false
 	ast.Inspect(s, func(n ast.Node) bool {
@@ -2548,7 +2476,6 @@ func stmtReferencesIdent(s ast.Stmt, name string) bool {
 	})
 	return found
 }
-
 func hirBodyNeedsArena(body *hir.BlockStmt) bool {
 	if body == nil {
 		return false
@@ -2703,7 +2630,6 @@ func hirBodyNeedsArena(body *hir.BlockStmt) bool {
 	walkStmt(body)
 	return needsArena
 }
-
 func hirBodyContainsNestedClosure(body *hir.BlockStmt) bool {
 	if body == nil {
 		return false
@@ -2871,162 +2797,6 @@ func hirBodyContainsNestedClosure(body *hir.BlockStmt) bool {
 	}
 	return found
 }
-
-// hirBodyUsesThis checks if an HIR block references `this`.
-func hirBodyAssignsThisProperty(body *hir.BlockStmt, property string) bool {
-	if body == nil || property == "" {
-		return false
-	}
-	found := false
-	var walkExpr func(hir.Expr)
-	var walkStmt func(hir.Stmt)
-	walkExpr = func(e hir.Expr) {
-		if found || e == nil {
-			return
-		}
-		switch e := e.(type) {
-		case *hir.AssignExpr:
-			if member, ok := e.Left.(*hir.MemberExpr); ok && !member.Private && member.Property == property {
-				if _, ok := member.Object.(*hir.ThisExpr); ok {
-					found = true
-					return
-				}
-			}
-			walkExpr(e.Left)
-			walkExpr(e.Right)
-		case *hir.BinaryExpr:
-			walkExpr(e.Left)
-			walkExpr(e.Right)
-		case *hir.UnaryExpr:
-			walkExpr(e.Operand)
-		case *hir.CallExpr:
-			walkExpr(e.Func)
-			for _, a := range e.Args {
-				walkExpr(a)
-			}
-		case *hir.MemberExpr:
-			walkExpr(e.Object)
-		case *hir.ComputedMemberExpr:
-			walkExpr(e.Object)
-			walkExpr(e.Property)
-		case *hir.TernaryExpr:
-			walkExpr(e.Cond)
-			walkExpr(e.Then)
-			walkExpr(e.Else)
-		case *hir.ArrayLiteral:
-			for _, el := range e.Elements {
-				walkExpr(el)
-			}
-		case *hir.ObjectLiteral:
-			for _, p := range e.Properties {
-				walkExpr(p.Value)
-				if p.Computed {
-					walkExpr(p.Key)
-				}
-			}
-		case *hir.SpreadExpr:
-			walkExpr(e.Value)
-		case *hir.NewExpr:
-			walkExpr(e.Callee)
-			for _, a := range e.Args {
-				walkExpr(a)
-			}
-		case *hir.UpdateExpr:
-			walkExpr(e.Operand)
-		case *hir.AwaitExpr:
-			walkExpr(e.Value)
-		case *hir.TemplateLiteral:
-			for _, p := range e.Parts {
-				walkExpr(p)
-			}
-		case *hir.SequenceExpr:
-			for _, ex := range e.Exprs {
-				walkExpr(ex)
-			}
-		case *hir.ParenExpr:
-			walkExpr(e.Expr)
-		case *hir.ArrowFunc, *hir.FuncExpr, *hir.ClassExpr:
-			return
-		}
-	}
-	walkStmt = func(s hir.Stmt) {
-		if found || s == nil {
-			return
-		}
-		switch s := s.(type) {
-		case *hir.ExprStmt:
-			walkExpr(s.Expr)
-		case *hir.ReturnStmt:
-			walkExpr(s.Value)
-		case *hir.VarDecl:
-			for _, d := range s.Declarators {
-				walkExpr(d.Init)
-			}
-		case *hir.IfStmt:
-			walkExpr(s.Cond)
-			if s.Then != nil {
-				for _, st := range s.Then.Stmts {
-					walkStmt(st)
-				}
-			}
-			if s.Else != nil {
-				walkStmt(s.Else)
-			}
-		case *hir.ForStmt:
-			walkStmt(s.Init)
-			walkExpr(s.Cond)
-			walkExpr(s.Post)
-			if s.Body != nil {
-				for _, st := range s.Body.Stmts {
-					walkStmt(st)
-				}
-			}
-		case *hir.WhileStmt:
-			walkExpr(s.Cond)
-			if s.Body != nil {
-				for _, st := range s.Body.Stmts {
-					walkStmt(st)
-				}
-			}
-		case *hir.BlockStmt:
-			for _, st := range s.Stmts {
-				walkStmt(st)
-			}
-		case *hir.ThrowStmt:
-			walkExpr(s.Value)
-		case *hir.SwitchStmt:
-			walkExpr(s.Tag)
-			for _, c := range s.Cases {
-				for _, st := range c.Body {
-					walkStmt(st)
-				}
-			}
-		case *hir.TryCatchStmt:
-			if s.Try != nil {
-				for _, st := range s.Try.Stmts {
-					walkStmt(st)
-				}
-			}
-			if s.Catch != nil && s.Catch.Body != nil {
-				for _, st := range s.Catch.Body.Stmts {
-					walkStmt(st)
-				}
-			}
-		case *hir.DoWhileStmt:
-			walkExpr(s.Cond)
-			if s.Body != nil {
-				for _, st := range s.Body.Stmts {
-					walkStmt(st)
-				}
-			}
-		}
-	}
-	for _, st := range body.Stmts {
-		walkStmt(st)
-	}
-	return found
-}
-
 func hirBodyUsesThis(body *hir.BlockStmt) bool {
 	if body == nil {
 		return false
@@ -3200,7 +2970,6 @@ func hirBodyUsesThis(body *hir.BlockStmt) bool {
 	}
 	return false
 }
-
 func hirExprReferencesName(expr hir.Expr, name string) bool {
 	found := false
 	var walk func(hir.Expr)
@@ -3290,7 +3059,6 @@ func hirExprReferencesName(expr hir.Expr, name string) bool {
 	walk(expr)
 	return found
 }
-
 func walkStmtExprRefs(stmt hir.Stmt, name string, found *bool) {
 	if stmt == nil || *found {
 		return
@@ -3440,7 +3208,6 @@ func walkStmtExprRefs(stmt hir.Stmt, name string, found *bool) {
 		walkStmtExprRefs(s.Stmt, name, found)
 	}
 }
-
 func (l *Lowerer) wrapAsJSValueFunc(params []*hir.Param, body *ast.BlockStmt) *ast.FuncLit {
 	l.jsvalueImport()
 	return &ast.FuncLit{
@@ -3454,18 +3221,15 @@ func (l *Lowerer) wrapAsJSValueFunc(params []*hir.Param, body *ast.BlockStmt) *a
 		Body: body,
 	}
 }
-
 func (l *Lowerer) generatedFunctionCtorName(fnLit *ast.FuncLit) string {
 	if l.arenaEnabled && l.disableArenaCount == 0 && funcLitUsesArena(fnLit) {
 		return "NewArenaFunction"
 	}
 	return "NewFunction"
 }
-
 func (l *Lowerer) generatedFunctionValue(name string, span *hir.SourceSpan, fnLit *ast.FuncLit) ast.Expr {
 	return callExpr(selectorExpr(goIdent("jsvalue"), l.generatedFunctionCtorName(fnLit)), fnLit)
 }
-
 func funcLitUsesArena(fnLit *ast.FuncLit) bool {
 	if fnLit == nil || fnLit.Body == nil {
 		return false
@@ -3483,7 +3247,6 @@ func funcLitUsesArena(fnLit *ast.FuncLit) bool {
 	})
 	return found
 }
-
 func (l *Lowerer) instrumentProfiledBody(name string, span *hir.SourceSpan, body *ast.BlockStmt) *ast.BlockStmt {
 	if l.cpuProfile == nil || body == nil {
 		return body
@@ -3523,11 +3286,11 @@ func (l *Lowerer) instrumentProfiledBody(name string, span *hir.SourceSpan, body
 	body.List = append([]ast.Stmt{enter, deferStmt}, body.List...)
 	return body
 }
-
 func (l *Lowerer) ensureProfileRuntimeAlias() string {
 	if l.profileRuntimeAlias == "" {
 		l.profileRuntimeAlias = l.uniqueInternalImportAlias("_gunprofile_runtime")
 		l.addAliasedImport("github.com/nnstd/gun/runtime/profile", l.profileRuntimeAlias)
 	}
 	return l.profileRuntimeAlias
+
 }

@@ -982,7 +982,7 @@ func TestClassMethodsThatReplaceThemselvesAreSynchronized(t *testing.T) {
 			}
 		}
 	`)
-	assertContains(t, out, `MarkSynchronized("match")`)
+	assertContains(t, out, `MarkAsMethod()`)
 }
 
 func TestMethodLikeFunctionThatReplacesItselfIsSynchronized(t *testing.T) {
@@ -992,7 +992,7 @@ func TestMethodLikeFunctionThatReplacesItselfIsSynchronized(t *testing.T) {
 			return value;
 		}
 	`)
-	assertContains(t, out, `MarkSynchronized("match")`)
+	assertContains(t, out, `MarkAsMethod()`)
 }
 
 func TestClassMethodsThatDoNotReplaceThemselvesAreNotSynchronized(t *testing.T) {
@@ -1001,7 +1001,7 @@ func TestClassMethodsThatDoNotReplaceThemselvesAreNotSynchronized(t *testing.T) 
 			name(value) { this.value = value; return this.value; }
 		}
 	`)
-	assertNotContains(t, out, "MarkSynchronized")
+	assertContains(t, out, `MarkAsMethod()`)
 }
 
 func TestClassGetterWithoutArenaWorkDoesNotAllocateArena(t *testing.T) {

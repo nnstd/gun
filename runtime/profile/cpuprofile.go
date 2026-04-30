@@ -269,6 +269,9 @@ func EnterFrame(frame Frame) func() {
 }
 
 func CaptureContext() *ContextToken {
+	if state.session == nil {
+		return nil
+	}
 	gid := currentGoroutineID()
 	state.mu.Lock()
 	defer state.mu.Unlock()

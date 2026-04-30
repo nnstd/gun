@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"runtime"
 	"runtime/debug"
 	"strconv"
 	"syscall"
-	"time"
 
 	"github.com/valyala/fasthttp"
 
@@ -18,6 +18,19 @@ import (
 	"github.com/nnstd/gun/runtime/promise"
 	"github.com/nnstd/gun/runtime/web"
 )
+
+func init() {
+	// Reduce GC frequency for server workloads (default 100 → 200).
+	// Trade ~50% more peak heap for ~5-10% less CPU from GC.
+	if debug.SetGCPercent(200) < 0 {
+		// GC percent was not previously set; 200 is our default.
+	}
+	// Cap OS threads to reduce scheduling overhead. Most Gun workloads
+	// are bottlenecked on single-threaded JS execution, not parallelism.
+	if runtime.GOMAXPROCS(0) > 4 {
+		runtime.GOMAXPROCS(4)
+	}
+}
 
 var (
 	listenFn = net.Listen
@@ -100,53 +113,45 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 				}
 			}()
 
-			done := make(chan *jsvalue.JSValue, 1)
-			errCh := make(chan *jsvalue.JSValue, 1)
+			req := web.RequestFromFastHTTP(ctx)
+			res := fetch.Call(req, serverObj)
 
-			eventloop.Default.ScheduleCallback(func() {
-				req := web.RequestFromFastHTTP(ctx)
-				res := fetch.Call(req, serverObj)
-
-				if !promise.IsPromise(res) {
-					done <- res
-					return
-				}
-
-				res.MethodCall("then",
-					jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
-						val := jsvalue.NewUndefined()
-						if len(args) > 0 && args[0] != nil {
-							val = args[0]
-						}
-						done <- val
-						return jsvalue.NewUndefined()
-					}),
-					jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
-						reason := jsvalue.NewString("Internal Server Error")
-						if len(args) > 0 && args[0] != nil {
-							reason = jsvalue.NewString(args[0].String())
-						}
-						errCh <- reason
-						return jsvalue.NewUndefined()
-					}),
-				)
-			})
-
-			timer := time.AfterFunc(30*time.Second, func() {
-				select {
-				case errCh <- jsvalue.NewString("Gateway Timeout: fetch handler did not resolve"):
-				default:
-				}
-			})
-			defer timer.Stop()
-
-			select {
-			case result := <-done:
-				web.WriteResponseFastHTTP(ctx, result)
-			case errMsg := <-errCh:
-				ctx.SetStatusCode(500)
-				ctx.SetBodyString(errMsg.String())
+			if !promise.IsPromise(res) {
+				web.WriteResponseFastHTTP(ctx, res)
+				return
 			}
+
+			// Async: wait for promise to settle
+			done := make(chan struct{})
+			var result *jsvalue.JSValue
+			var errResult *jsvalue.JSValue
+
+			res.MethodCall("then",
+				jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+					if len(args) > 0 && args[0] != nil {
+						result = args[0]
+					}
+					close(done)
+					return jsvalue.NewUndefined()
+				}),
+				jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+					if len(args) > 0 && args[0] != nil {
+						errResult = jsvalue.NewString(args[0].String())
+					} else {
+						errResult = jsvalue.NewString("Internal Server Error")
+					}
+					close(done)
+					return jsvalue.NewUndefined()
+				}),
+			)
+			<-done
+
+			if errResult != nil {
+				ctx.SetStatusCode(500)
+				ctx.SetBodyString(errResult.String())
+				return
+			}
+			web.WriteResponseFastHTTP(ctx, result)
 		},
 	}
 
