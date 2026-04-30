@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/nnstd/gun/compiler"
+	"github.com/nnstd/gun/compiler/jsonmodule"
 
 	"github.com/alecthomas/kong"
 )
@@ -426,25 +427,26 @@ func findRelativeImports(source []byte) []string {
 	return imports
 }
 
-// resolveImportFile resolves a relative import path like ./foo to an actual .ts/.js file.
+// resolveImportFile resolves a relative import path like ./foo to an actual .ts/.js/.json file.
 // Tries extensions in Node/Bun resolution order.
 func resolveImportFile(importPath, fromDir string) (string, error) {
 	clean := importPath
 	clean = strings.TrimSuffix(clean, ".ts")
 	clean = strings.TrimSuffix(clean, ".js")
 	clean = strings.TrimSuffix(clean, ".mjs")
+	clean = strings.TrimSuffix(clean, ".json")
 
 	base := filepath.Join(fromDir, clean)
 
 	// Try file extensions in order
-	for _, ext := range []string{".ts", ".js", ".mjs"} {
+	for _, ext := range []string{".ts", ".js", ".mjs", ".json"} {
 		if _, err := os.Stat(base + ext); err == nil {
 			return base + ext, nil
 		}
 	}
 
 	// Try index files in directory
-	for _, idx := range []string{"index.ts", "index.js"} {
+	for _, idx := range []string{"index.ts", "index.js", "index.json"} {
 		candidate := filepath.Join(base, idx)
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate, nil
@@ -476,6 +478,9 @@ func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose b
 	if err != nil {
 		return err
 	}
+	if isJSONFile(tsFile) {
+		return nil
+	}
 
 	fileDir := filepath.Dir(tsFile)
 	imports := findRelativeImports(source)
@@ -506,7 +511,7 @@ func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose b
 			clean := strings.TrimPrefix(imp, "./")
 			clean = strings.TrimPrefix(clean, "../")
 			clean = strings.TrimSuffix(clean, ".ts")
-			clean = strings.TrimSuffix(clean, ".js")
+			clean = trimModuleExt(clean)
 			pkgName = filepath.Base(clean)
 			relDir = clean
 		}
@@ -516,8 +521,12 @@ func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose b
 			return err
 		}
 
-		outFile := filepath.Join(outDir, filepath.Base(strings.TrimSuffix(resolved, ".ts"))+".go")
-		if err := transpileFile(resolved, outFile, pkgName, moduleName, verbose, false, optLevel, opts); err != nil {
+		outFile := filepath.Join(outDir, filepath.Base(trimModuleExt(resolved))+".go")
+		if isJSONFile(resolved) {
+			if err := transpileJSONModuleFile(resolved, outFile, pkgName); err != nil {
+				return err
+			}
+		} else if err := transpileFile(resolved, outFile, pkgName, moduleName, verbose, false, optLevel, opts); err != nil {
 			return err
 		}
 
@@ -532,7 +541,7 @@ func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose b
 // findRequireImports scans TS/JS source for string literal arguments to
 // require("..."). It is line-based like findRelativeImports: skips comments,
 // accepts single and double quotes, strips the "node:" prefix, and omits
-// ".json" specifiers (JSON data files are read at runtime, not transpiled).
+// JSON specifiers are included so static require/import can compile JSON as modules.
 // Returned specifiers may be relative (./…, ../…) or bare; callers are
 // responsible for classification.
 func findRequireImports(source []byte) []string {
@@ -573,10 +582,6 @@ func findRequireImports(source []byte) []string {
 			}
 			modPath := after[1 : end+1]
 			modPath = strings.TrimPrefix(modPath, "node:")
-			if strings.HasSuffix(modPath, ".json") {
-				rest = after[end+2:]
-				continue
-			}
 			if !seen[modPath] {
 				seen[modPath] = true
 				imports = append(imports, modPath)
@@ -585,6 +590,33 @@ func findRequireImports(source []byte) []string {
 		}
 	}
 	return imports
+}
+
+func trimModuleExt(path string) string {
+	path = strings.TrimSuffix(path, ".ts")
+	path = strings.TrimSuffix(path, ".js")
+	path = strings.TrimSuffix(path, ".mjs")
+	path = strings.TrimSuffix(path, ".json")
+	return path
+}
+
+func isJSONFile(path string) bool {
+	return strings.EqualFold(filepath.Ext(path), ".json")
+}
+
+func transpileJSONModuleFile(inputPath, outputPath, pkgName string) error {
+	data, err := os.ReadFile(inputPath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", inputPath, err)
+	}
+	if _, err := jsonmodule.Parse(data); err != nil {
+		return fmt.Errorf("parse json %s: %w", inputPath, err)
+	}
+	source, err := jsonmodule.Compile(data, pkgName, "Default", nil)
+	if err != nil {
+		return fmt.Errorf("compile json %s: %w", inputPath, err)
+	}
+	return os.WriteFile(outputPath, source, 0644)
 }
 
 // findNodeModuleImports scans TS/JS source for non-relative, non-known imports.
@@ -857,6 +889,9 @@ func collectAllSourceFiles(entryFile string) []string {
 		}
 		seen[abs] = true
 		files = append(files, abs)
+		if isJSONFile(tsFile) {
+			return
+		}
 
 		source, err := os.ReadFile(tsFile)
 		if err != nil {
@@ -886,6 +921,9 @@ func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName
 	var newSourceFiles []string
 
 	for _, srcFile := range sourceFiles {
+		if isJSONFile(srcFile) {
+			continue
+		}
 		source, err := os.ReadFile(srcFile)
 		if err != nil {
 			continue
@@ -963,6 +1001,9 @@ func transpileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string,
 	visited := map[string]bool{absEntry: true}
 	var discover func(string) error
 	discover = func(tsFile string) error {
+		if isJSONFile(tsFile) {
+			return nil
+		}
 		src, err := os.ReadFile(tsFile)
 		if err != nil {
 			return err

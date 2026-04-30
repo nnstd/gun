@@ -24,12 +24,14 @@ type importResolution struct {
 	jsExportName string
 	modulePath   string
 }
+
 // CrossFileExport describes a symbol exported from another file in the same package.
 type CrossFileExport struct {
 	OriginalName string
 	GoName       string
 	IsJSValue    bool
 }
+
 // Lowerer converts an HIR Module into a go/ast.File.
 type Lowerer struct {
 	symtab              *symbol.Table
@@ -71,20 +73,24 @@ type Lowerer struct {
 	cpuProfile          *CPUProfileConfig
 	profileRuntimeAlias string
 }
+
 // Lower converts an HIR module to a Go AST file.
 func Lower(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, optLevel context.OptLevel) *ast.File {
 	return LowerWithCPUProfile(mod, ctx, moduleName, samePackageImports, nil, optLevel)
 }
+
 // LowerWithCPUProfile converts an HIR module to a Go AST file with optional
 // generated-main CPU profiling support.
 func LowerWithCPUProfile(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, cpuProfile *CPUProfileConfig, optLevel context.OptLevel) *ast.File {
 	return LowerWithExportsAndCPUProfile(mod, ctx, moduleName, samePackageImports, nil, nil, nil, nil, nil, "", nil, cpuProfile, optLevel)
 }
+
 // LowerWithExports converts an HIR module to a Go AST file with knowledge of
 // symbols exported from other files in the same package.
 func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string, localAliasMap map[symbol.ID]string, namespaceAlias string, namespaceEntries map[string]string, optLevel context.OptLevel) *ast.File {
 	return LowerWithExportsAndCPUProfile(mod, ctx, moduleName, samePackageImports, crossFileExports, reservedNames, importNameMap, exportAliasMap, localAliasMap, namespaceAlias, namespaceEntries, nil, optLevel)
 }
+
 // LowerWithExportsAndCPUProfile converts an HIR module to a Go AST file with
 // knowledge of same-package exports plus optional generated-main CPU profiling support.
 func LowerWithExportsAndCPUProfile(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string, localAliasMap map[symbol.ID]string, namespaceAlias string, namespaceEntries map[string]string, cpuProfile *CPUProfileConfig, optLevel context.OptLevel) *ast.File {
@@ -273,6 +279,7 @@ func (l *Lowerer) registerTopLevelName(sym *symbol.Symbol) {
 	}
 	l.topLevelNames[sym.OriginalName] = l.emitName(sym)
 }
+
 // --------------------------------------------------------------------
 // Declarations
 // --------------------------------------------------------------------
@@ -381,7 +388,7 @@ func (l *Lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 	}
 	if methodLike {
 		fnVal = callExpr(selectorExpr(fnVal, "MarkAsMethod"))
-		}
+	}
 	l.decls = append(l.decls, setDeclPos(varDecl(name, nil, fnVal), d.Span))
 }
 func (l *Lowerer) lowerVarDecl(d *hir.VarDecl) {
@@ -908,6 +915,7 @@ func (l *Lowerer) maybeEmitExportAlias(sym *symbol.Symbol, localGoName string) {
 	}
 	l.decls = append(l.decls, varDecl(goName, nil, goIdent(localGoName)))
 }
+
 // deferVarToInit emits a forward declaration for goName and defers the
 // assignment to init(). Used for exports that reference variables whose
 // value may not be available at package level (cross-file references,
@@ -921,6 +929,7 @@ func (l *Lowerer) deferVarToInit(goName string, rhs ast.Expr) {
 	l.initStmts = append(l.initStmts, assignStmt([]ast.Expr{goIdent(goName)}, []ast.Expr{rhs}))
 	l.emittedExportNames[goName] = true
 }
+
 // lowerExportDefault handles `export default ...` declarations.
 func (l *Lowerer) lowerExportDefault(d *hir.ExportDecl) {
 	if d.Decl == nil {
@@ -988,6 +997,7 @@ func (l *Lowerer) lowerExportDefault(d *hir.ExportDecl) {
 		l.lowerDecl(d.Decl)
 	}
 }
+
 // synthesizeDefaultExport creates var Default = PrimaryExport when a module
 // has named exports but no default export. This matches SWC's interop behavior:
 // `import X from 'module'` resolves to the primary named export.
@@ -1193,6 +1203,7 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 		}
 	}
 }
+
 // resolveModule resolves a TS module path to Go import path and package name.
 func (l *Lowerer) resolveModule(modulePath string) (goImportPath, goPkgName string, isKnown bool) {
 	// Check context-registered known modules
@@ -1210,6 +1221,7 @@ func (l *Lowerer) resolveModule(modulePath string) (goImportPath, goPkgName stri
 		clean := strings.TrimSuffix(modulePath, ".ts")
 		clean = strings.TrimSuffix(clean, ".js")
 		clean = strings.TrimSuffix(clean, ".mjs")
+		clean = strings.TrimSuffix(clean, ".json")
 		pkgName := filepath.Base(clean)
 		modName := l.moduleName
 		if modName == "" {
@@ -1226,6 +1238,7 @@ func (l *Lowerer) resolveModule(modulePath string) (goImportPath, goPkgName stri
 	}
 	return pkgName, pkgName, false
 }
+
 // collectUsedIdents walks Go AST declarations and returns all identifier names used.
 func collectUsedIdents(decls []ast.Decl) map[string]bool {
 	used := make(map[string]bool)
@@ -1284,6 +1297,7 @@ func (l *Lowerer) lowerTopLevelStmt(d *hir.TopLevelStmt) {
 		l.initStmts = l.appendWithLineMarker(l.initStmts, d.Span, gs)
 	}
 }
+
 // getOrCreateMain returns the main() function declaration, creating it if needed.
 func (l *Lowerer) getOrCreateMain() *ast.FuncDecl {
 	// Look for existing main func
@@ -1378,6 +1392,7 @@ func (l *Lowerer) internalImportAliasTaken(alias string) bool {
 	}
 	return false
 }
+
 // prescan collects metadata from HIR declarations before lowering.
 // Records function param counts and marks exported names.
 func (l *Lowerer) prescan(mod *hir.Module) {
@@ -1437,6 +1452,7 @@ func (l *Lowerer) prescan(mod *hir.Module) {
 		}
 	}
 }
+
 // markCrossFileExported marks symbols whose capitalized name matches a cross-file export,
 // but ONLY if the original name itself would capitalize to that export name AND no other
 // symbol in the same file already has that capitalized name.
@@ -1492,6 +1508,7 @@ func (l *Lowerer) markCrossFileExported(mod *hir.Module) {
 		}
 	}
 }
+
 // fixInitCycles detects package-level variable initializer cycles
 // and splits the participating vars into forward declarations + init() assignments.
 func (l *Lowerer) fixInitCycles(decls []ast.Decl) []ast.Decl {
@@ -1644,6 +1661,7 @@ func exprReferencedIdents(expr ast.Expr) map[string]bool {
 	})
 	return refs
 }
+
 // --------------------------------------------------------------------
 // Function helpers
 // --------------------------------------------------------------------
@@ -1789,6 +1807,7 @@ func (l *Lowerer) lowerFuncBody(params []*hir.Param, body *hir.BlockStmt) *ast.B
 
 	return &ast.BlockStmt{List: stmts}
 }
+
 // endsWithReturn checks if a statement list ends with a return statement.
 func endsWithReturn(stmts []ast.Stmt) bool {
 	if len(stmts) == 0 {
@@ -1812,6 +1831,7 @@ func endsWithReturn(stmts []ast.Stmt) bool {
 	}
 	return false
 }
+
 // lowerMethodBody is like lowerFuncBody but prepends `this := _args[0]`
 // and unpacks remaining params from _args[1:] offset.
 func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast.BlockStmt {
@@ -1945,6 +1965,7 @@ func (l *Lowerer) lowerMethodBody(params []*hir.Param, body *hir.BlockStmt) *ast
 
 	return &ast.BlockStmt{List: stmts}
 }
+
 // forwardDeclareVars scans Go statements for variables used before their :=
 // declaration. Adds `var name *jsvalue.JSValue` at top and changes := to =.
 // Also hoists function-valued assignments to the top (JS function hoisting).
@@ -2258,6 +2279,7 @@ func inspectWithoutNestedFuncLits(root ast.Node, fn func(ast.Node) bool) {
 		return fn(n)
 	})
 }
+
 // eliminateUnusedVars performs SWC-style write/read analysis on an entire
 // function body. Variables that are written (declared or assigned) but never
 // read are eliminated: var decls are removed, := becomes _ =, = becomes _ =.
@@ -2323,6 +2345,7 @@ func collectLocalDecls(stmts []ast.Stmt, locals map[string]bool) {
 		})
 	}
 }
+
 // collectWritesAndReads walks a statement recursively, recording which
 // identifiers appear in write positions (LHS of assignment, var decl names)
 // vs read positions (everything else).
@@ -2367,6 +2390,7 @@ func collectWritesAndReads(node ast.Node, writes, reads, locals map[string]bool)
 		return true
 	})
 }
+
 // eliminateUnusedInStmts walks statements recursively and blanks out
 // unused variable references in assignment LHS positions.
 func eliminateUnusedInStmts(stmts []ast.Stmt, unused map[string]bool) {
@@ -2390,6 +2414,7 @@ func eliminateUnusedInStmts(stmts []ast.Stmt, unused map[string]bool) {
 		})
 	}
 }
+
 // filterUnusedDecls removes `var x *T` DeclStmts where x is unused.
 // Works recursively on nested BlockStmts.
 func filterUnusedDecls(stmts []ast.Stmt, unused map[string]bool) []ast.Stmt {
@@ -2424,6 +2449,7 @@ func filterUnusedDecls(stmts []ast.Stmt, unused map[string]bool) []ast.Stmt {
 	}
 	return result
 }
+
 // isFuncValuedAssign checks if an assignment's RHS is a jsvalue.NewFunction() call
 // (possibly with .MarkAsMethod() chained).
 func isFuncValuedAssign(assign *ast.AssignStmt) bool {

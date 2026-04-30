@@ -14,6 +14,7 @@ import (
 	"github.com/nnstd/gun/compiler/backend"
 	"github.com/nnstd/gun/compiler/context"
 	"github.com/nnstd/gun/compiler/hir"
+	"github.com/nnstd/gun/compiler/jsonmodule"
 	"github.com/nnstd/gun/compiler/mir"
 	"github.com/nnstd/gun/compiler/passes"
 	"github.com/nnstd/gun/compiler/ssa"
@@ -167,6 +168,21 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 	namespaceAliases := make(map[string]string)
 
 	for name, source := range files {
+		if isJSONModule(name) {
+			mod, err := jsonmodule.Parse(source)
+			if err != nil {
+				return nil, fmt.Errorf("parse json %s: %w", name, err)
+			}
+			exports := []backend.CrossFileExport{{OriginalName: "default", GoName: "Default", IsJSValue: true}}
+			names := []string{"Default"}
+			for _, exp := range mod.Exports {
+				exports = append(exports, backend.CrossFileExport{OriginalName: exp.OriginalName, GoName: exp.GoName, IsJSValue: true})
+				names = append(names, exp.GoName)
+			}
+			allExports[name] = exports
+			allNames[name] = names
+			continue
+		}
 		tree, err := parseTypeScript(source)
 		if err != nil {
 			continue
@@ -360,6 +376,26 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 
 		goFiles[name] = backend.LowerWithExportsAndCPUProfile(hirMod, p.Ctx, moduleName, true, crossExports, reservedNames, importNameMap, exportAliases[name], localAliases[name], namespaceAliases[name], exportAliases[name], cpuProfile, p.OptLevel)
 	}
+	for name, source := range files {
+		if !isJSONModule(name) {
+			continue
+		}
+		defaultName := exportAliases[name]["default"]
+		if defaultName == "" {
+			defaultName = "Default"
+		}
+		namedAliases := map[string]string{}
+		for originalName, alias := range exportAliases[name] {
+			if originalName != "default" {
+				namedAliases[originalName] = alias
+			}
+		}
+		out, err := jsonmodule.Compile(source, pkgName, defaultName, namedAliases)
+		if err != nil {
+			return nil, fmt.Errorf("compile %s: %w", name, err)
+		}
+		results[name] = out
+	}
 
 	backend.BreakPackageInitCycles(goFiles)
 
@@ -395,8 +431,19 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 		}
 		results[outName] = out
 	}
+	for name, out := range results {
+		if !isJSONModule(name) {
+			continue
+		}
+		delete(results, name)
+		results[strings.TrimSuffix(name, filepath.Ext(name))] = out
+	}
 
 	return results, nil
+}
+
+func isJSONModule(name string) bool {
+	return strings.EqualFold(filepath.Ext(name), ".json")
 }
 
 // fileDefaultName generates a file-specific name for renamed default exports.

@@ -126,8 +126,11 @@ func ResolvePackageImportFile(currentFile, importPath string, files map[string][
 		base,
 		base + ".ts",
 		base + ".js",
+		base + ".mjs",
+		base + ".json",
 		filepath.Join(base, "index.ts"),
 		filepath.Join(base, "index.js"),
+		filepath.Join(base, "index.json"),
 	}
 	for _, candidate := range candidates {
 		if _, ok := files[candidate]; ok {

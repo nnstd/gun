@@ -1329,7 +1329,7 @@ func (b *Builder) extractComputedPropertyName(node *sitter.Node) (sideEffects []
 // tryBuildRequireAsImport desugars `const x = require("mod")` or
 // `const { a, b: c } = require("mod")` in a single variable_declarator
 // into an ImportDecl. Returns nil to fall through to runtime handling for
-// shadowed require, dynamic args, .json specifiers, or unsupported patterns.
+// shadowed require, dynamic args, or unsupported patterns.
 func (b *Builder) tryBuildRequireAsImport(declNode *sitter.Node) *ImportDecl {
 	if declNode == nil || declNode.Kind() != "variable_declarator" {
 		return nil
@@ -1451,8 +1451,8 @@ func (b *Builder) tryBuildBareRequireImport(exprStmtNode *sitter.Node) *ImportDe
 
 // requireCallStringArg returns (modulePath, true) when callNode is a
 // call_expression invoking the bare identifier `require` with a single
-// string-literal argument whose specifier is not `.json`. The `node:` prefix
-// is stripped. Returns ("", false) otherwise.
+// string-literal argument. The `node:` prefix is stripped. Returns ("", false)
+// otherwise.
 func (b *Builder) requireCallStringArg(callNode *sitter.Node) (string, bool) {
 	if callNode == nil || callNode.Kind() != "call_expression" {
 		return "", false
@@ -1475,9 +1475,6 @@ func (b *Builder) requireCallStringArg(callNode *sitter.Node) (string, bool) {
 	raw := b.nodeText(arg)
 	modulePath := strings.Trim(raw, "'\"")
 	modulePath = strings.TrimPrefix(modulePath, "node:")
-	if strings.HasSuffix(modulePath, ".json") {
-		return "", false
-	}
 	return modulePath, true
 }
 

@@ -766,10 +766,16 @@ func TestRequireBareBecomesSideEffectImport(t *testing.T) {
 	}
 }
 
-func TestRequireJSONIsNotDesugared(t *testing.T) {
+func TestRequireJSONBecomesImportDecl(t *testing.T) {
 	mod := buildHIR(t, `const pkg = require("./package.json");`)
-	if len(mod.Imports) != 0 {
-		t.Errorf("JSON require should fall through, got ImportDecls: %+v", mod.Imports)
+	if len(mod.Imports) != 1 {
+		t.Fatalf("expected 1 ImportDecl, got %+v", mod.Imports)
+	}
+	if mod.Imports[0].ModulePath != "./package.json" {
+		t.Errorf("ModulePath: want %q, got %q", "./package.json", mod.Imports[0].ModulePath)
+	}
+	if mod.Imports[0].Default == nil || mod.Imports[0].Default.LocalName != "pkg" {
+		t.Errorf("Default binding incorrect: %+v", mod.Imports[0].Default)
 	}
 }
 

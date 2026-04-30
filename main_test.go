@@ -75,6 +75,117 @@ func TestResolveSubpathEntryResolvesExtensionlessExport(t *testing.T) {
 	}
 }
 
+func TestBuildInlineFixtureWithJSONRequire(t *testing.T) {
+	fixtureRoot := t.TempDir()
+	entry := filepath.Join(fixtureRoot, "entry.ts")
+	if err := os.WriteFile(entry, []byte(`const data = require("./data.json");
+console.log(data.hello + ":" + data.nums[1]);
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixtureRoot, "data.json"), []byte(`{"hello":"json","nums":[1,2,3]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildFixture(t, entry)
+	cmd := exec.Command(bin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "json:2" {
+		t.Fatalf("stdout mismatch: got %q want %q\nstderr:\n%s", got, "json:2", stderr.String())
+	}
+}
+
+func TestBuildInlineFixtureWithJSONNamedImport(t *testing.T) {
+	fixtureRoot := t.TempDir()
+	entry := filepath.Join(fixtureRoot, "entry.ts")
+	if err := os.WriteFile(entry, []byte(`import { some, nums } from "./file.json";
+console.log(some + ":" + nums[1]);
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixtureRoot, "file.json"), []byte(`{"some":"ok","nums":[1,2,3]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildFixture(t, entry)
+	cmd := exec.Command(bin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "ok:2" {
+		t.Fatalf("stdout mismatch: got %q want %q\nstderr:\n%s", got, "ok:2", stderr.String())
+	}
+}
+
+func TestBuildInlineFixtureWithJSONDestructuredRequire(t *testing.T) {
+	fixtureRoot := t.TempDir()
+	entry := filepath.Join(fixtureRoot, "entry.ts")
+	if err := os.WriteFile(entry, []byte(`const { some, nested } = require("./file.json");
+console.log(some + ":" + nested.value);
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixtureRoot, "file.json"), []byte(`{"some":"ok","nested":{"value":"yes"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildFixture(t, entry)
+	cmd := exec.Command(bin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "ok:yes" {
+		t.Fatalf("stdout mismatch: got %q want %q\nstderr:\n%s", got, "ok:yes", stderr.String())
+	}
+}
+
+func TestTranspileNodeModuleAsPackageSupportsExtensionlessJSONRequire(t *testing.T) {
+	pkgDir := t.TempDir()
+	entry := filepath.Join(pkgDir, "index.js")
+	if err := os.WriteFile(entry, []byte(`const features = require("./lib/features");
+module.exports = features;
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(pkgDir, "lib"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "lib", "features.json"), []byte(`[{"name":"jump","versions":["1.20"]}]`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := t.TempDir()
+	files, err := transpileNodeModuleAsPackage(entry, outDir, "gunrun", "pkg", false, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jsonPath := filepath.Join(pkgDir, "lib", "features.json")
+	found := false
+	for _, file := range files {
+		if file == jsonPath {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("discovered files did not include %s: %+v", jsonPath, files)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "lib-features.go")); err != nil {
+		t.Fatalf("expected compiled JSON module: %v", err)
+	}
+}
+
 func TestTranspileProject_BuiltGunTestMatchesCLIParity(t *testing.T) {
 	entry := gunTestEntry(t)
 	outDir := t.TempDir()
