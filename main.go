@@ -669,18 +669,18 @@ func getNodeModuleEntry(pkgDir string) (string, error) {
 	if len(pj.Exports) > 0 {
 		entry := resolveExportsField(pj.Exports)
 		if entry != "" {
-			return filepath.Join(pkgDir, entry), nil
+			return resolvePackageEntryPath(pkgDir, entry)
 		}
 	}
 
 	// Try module field
 	if pj.Module != "" {
-		return filepath.Join(pkgDir, pj.Module), nil
+		return resolvePackageEntryPath(pkgDir, pj.Module)
 	}
 
 	// Try main field
 	if pj.Main != "" {
-		return filepath.Join(pkgDir, pj.Main), nil
+		return resolvePackageEntryPath(pkgDir, pj.Main)
 	}
 
 	// Fallback to index files
@@ -692,6 +692,13 @@ func getNodeModuleEntry(pkgDir string) (string, error) {
 	}
 
 	return "", fmt.Errorf("cannot determine entry point for %s", pkgDir)
+}
+
+func resolvePackageEntryPath(pkgDir, entry string) (string, error) {
+	if resolved, err := resolveImportFile(entry, pkgDir); err == nil {
+		return resolved, nil
+	}
+	return "", fmt.Errorf("cannot resolve package entry %q in %s", entry, pkgDir)
 }
 
 // resolveExportsField extracts an entry path from a package.json "exports" field.
@@ -804,7 +811,7 @@ func resolveSubpathEntry(pkgName, fromDir string) (string, error) {
 	}
 
 	if entry := resolveExportValue(raw); entry != "" {
-		return filepath.Join(rootDir, entry), nil
+		return resolvePackageEntryPath(rootDir, entry)
 	}
 
 	return "", fmt.Errorf("cannot resolve subpath export %s in %s", key, root)

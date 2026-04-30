@@ -555,6 +555,14 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 	})
 
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "performance",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddImport("github.com/nnstd/gun/runtime/perf_hooks")
+			return selectorExpr(ident("perf_hooks"), "Performance")
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "Array",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
@@ -1012,6 +1020,11 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 		GoPkgName:    "v8",
 		UseAsJSValue: true,
 	})
+	ctx.RegisterModule("perf_hooks", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/perf_hooks",
+		GoPkgName:    "perf_hooks",
+		UseAsJSValue: true,
+	})
 }
 
 // registerKnownGlobals marks names as known globals that should not
@@ -1049,6 +1062,7 @@ func registerKnownGlobals(ctx *tcontext.TranspilerContext) {
 	ctx.MarkKnownGlobal("__filename")
 	ctx.MarkKnownGlobal("__dirname")
 	ctx.MarkKnownGlobal("globalThis")
+	ctx.MarkKnownGlobal("performance")
 	ctx.MarkKnownGlobal("decodeURI")
 	ctx.MarkKnownGlobal("decodeURIComponent")
 	ctx.MarkKnownGlobal("encodeURI")

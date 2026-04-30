@@ -33,6 +33,48 @@ func gunTestEntry(t *testing.T) string {
 	return ""
 }
 
+func TestGetNodeModuleEntryResolvesExtensionlessMain(t *testing.T) {
+	pkgDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(pkgDir, "package.json"), []byte(`{"main":"nbt"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "nbt.js"), []byte(`module.exports = {}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := getNodeModuleEntry(pkgDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(pkgDir, "nbt.js")
+	if got != want {
+		t.Fatalf("entry mismatch: got %q want %q", got, want)
+	}
+}
+
+func TestResolveSubpathEntryResolvesExtensionlessExport(t *testing.T) {
+	fixtureRoot := t.TempDir()
+	pkgDir := filepath.Join(fixtureRoot, "node_modules", "pkg")
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "package.json"), []byte(`{"exports":{"./feature":"./feature"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "feature.js"), []byte(`export const ok = true`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveSubpathEntry("pkg/feature", fixtureRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(pkgDir, "feature.js")
+	if got != want {
+		t.Fatalf("entry mismatch: got %q want %q", got, want)
+	}
+}
+
 func TestTranspileProject_BuiltGunTestMatchesCLIParity(t *testing.T) {
 	entry := gunTestEntry(t)
 	outDir := t.TempDir()

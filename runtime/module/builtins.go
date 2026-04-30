@@ -12,6 +12,7 @@ import (
 	nodehttp "github.com/nnstd/gun/runtime/http"
 	nodeos "github.com/nnstd/gun/runtime/os"
 	"github.com/nnstd/gun/runtime/path"
+	"github.com/nnstd/gun/runtime/perf_hooks"
 	"github.com/nnstd/gun/runtime/process"
 	"github.com/nnstd/gun/runtime/stream"
 	"github.com/nnstd/gun/runtime/string_decoder"
@@ -59,4 +60,5 @@ func RegisterBuiltins() {
 
 	ModuleRegistry["process"] = process.AsJSValueCached
 	ModuleRegistry["v8"] = v8.AsJSValue
+	ModuleRegistry["perf_hooks"] = perf_hooks.AsJSValue
 }
