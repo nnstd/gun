@@ -14,6 +14,8 @@ import (
 	"github.com/nnstd/gun/compiler/yamlmodule"
 
 	"github.com/alecthomas/kong"
+	sitter "github.com/tree-sitter/go-tree-sitter"
+	typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 )
 
 var cli struct {
@@ -492,6 +494,7 @@ func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose b
 
 	fileDir := filepath.Dir(tsFile)
 	imports := findRelativeImports(source)
+	optionalRequires := findOptionalRequireImports(source)
 	for _, imp := range findRequireImports(source) {
 		if strings.HasPrefix(imp, ".") {
 			imports = append(imports, imp)
@@ -501,6 +504,9 @@ func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose b
 	for _, imp := range imports {
 		resolved, err := resolveImportFile(imp, fileDir)
 		if err != nil {
+			if optionalRequires[imp] {
+				continue
+			}
 			return err
 		}
 
@@ -546,13 +552,120 @@ func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose b
 	return nil
 }
 
-// findRequireImports scans TS/JS source for string literal arguments to
-// require("..."). It is line-based like findRelativeImports: skips comments,
-// accepts single and double quotes, strips the "node:" prefix, and omits
-// JSON specifiers are included so static require/import can compile JSON as modules.
-// Returned specifiers may be relative (./…, ../…) or bare; callers are
+type requireImport struct {
+	Path     string
+	Optional bool
+}
+
+// findRequireImports scans TS/JS source for static require("...") calls.
+// Returned specifiers may be relative (./..., ../...) or bare; callers are
 // responsible for classification.
 func findRequireImports(source []byte) []string {
+	specs, ok := scanRequireImports(source)
+	if !ok {
+		return findRequireImportsText(source)
+	}
+	var imports []string
+	seen := map[string]bool{}
+	for _, spec := range specs {
+		if !seen[spec.Path] {
+			seen[spec.Path] = true
+			imports = append(imports, spec.Path)
+		}
+	}
+	return imports
+}
+
+func findOptionalRequireImports(source []byte) map[string]bool {
+	optional := map[string]bool{}
+	specs, ok := scanRequireImports(source)
+	if !ok {
+		return optional
+	}
+	for _, spec := range specs {
+		if spec.Optional {
+			optional[spec.Path] = true
+		}
+	}
+	return optional
+}
+
+func scanRequireImports(source []byte) ([]requireImport, bool) {
+	parser := sitter.NewParser()
+	defer parser.Close()
+
+	lang := sitter.NewLanguage(typescript.LanguageTypescript())
+	if err := parser.SetLanguage(lang); err != nil {
+		return nil, false
+	}
+	tree := parser.Parse(source, nil)
+	if tree == nil {
+		return nil, false
+	}
+	defer tree.Close()
+
+	root := tree.RootNode()
+	if root == nil || root.HasError() {
+		return nil, false
+	}
+
+	var imports []requireImport
+	var walk func(*sitter.Node, bool)
+	walk = func(node *sitter.Node, inCatchableTry bool) {
+		if node == nil {
+			return
+		}
+		switch node.Kind() {
+		case "function_declaration", "function_expression", "arrow_function", "method_definition", "generator_function_declaration", "generator_function":
+			inCatchableTry = false
+		}
+		if path, ok := requireCallStringArg(node, source); ok {
+			imports = append(imports, requireImport{Path: path, Optional: inCatchableTry})
+		}
+
+		childOptional := inCatchableTry
+		if node.Kind() == "try_statement" && node.ChildByFieldName("handler") != nil {
+			childOptional = true
+		}
+		for i := uint(0); i < node.NamedChildCount(); i++ {
+			walk(node.NamedChild(i), childOptional)
+		}
+	}
+	walk(root, false)
+	return imports, true
+}
+
+func requireCallStringArg(callNode *sitter.Node, source []byte) (string, bool) {
+	if callNode == nil || callNode.Kind() != "call_expression" {
+		return "", false
+	}
+	fnNode := callNode.ChildByFieldName("function")
+	argsNode := callNode.ChildByFieldName("arguments")
+	if fnNode == nil || argsNode == nil {
+		return "", false
+	}
+	if fnNode.Kind() != "identifier" || fnNode.Utf8Text(source) != "require" {
+		return "", false
+	}
+	if argsNode.NamedChildCount() != 1 {
+		return "", false
+	}
+	arg := argsNode.NamedChild(0)
+	if arg.Kind() != "string" {
+		return "", false
+	}
+	raw := arg.Utf8Text(source)
+	if len(raw) < 2 {
+		return "", false
+	}
+	quote := raw[0]
+	if quote != '\'' && quote != '"' || raw[len(raw)-1] != quote {
+		return "", false
+	}
+	return strings.TrimPrefix(raw[1:len(raw)-1], "node:"), true
+}
+
+func findRequireImportsText(source []byte) []string {
 	var imports []string
 	seen := map[string]bool{}
 	lines := strings.Split(string(source), "\n")
@@ -948,6 +1061,7 @@ func collectAllSourceFiles(entryFile string) []string {
 		if err != nil {
 			return
 		}
+		optionalRequires := findOptionalRequireImports(source)
 		for _, imp := range findRelativeImports(source) {
 			resolved, err := resolveImportFile(imp, filepath.Dir(tsFile))
 			if err == nil {
@@ -961,6 +1075,8 @@ func collectAllSourceFiles(entryFile string) []string {
 			resolved, err := resolveImportFile(imp, filepath.Dir(tsFile))
 			if err == nil {
 				walk(resolved)
+			} else if !optionalRequires[imp] {
+				return
 			}
 		}
 	}
@@ -979,6 +1095,7 @@ func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName
 		if err != nil {
 			continue
 		}
+		optionalRequires := findOptionalRequireImports(source)
 		nodeImports := findNodeModuleImports(source)
 		for _, imp := range findRequireImports(source) {
 			if strings.HasPrefix(imp, ".") {
@@ -993,12 +1110,15 @@ func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName
 			if visited[pkgName] {
 				continue
 			}
-			visited[pkgName] = true
 
 			pkgDir, err := resolveNodeModule(pkgName, filepath.Dir(srcFile))
 			if err != nil {
+				if optionalRequires[pkgName] {
+					continue
+				}
 				return err
 			}
+			visited[pkgName] = true
 			entryPath, err := getNodeModuleEntry(pkgDir)
 			if err != nil {
 				// Try subpath export resolution (e.g. "yargs/helpers" → yargs exports["./helpers"])
@@ -1059,6 +1179,7 @@ func transpileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string,
 		if err != nil {
 			return err
 		}
+		optionalRequires := findOptionalRequireImports(src)
 		relImports := findRelativeImports(src)
 		for _, imp := range findRequireImports(src) {
 			if strings.HasPrefix(imp, ".") {
@@ -1068,6 +1189,9 @@ func transpileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string,
 		for _, imp := range relImports {
 			resolved, err := resolveImportFile(imp, filepath.Dir(tsFile))
 			if err != nil {
+				if optionalRequires[imp] {
+					continue
+				}
 				return err
 			}
 			absResolved, _ := filepath.Abs(resolved)

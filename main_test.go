@@ -75,6 +75,116 @@ func TestResolveSubpathEntryResolvesExtensionlessExport(t *testing.T) {
 	}
 }
 
+func TestFindOptionalRequireImportsDetectsTryCatchRequires(t *testing.T) {
+	source := []byte(`const fs = require("fs");
+let convert;
+try {
+	convert = require('encoding').convert;
+} catch (e) {}
+try { require("node:crypto"); } catch {}
+const required = require("required");
+`)
+
+	optional := findOptionalRequireImports(source)
+	if !optional["encoding"] {
+		t.Fatal("expected encoding require inside try/catch to be optional")
+	}
+	if !optional["crypto"] {
+		t.Fatal("expected node:crypto require inside try/catch to be optional")
+	}
+	if optional["fs"] || optional["required"] {
+		t.Fatalf("non-try requires were marked optional: %+v", optional)
+	}
+}
+
+func TestProcessNodeModuleImportsSkipsMissingOptionalRequire(t *testing.T) {
+	fixtureRoot := t.TempDir()
+	pkgDir := filepath.Join(fixtureRoot, "node_modules", "pkg")
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "package.json"), []byte(`{"main":"index.js"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "index.js"), []byte(`let convert;
+try {
+	convert = require("encoding").convert;
+} catch (e) {}
+module.exports = { convert };
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	entry := filepath.Join(fixtureRoot, "entry.ts")
+	if err := os.WriteFile(entry, []byte(`const pkg = require("pkg");
+console.log(!!pkg);
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := t.TempDir()
+	if err := transpileFile(entry, filepath.Join(outDir, "entry.go"), "main", "gunrun", false, false, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	visited := map[string]bool{}
+	err := processNodeModuleImports([]string{entry}, fixtureRoot, outDir, "gunrun", false, visited, 0, nil)
+	if err != nil {
+		t.Fatalf("optional missing require should not fail node_module discovery: %v", err)
+	}
+	if visited["encoding"] {
+		t.Fatal("optional missing encoding require was visited as a hard dependency")
+	}
+	if !visited["pkg"] {
+		t.Fatal("required package was not discovered")
+	}
+}
+
+func TestProcessNodeModuleImportsIncludesResolvableOptionalRequire(t *testing.T) {
+	fixtureRoot := t.TempDir()
+	pkgDir := filepath.Join(fixtureRoot, "node_modules", "pkg")
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "package.json"), []byte(`{"main":"index.js"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "index.js"), []byte(`try {
+	require("encoding");
+} catch (e) {}
+module.exports = {};
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	encodingDir := filepath.Join(fixtureRoot, "node_modules", "encoding")
+	if err := os.MkdirAll(encodingDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(encodingDir, "package.json"), []byte(`{"main":"index.js"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(encodingDir, "index.js"), []byte(`throw new Error("load failure");`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	entry := filepath.Join(fixtureRoot, "entry.ts")
+	if err := os.WriteFile(entry, []byte(`require("pkg");`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := t.TempDir()
+	if err := transpileFile(entry, filepath.Join(outDir, "entry.go"), "main", "gunrun", false, false, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	visited := map[string]bool{}
+	err := processNodeModuleImports([]string{entry}, fixtureRoot, outDir, "gunrun", false, visited, 0, nil)
+	if err != nil {
+		t.Fatalf("resolvable optional require should be included even if runtime evaluation may throw: %v", err)
+	}
+	if !visited["encoding"] {
+		t.Fatal("resolvable optional encoding require was not included")
+	}
+}
+
 func TestBuildInlineFixtureWithJSONRequire(t *testing.T) {
 	fixtureRoot := t.TempDir()
 	entry := filepath.Join(fixtureRoot, "entry.ts")
