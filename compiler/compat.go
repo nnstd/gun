@@ -20,5 +20,6 @@ func SanitizeGoPkgName(npmName string) string {
 	name := strings.TrimPrefix(npmName, "@")
 	name = strings.ReplaceAll(name, "/", "_")
 	name = strings.ReplaceAll(name, "-", "_")
+	name = strings.ReplaceAll(name, ".", "_")
 	return name
 }

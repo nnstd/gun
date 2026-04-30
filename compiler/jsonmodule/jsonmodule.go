@@ -22,6 +22,8 @@ type Module struct {
 	Exports []Export
 }
 
+const inlineValueExprMaxBytes = 32 * 1024
+
 func Parse(source []byte) (*Module, error) {
 	dec := json.NewDecoder(bytes.NewReader(source))
 	dec.UseNumber()
@@ -46,7 +48,16 @@ func Compile(source []byte, pkgName, defaultName string, namedAliases map[string
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "package %s\n\n", pkgName)
-	b.WriteString("import jsvalue \"github.com/nnstd/gun/runtime/builtin\"\n\n")
+	if len(source) <= inlineValueExprMaxBytes {
+		b.WriteString("import jsvalue \"github.com/nnstd/gun/runtime/builtin\"\n\n")
+	} else {
+		b.WriteString("import (\n")
+		b.WriteString("\t\"encoding/json\"\n")
+		b.WriteString("\n")
+		b.WriteString("\tjsvalue \"github.com/nnstd/gun/runtime/builtin\"\n")
+		b.WriteString("\t\"github.com/nnstd/gun/runtime/module\"\n")
+		b.WriteString(")\n\n")
+	}
 	fmt.Fprintf(&b, "var %s *jsvalue.JSValue\n", defaultName)
 	for _, exp := range mod.Exports {
 		name := namedAliases[exp.OriginalName]
@@ -59,7 +70,13 @@ func Compile(source []byte, pkgName, defaultName string, namedAliases map[string
 		fmt.Fprintf(&b, "var %s *jsvalue.JSValue\n", name)
 	}
 	b.WriteString("\nfunc init() {\n")
-	fmt.Fprintf(&b, "\t%s = %s\n", defaultName, valueExpr(modValue(source)))
+	if len(source) <= inlineValueExprMaxBytes {
+		fmt.Fprintf(&b, "\t%s = %s\n", defaultName, valueExpr(modValue(source)))
+	} else {
+		b.WriteString("\tvar data any\n")
+		fmt.Fprintf(&b, "\t_ = json.Unmarshal([]byte(%s), &data)\n", strconv.Quote(string(source)))
+		fmt.Fprintf(&b, "\t%s = module.DataToJSValue(data)\n", defaultName)
+	}
 	for _, exp := range mod.Exports {
 		name := namedAliases[exp.OriginalName]
 		if name == "" {
