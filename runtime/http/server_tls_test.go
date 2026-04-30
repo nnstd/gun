@@ -24,6 +24,8 @@ func startTLSServer(t *testing.T, certPEM, keyPEM string, handler func(req, res 
 		"cert", jsvalue.NewString(certPEM),
 	), listener)
 
+	pumpEventLoop()
+
 	ready := make(chan string, 1)
 	cb := jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		a := srv.MethodCall("address")
@@ -80,6 +82,8 @@ func TestServerTLSInvalidPEM(t *testing.T) {
 		"key", jsvalue.NewString("INVALID"),
 		"cert", jsvalue.NewString("INVALID"),
 	), listener)
+
+	pumpEventLoop()
 
 	gotErr := make(chan string, 1)
 	srv.MethodCall("on", jsvalue.NewString("error"), jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {

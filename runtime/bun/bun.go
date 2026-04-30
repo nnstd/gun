@@ -8,8 +8,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"syscall"
-
-
+	"time"
 
 	"github.com/valyala/fasthttp"
 
@@ -101,16 +100,53 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 				}
 			}()
 
-			req := web.RequestFromFastHTTP(ctx)
-			res := fetch.Call(req, serverObj)
+			done := make(chan *jsvalue.JSValue, 1)
+			errCh := make(chan *jsvalue.JSValue, 1)
 
-			if !promise.IsPromise(res) {
-				web.WriteResponseFastHTTP(ctx, res)
-				return
+			eventloop.Default.ScheduleCallback(func() {
+				req := web.RequestFromFastHTTP(ctx)
+				res := fetch.Call(req, serverObj)
+
+				if !promise.IsPromise(res) {
+					done <- res
+					return
+				}
+
+				res.MethodCall("then",
+					jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+						val := jsvalue.NewUndefined()
+						if len(args) > 0 && args[0] != nil {
+							val = args[0]
+						}
+						done <- val
+						return jsvalue.NewUndefined()
+					}),
+					jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+						reason := jsvalue.NewString("Internal Server Error")
+						if len(args) > 0 && args[0] != nil {
+							reason = jsvalue.NewString(args[0].String())
+						}
+						errCh <- reason
+						return jsvalue.NewUndefined()
+					}),
+				)
+			})
+
+			timer := time.AfterFunc(30*time.Second, func() {
+				select {
+				case errCh <- jsvalue.NewString("Gateway Timeout: fetch handler did not resolve"):
+				default:
+				}
+			})
+			defer timer.Stop()
+
+			select {
+			case result := <-done:
+				web.WriteResponseFastHTTP(ctx, result)
+			case errMsg := <-errCh:
+				ctx.SetStatusCode(500)
+				ctx.SetBodyString(errMsg.String())
 			}
-
-			res = promise.Await(res)
-			web.WriteResponseFastHTTP(ctx, res)
 		},
 	}
 

@@ -85,16 +85,20 @@ func (el *EventLoop) SettlePromise() {
 	el.wake()
 }
 
-// ScheduleMicrotask enqueues fn as a microtask on the event loop.
-// The microtask increments jobCount on schedule and decrements it on completion.
-// Used by Promise resolution to dispatch .then()/.catch() handlers asynchronously.
+// ScheduleMicrotask enqueues fn to run on the event loop goroutine as a microtask.
+// All JS-visible code (JSValue .Call(), .Get(), .Set(), .MethodCall()) MUST run via
+// this method or ScheduleCallback. I/O goroutines must never call JSValue methods
+// directly — they should capture Go-native data, schedule fn here, and block on a
+// channel until fn completes. Used by Promise resolution to dispatch handlers.
 func (el *EventLoop) ScheduleMicrotask(fn func()) {
 	el.scheduleCallback(profile.CaptureContext(), fn)
 }
 
-// ScheduleCallback enqueues an I/O or runtime callback on the event loop.
-// Unlike handle registration, it keeps the loop alive only until the queued
-// callback has run.
+// ScheduleCallback enqueues fn to run on the event loop goroutine.
+// All JS-visible code (JSValue .Call(), .Get(), .Set(), .MethodCall()) MUST run via
+// this method or ScheduleMicrotask. I/O goroutines must never call JSValue methods
+// directly — they should capture Go-native data, schedule fn here, and block on a
+// Go channel until fn completes.
 func (el *EventLoop) ScheduleCallback(fn func()) {
 	el.scheduleCallback(profile.CaptureContext(), fn)
 }
@@ -107,4 +111,15 @@ func (el *EventLoop) scheduleCallback(ctx *profile.ContextToken, fn func()) {
 		el.jobCount.Add(-1)
 		el.wake()
 	}
+}
+
+// Pump starts a background goroutine that drains the event loop's job channel.
+// Unlike Run(), Pump never exits and does not manage handle/job lifecycle.
+// It is intended for use in tests where the process terminates after all tests complete.
+func (el *EventLoop) Pump() {
+	go func() {
+		for fn := range el.jobChan {
+			fn()
+		}
+	}()
 }

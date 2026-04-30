@@ -371,26 +371,37 @@ func startReadStream(rs *jsvalue.JSValue) {
 		return
 	}
 	rs.Set("_started", jsvalue.NewBool(true))
-	eventloop.SetImmediate(jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
-		options := rs.Get("_options")
-		if errVal := abortErrFromSignal(web.AbortSignalFromOptions(options)); errVal != nil {
-			rs.MethodCall("emit", jsvalue.NewString("error"), errVal)
-			return jsvalue.NewUndefined()
-		}
-		p := rs.Get("path").String()
+	options := rs.Get("_options")
+	p := rs.Get("path").String()
+	_, hasEnc := readEncoding(options)
+
+	// Check abort signal on event loop before spawning goroutine.
+	if errVal := abortErrFromSignal(web.AbortSignalFromOptions(options)); errVal != nil {
+		rs.MethodCall("emit", jsvalue.NewString("error"), errVal)
+		return
+	}
+
+	// Read file in goroutine (non-blocking).
+	// Register handle to keep event loop alive while goroutine runs.
+	eventloop.Default.RegisterHandle()
+	go func() {
+		defer eventloop.Default.UnregisterHandle()
 		data, err := os.ReadFile(p)
 		if err != nil {
-			rs.MethodCall("emit", jsvalue.NewString("error"), nodeFSError(err, "open", p))
-			return jsvalue.NewUndefined()
+			eventloop.Default.ScheduleCallback(func() {
+				rs.MethodCall("emit", jsvalue.NewString("error"), nodeFSError(err, "open", p))
+			})
+			return
 		}
-		if _, ok := readEncoding(options); ok {
-			rs.MethodCall("push", jsvalue.NewString(string(data)))
-		} else {
-			rs.MethodCall("push", bufferFromBytes(data))
-		}
-		rs.MethodCall("emit", jsvalue.NewString("end"))
-		return jsvalue.NewUndefined()
-	}))
+		eventloop.Default.ScheduleCallback(func() {
+			if hasEnc {
+				rs.MethodCall("push", jsvalue.NewString(string(data)))
+			} else {
+				rs.MethodCall("push", bufferFromBytes(data))
+			}
+			rs.MethodCall("emit", jsvalue.NewString("end"))
+		})
+	}()
 }
 
 func finishWriteStream(ws *jsvalue.JSValue) {
@@ -403,11 +414,22 @@ func finishWriteStream(ws *jsvalue.JSValue) {
 		data = append(data, dataBytes(chunk)...)
 	}
 	p := ws.Get("path").String()
-	if err := os.WriteFile(p, data, 0644); err != nil {
-		ws.MethodCall("emit", jsvalue.NewString("error"), nodeFSError(err, "open", p))
-		return
-	}
-	ws.MethodCall("emit", jsvalue.NewString("finish"))
+
+	// Write file in goroutine (non-blocking).
+	// Register handle to keep event loop alive while goroutine runs.
+	eventloop.Default.RegisterHandle()
+	go func() {
+		defer eventloop.Default.UnregisterHandle()
+		if err := os.WriteFile(p, data, 0644); err != nil {
+			eventloop.Default.ScheduleCallback(func() {
+				ws.MethodCall("emit", jsvalue.NewString("error"), nodeFSError(err, "open", p))
+			})
+			return
+		}
+		eventloop.Default.ScheduleCallback(func() {
+			ws.MethodCall("emit", jsvalue.NewString("finish"))
+		})
+	}()
 }
 
 func CreateReadStream(path *jsvalue.JSValue, opts ...*jsvalue.JSValue) *jsvalue.JSValue {

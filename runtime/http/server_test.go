@@ -11,7 +11,15 @@ import (
 	"time"
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
+	"github.com/nnstd/gun/runtime/eventloop"
 )
+
+// pumpEventLoop starts a background goroutine that drains the event loop's
+// job channel so ScheduleCallback work executes. Unlike Run(), Pump never exits,
+// which is safe for tests where the process terminates after all tests complete.
+func pumpEventLoop() {
+	eventloop.Default.Pump()
+}
 
 // startTestServer creates a Server, listens on an ephemeral port, and returns
 // the address + a teardown func. handler runs as the createServer listener.
@@ -24,6 +32,7 @@ func startTestServer(t *testing.T, handler func(req, res *jsvalue.JSValue)) (add
 		return jsvalue.NewUndefined()
 	})
 	srv = CreateServer(false, listener)
+	pumpEventLoop()
 
 	ready := make(chan string, 1)
 	cb := jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
@@ -106,6 +115,8 @@ func TestServerEADDRINUSE(t *testing.T) {
 	port := ln.Addr().(*net.TCPAddr).Port
 
 	srv := CreateServer(false, jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue { return jsvalue.NewUndefined() }))
+	pumpEventLoop()
+
 	errCh := make(chan *jsvalue.JSValue, 1)
 	srv.MethodCall("on", jsvalue.NewString("error"), jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		if len(args) > 0 {

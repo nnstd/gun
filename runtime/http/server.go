@@ -200,10 +200,9 @@ func init() {
 		}
 		if err != nil {
 			errVal := buildListenError(err, addrLabel, "listen")
-			go func() {
-				time.Sleep(time.Millisecond)
+			eventloop.Default.ScheduleCallback(func() {
 				this.MethodCall("emit", jsvalue.NewString("error"), errVal)
-			}()
+			})
 			return this
 		}
 		si.listener = ln
@@ -225,19 +224,20 @@ func init() {
 				serveErr = si.server.Serve(ln)
 			}
 			if serveErr != nil && !si.closed.Load() {
-				errVal := jserror.Error.Call(jsvalue.NewString(serveErr.Error()))
-				this.MethodCall("emit", jsvalue.NewString("error"), errVal)
+				eventloop.Default.ScheduleCallback(func() {
+					errVal := jserror.Error.Call(jsvalue.NewString(serveErr.Error()))
+					this.MethodCall("emit", jsvalue.NewString("error"), errVal)
+				})
 			}
 		}()
 
 		// Fire 'listening' on next event loop tick (defer to JS handler register).
-		go func() {
-			time.Sleep(time.Millisecond)
+		eventloop.Default.ScheduleCallback(func() {
 			this.MethodCall("emit", jsvalue.NewString("listening"))
 			if cb != nil {
 				cb.Call()
 			}
-		}()
+		})
 		return this
 	}).MarkAsMethod())
 
@@ -338,21 +338,50 @@ func makeRequestHandler(server *jsvalue.JSValue) fasthttp.RequestHandler {
 			}
 		}()
 
-		req := newIncomingMessage(ctx)
-		res, done := newServerResponse(ctx)
+		body := ctx.PostBody()
+		bodyCopy := make([]byte, len(body))
+		copy(bodyCopy, body)
 
-		// Fire 'request' for any extra listeners.
-		server.MethodCall("emit", jsvalue.NewString("request"), req, res)
+		done := make(chan struct{})
+		var resRI *responseInternal
 
-		// Dispatch synthetic body events after handler had a chance to register.
-		go func() {
-			body := ctx.PostBody()
-			if len(body) > 0 {
-				req.MethodCall("emit", jsvalue.NewString("data"), jsvalue.NewString(string(body)))
+		// Timeout: force 504 if handler never calls res.end()
+		timer := time.AfterFunc(30*time.Second, func() {
+			eventloop.Default.ScheduleCallback(func() {
+				if resRI != nil && !resRI.closed {
+					resRI.ctx.SetStatusCode(504)
+					resRI.ctx.SetBodyString("Gateway Timeout: res.end() not called")
+					resRI.finish()
+				}
+			})
+		})
+		defer timer.Stop()
+
+		// Schedule all JS work on event loop
+		eventloop.Default.ScheduleCallback(func() {
+			req := newIncomingMessage(ctx)
+			res, resDone := newServerResponse(ctx)
+			resRI = responseInternalOf(res)
+
+			// Fire 'request' event on event loop
+			server.MethodCall("emit", jsvalue.NewString("request"), req, res)
+
+			// Dispatch body events on event loop (no goroutine)
+			if len(bodyCopy) > 0 {
+				req.MethodCall("emit", jsvalue.NewString("data"),
+					jsvalue.NewString(string(bodyCopy)))
 			}
 			req.MethodCall("emit", jsvalue.NewString("end"))
-		}()
 
+			// Bridging goroutine: only touches Go channels, never JSValue
+			go func() {
+				<-resDone
+				// OWNERSHIP TRANSFER: event loop -> fasthttp goroutine
+				close(done)
+			}()
+		})
+
+		// Block fasthttp goroutine until response is written
 		<-done
 	}
 }

@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/valyala/fasthttp"
 
@@ -85,10 +84,9 @@ func ClientRequest(isTLS, autoEnd bool, args ...*jsvalue.JSValue) *jsvalue.JSVal
 	eventloop.Default.RegisterHandle()
 
 	if autoEnd {
-		go func() {
-			time.Sleep(time.Millisecond)
+		eventloop.Default.ScheduleCallback(func() {
 			this.MethodCall("end")
-		}()
+		})
 	}
 	return this
 }
@@ -248,19 +246,23 @@ func (ci *clientInternal) dispatchRequest(this *jsvalue.JSValue) {
 			clientRegistryMu.Unlock()
 		}()
 
-		if doErr != nil {
-			errVal := jserror.Error.Call(jsvalue.NewString(doErr.Error()))
-			errVal.Set("code", jsvalue.NewString(classifyClientErr(doErr)))
-			this.MethodCall("emit", jsvalue.NewString("error"), errVal)
-			return
-		}
+		// Schedule all JS execution on event loop
+		eventloop.Default.ScheduleCallback(func() {
+			if doErr != nil {
+				errVal := jserror.Error.Call(jsvalue.NewString(doErr.Error()))
+				errVal.Set("code", jsvalue.NewString(classifyClientErr(doErr)))
+				this.MethodCall("emit", jsvalue.NewString("error"), errVal)
+				return
+			}
 
-		respMsg := newTransportResponseMessage(resp)
-		this.MethodCall("emit", jsvalue.NewString("response"), respMsg)
-		if len(resp.Body) > 0 {
-			respMsg.MethodCall("emit", jsvalue.NewString("data"), jsvalue.NewString(string(resp.Body)))
-		}
-		respMsg.MethodCall("emit", jsvalue.NewString("end"))
+			respMsg := newTransportResponseMessage(resp)
+			this.MethodCall("emit", jsvalue.NewString("response"), respMsg)
+			if len(resp.Body) > 0 {
+				respMsg.MethodCall("emit", jsvalue.NewString("data"),
+					jsvalue.NewString(string(resp.Body)))
+			}
+			respMsg.MethodCall("emit", jsvalue.NewString("end"))
+		})
 	})
 }
 

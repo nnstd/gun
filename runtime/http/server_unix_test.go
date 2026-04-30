@@ -25,6 +25,8 @@ func startUnixServer(t *testing.T, sockPath string, handler func(req, res *jsval
 	})
 	srv = CreateServer(false, listener)
 
+	pumpEventLoop()
+
 	ready := make(chan struct{}, 1)
 	cb := jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		ready <- struct{}{}
@@ -113,6 +115,9 @@ func TestServerUnixOptionsForm(t *testing.T) {
 		return jsvalue.NewUndefined()
 	})
 	srv := CreateServer(false, listener)
+
+	pumpEventLoop()
+
 	ready := make(chan struct{}, 1)
 	cb := jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		ready <- struct{}{}

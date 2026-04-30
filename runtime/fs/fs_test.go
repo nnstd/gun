@@ -279,22 +279,25 @@ func TestCreateReadAndWriteStreams(t *testing.T) {
 	if !jsvalue.InstanceOf(ws, WriteStream).Bool() {
 		t.Fatal("createWriteStream should return WriteStream")
 	}
-	finished := false
+	finishCh := make(chan struct{}, 1)
 	ws.MethodCall("on", js("finish"), jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
-		finished = true
+		finishCh <- struct{}{}
 		return jsvalue.NewUndefined()
 	}))
 	ws.MethodCall("write", js("a"))
 	ws.MethodCall("end", buffer.Buffer.Get("from").Call(js("b")))
+	go eventloop.Default.Run()
+	select {
+	case <-finishCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for finish")
+	}
 	data, err := os.ReadFile(wp)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(data) != "ab" {
 		t.Fatalf("written data = %q, want ab", data)
-	}
-	if !finished {
-		t.Fatal("finish event not emitted")
 	}
 }
 
