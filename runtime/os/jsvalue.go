@@ -1,6 +1,9 @@
 package os
 
-import jsvalue "github.com/nnstd/gun/runtime/builtin"
+import (
+	jsvalue "github.com/nnstd/gun/runtime/builtin"
+	"github.com/nnstd/gun/runtime/constants"
+)
 
 // AsJSValue returns the os module as a JSValue object with all exports.
 var AsJSValue = func() *jsvalue.JSValue {
@@ -12,6 +15,7 @@ var AsJSValue = func() *jsvalue.JSValue {
 	obj.Set("arch", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue { return Arch() }))
 	obj.Set("cpus", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue { return Cpus() }))
 	obj.Set("environ", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue { return Environ() }))
+	obj.Set("constants", constants.OSConstants)
 	obj.Set("EOL", EOL)
 	return obj
 }()

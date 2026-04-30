@@ -23,6 +23,25 @@ func TestRegisterDefaultBuiltinsIncludesDgram(t *testing.T) {
 	}
 }
 
+func TestRegisterDefaultBuiltinsIncludesConstants(t *testing.T) {
+	ctx := tcontext.New()
+	RegisterDefaultBuiltins(ctx)
+
+	mod := ctx.LookupModule("constants")
+	if mod == nil {
+		t.Fatal("expected constants module mapping")
+	}
+	if mod.GoImportPath != "github.com/nnstd/gun/runtime/constants" {
+		t.Fatalf("unexpected constants import path: %q", mod.GoImportPath)
+	}
+	if !mod.UseAsJSValue {
+		t.Fatal("expected constants to use AsJSValue")
+	}
+	if !IsKnownModule("constants") || !IsKnownModule("node:constants") {
+		t.Fatal("expected constants and node:constants to be known modules")
+	}
+}
+
 func TestDefaultContextRegistersBunFFI(t *testing.T) {
 	ctx := tcontext.New()
 	RegisterDefaultBuiltins(ctx)

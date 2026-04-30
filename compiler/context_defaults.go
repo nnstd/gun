@@ -935,6 +935,11 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 		GoPkgName:    "string_decoder",
 		UseAsJSValue: true,
 	})
+	ctx.RegisterModule("constants", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/constants",
+		GoPkgName:    "constants",
+		UseAsJSValue: true,
+	})
 	ctx.RegisterModule("crypto", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/crypto",
 		GoPkgName:    "crypto",

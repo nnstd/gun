@@ -23,6 +23,25 @@ func TestDgramRegisteredInModuleRegistry(t *testing.T) {
 	}
 }
 
+func TestConstantsBuiltinRegistered(t *testing.T) {
+	if !IsBuiltin("constants") || !IsBuiltin("node:constants") {
+		t.Fatal("expected constants and node:constants to be builtin")
+	}
+	mod, ok := lookupRegistry("constants")
+	if !ok || mod == nil {
+		t.Fatal("expected constants in module registry")
+	}
+	if got := mod.Get("RSA_PKCS1_PADDING").Number(); got != 1 {
+		t.Fatalf("RSA_PKCS1_PADDING = %v", got)
+	}
+	if got := mod.Get("RSA_NO_PADDING").Number(); got != 3 {
+		t.Fatalf("RSA_NO_PADDING = %v", got)
+	}
+	if mod.Get("RSA_SSLV23_PADDING").TypeString() != "undefined" {
+		t.Fatal("RSA_SSLV23_PADDING should match Node as undefined")
+	}
+}
+
 func TestURLRegisteredInModuleRegistry(t *testing.T) {
 	if !IsBuiltin("url") || !IsBuiltin("node:url") {
 		t.Fatal("expected url and node:url to be builtin")
