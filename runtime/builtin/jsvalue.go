@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 
 	"github.com/nnstd/gun/runtime/profile"
@@ -78,8 +77,6 @@ type JSValue struct {
 	isArenaAllocated bool
 	ext              atomic.Pointer[jsValueExt]
 }
-
-var jsValueExtInitMu sync.Mutex
 
 func (v *JSValue) isBoxedPrimitive() bool {
 	return v != nil && v.typ == TypeObject && v.boxedValue != nil
@@ -192,14 +189,11 @@ func (v *JSValue) ensureExt() *jsValueExt {
 	if ext := v.ext.Load(); ext != nil {
 		return ext
 	}
-	jsValueExtInitMu.Lock()
-	defer jsValueExtInitMu.Unlock()
-	if ext := v.ext.Load(); ext != nil {
+	ext := &jsValueExt{}
+	if v.ext.CompareAndSwap(nil, ext) {
 		return ext
 	}
-	ext := &jsValueExt{}
-	v.ext.Store(ext)
-	return ext
+	return v.ext.Load()
 }
 
 func (v *JSValue) ensureMeta() *jsValueMeta {

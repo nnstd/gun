@@ -124,6 +124,21 @@ func (m *SmallPropMap) ForEach(fn func(key string, desc *PropertyDescriptor)) {
 	}
 }
 
+// Clear removes all entries but preserves the overflow map allocation.
+func (m *SmallPropMap) Clear() {
+	if m.overflow != nil {
+		for k := range m.overflow {
+			delete(m.overflow, k)
+		}
+		return
+	}
+	for i := 0; i < m.count; i++ {
+		m.keys[i] = ""
+		m.vals[i] = nil
+	}
+	m.count = 0
+}
+
 // Keys returns all keys as a freshly allocated slice.
 func (m *SmallPropMap) Keys() []string {
 	if m.overflow != nil {

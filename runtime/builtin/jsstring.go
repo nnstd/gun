@@ -3,6 +3,7 @@ package jsvalue
 import (
 	"fmt"
 	"strings"
+	"sync"
 )
 
 func stringFast(v *JSValue) string {
@@ -69,10 +70,69 @@ func runeSliceFast(s string, start, end int) string {
 // prototype.init() to avoid init-order dependency.
 var _emptyString = &JSValue{typ: TypeString, strVal: "", frozen: true}
 
-// NewString creates a string JSValue. Returns the singleton for "".
+// Interned HTTP singletons — lazily created on first access via EnsureHTTPStrings().
+var (
+	httpStringsOnce     sync.Once
+	strGET              *JSValue
+	strPOST             *JSValue
+	strPUT              *JSValue
+	strDELETE           *JSValue
+	strPATCH            *JSValue
+	strHEAD             *JSValue
+	strOPTIONS          *JSValue
+	strOK               *JSValue
+	strContentType      *JSValue
+	strTextPlain        *JSValue
+	strApplicationJSON  *JSValue
+)
+
+// EnsureHTTPStrings initializes HTTP string singletons on first call.
+// Safe to call from any goroutine; no-op after first invocation.
+func EnsureHTTPStrings() {
+	httpStringsOnce.Do(func() {
+		mk := func(s string) *JSValue {
+			return &JSValue{typ: TypeString, strVal: s, prototype: StringPrototype, frozen: true}
+		}
+		strGET = mk("GET")
+		strPOST = mk("POST")
+		strPUT = mk("PUT")
+		strDELETE = mk("DELETE")
+		strPATCH = mk("PATCH")
+		strHEAD = mk("HEAD")
+		strOPTIONS = mk("OPTIONS")
+		strOK = mk("OK")
+		strContentType = mk("Content-Type")
+		strTextPlain = mk("text/plain")
+		strApplicationJSON = mk("application/json")
+	})
+}
+
+// NewString creates a string JSValue. Returns singletons for "" and common HTTP strings.
 func NewString(s string) *JSValue {
 	if s == "" {
 		return _emptyString
+	}
+	switch s {
+	case "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "OK":
+		EnsureHTTPStrings()
+		switch s {
+		case "GET":
+			return strGET
+		case "POST":
+			return strPOST
+		case "PUT":
+			return strPUT
+		case "DELETE":
+			return strDELETE
+		case "PATCH":
+			return strPATCH
+		case "HEAD":
+			return strHEAD
+		case "OPTIONS":
+			return strOPTIONS
+		case "OK":
+			return strOK
+		}
 	}
 	return &JSValue{typ: TypeString, strVal: s, prototype: StringPrototype}
 }

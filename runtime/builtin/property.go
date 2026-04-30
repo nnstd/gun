@@ -154,6 +154,28 @@ func (v *JSValue) lookupAndCache(name string, ext *jsValueExt, meta *jsValueMeta
 	return NewUndefined()
 }
 
+// GetOwn returns the value of an own property without walking the prototype
+// chain or consulting the inline cache. Returns (nil, false) if the property
+// does not exist on this object. Used by response writing where all fields are
+// known own properties.
+func (v *JSValue) GetOwn(name string) (*JSValue, bool) {
+	if v == nil {
+		return nil, false
+	}
+	props := v.propertiesOrNil()
+	if props == nil {
+		return nil, false
+	}
+	desc, ok := props.Get(name)
+	if !ok || desc == nil {
+		return nil, false
+	}
+	if desc.Get != nil {
+		return desc.Get(v), true
+	}
+	return desc.Value, true
+}
+
 // prototypeGet walks the prototype chain for an object with no own properties.
 func (v *JSValue) prototypeGet(name string) *JSValue {
 	var next *JSValue

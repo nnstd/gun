@@ -248,7 +248,7 @@ bootstrap() {
     log "Transpiling with Gun -O $level ..."
     mkdir -p "$BENCH_DIR/gun-o$level"
     $GUN_BIN transpile "$BENCH_DIR/server.ts" -o "$BENCH_DIR/gun-o$level" -O $level 2>&1 | tail -3
-    (cd "$BENCH_DIR/gun-o$level" && go mod tidy 2>&1 && go build -o bench-server . 2>&1)
+    (cd "$BENCH_DIR/gun-o$level" && go mod tidy 2>&1 && go build -ldflags="-s -w" -o bench-server . 2>&1)
     ok "Gun -O $level build done"
   done
 

@@ -27,8 +27,11 @@ func init() {
 	}
 	// Cap OS threads to reduce scheduling overhead. Most Gun workloads
 	// are bottlenecked on single-threaded JS execution, not parallelism.
-	if runtime.GOMAXPROCS(0) > 4 {
-		runtime.GOMAXPROCS(4)
+	// GOMAXPROCS=2 reduces Go runtime overhead (goroutine scheduling,
+	// cache coherency) while maintaining sufficient parallelism for
+	// fasthttp's accept loop + request handling.
+	if v := runtime.GOMAXPROCS(0); v > 2 {
+		runtime.GOMAXPROCS(2)
 	}
 }
 
@@ -118,6 +121,7 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 
 			if !promise.IsPromise(res) {
 				web.WriteResponseFastHTTP(ctx, res)
+				web.ReleaseFastHTTPRequest(req)
 				return
 			}
 
@@ -149,9 +153,11 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 			if errResult != nil {
 				ctx.SetStatusCode(500)
 				ctx.SetBodyString(errResult.String())
+				web.ReleaseFastHTTPRequest(req)
 				return
 			}
 			web.WriteResponseFastHTTP(ctx, result)
+			web.ReleaseFastHTTPRequest(req)
 		},
 	}
 

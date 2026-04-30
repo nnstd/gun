@@ -83,6 +83,9 @@ func init() {
 	// Populate numCache now that NumberPrototype is available.
 	initNumCache()
 
+	// HTTP string singletons are lazily initialized via EnsureHTTPStrings()
+	// on first access, avoiding init overhead for non-HTTP workloads.
+
 	// Global constructor objects are initialized in a separate init and may run
 	// before this one. Patch their prototype properties here so constructor
 	// property access is stable regardless of package init order.

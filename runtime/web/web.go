@@ -6,6 +6,7 @@ import (
 	"net/http"
 	neturl "net/url"
 	"strings"
+	"sync"
 
 	"github.com/valyala/fasthttp"
 
@@ -398,6 +399,22 @@ func WriteResponse(w http.ResponseWriter, value *jsvalue.JSValue) {
 	_, _ = io.WriteString(w, value.String())
 }
 
+// requestPool recycles request JSValue shells between HTTP requests.
+// Set() on an existing property updates desc.Value in-place (zero-alloc),
+// so pooled requests avoid ~10 allocations per request.
+var requestPool = sync.Pool{
+	New: func() any {
+		req := jsvalue.NewObjectWithPrototype(Request.Get("prototype"))
+		req.Set("url", jsvalue.NewString(""))
+		req.Set("method", jsvalue.NewString(""))
+		req.Set("headers", newHeadersValue(nil))
+		req.Set("body", jsvalue.NewString(""))
+		req.Set("bodyUsed", jsvalue.NewBool(false))
+		req.Set("raw", req)
+		return req
+	},
+}
+
 func RequestFromFastHTTP(ctx *fasthttp.RequestCtx) *jsvalue.JSValue {
 	body := string(ctx.PostBody())
 
@@ -413,7 +430,22 @@ func RequestFromFastHTTP(ctx *fasthttp.RequestCtx) *jsvalue.JSValue {
 
 	method := string(ctx.Method())
 
-	return newRequestValueWithPrototype(Request.Get("prototype"), url, method, Headers.Call(), body)
+	req := requestPool.Get().(*jsvalue.JSValue)
+	req.Set("url", jsvalue.NewString(url))
+	req.Set("method", jsvalue.NewString(method))
+	req.Set("headers", newHeadersValue(nil))
+	req.Set("body", jsvalue.NewString(body))
+	req.Set("bodyUsed", jsvalue.NewBool(false))
+	return req
+}
+
+// ReleaseFastHTTPRequest returns a request to the pool.
+// Must be called after the response is fully written.
+func ReleaseFastHTTPRequest(req *jsvalue.JSValue) {
+	if req == nil {
+		return
+	}
+	requestPool.Put(req)
 }
 
 func WriteResponseFastHTTP(ctx *fasthttp.RequestCtx, value *jsvalue.JSValue) {
@@ -422,23 +454,30 @@ func WriteResponseFastHTTP(ctx *fasthttp.RequestCtx, value *jsvalue.JSValue) {
 		return
 	}
 
-	if value.Get("status").TypeString() == "number" || value.Get("headers").TypeString() == "object" || value.Get("_bodyInit").TypeString() != "undefined" {
-		headers := value.Get("headers")
-		if headers != nil && headers.TypeString() == "object" {
-			for _, key := range headers.OwnKeys() {
-				ctx.Response.Header.Set(strings.Trim(key, "\""), headers.Get(key).String())
+	// Fast path: use GetOwn to skip prototype chain and inline cache
+	// overhead. Response objects always have these as own properties.
+	statusVal, hasStatus := value.GetOwn("status")
+	headersVal, hasHeaders := value.GetOwn("headers")
+	bodyInitVal, hasBodyInit := value.GetOwn("_bodyInit")
+
+	if hasStatus || hasHeaders || hasBodyInit {
+		if hasHeaders && headersVal != nil && headersVal.TypeString() == "object" {
+			for _, key := range headersVal.OwnKeys() {
+				ctx.Response.Header.Set(key, headersVal.Get(key).String())
 			}
 		}
-		status := int(value.Get("status").Number())
-		if status == 0 {
-			status = fasthttp.StatusOK
+		status := fasthttp.StatusOK
+		if hasStatus && statusVal != nil && statusVal.TypeString() == "number" {
+			status = int(statusVal.Number())
 		}
 		ctx.SetStatusCode(status)
-		body := value.Get("_bodyInit")
-		if body.TypeString() == "undefined" {
-			body = value.Get("body")
+		body := bodyInitVal
+		if !hasBodyInit || body == nil || body.TypeString() == "undefined" {
+			body, _ = value.GetOwn("body")
 		}
-		ctx.WriteString(body.String())
+		if body != nil {
+			ctx.WriteString(body.String())
+		}
 		return
 	}
 
