@@ -580,6 +580,11 @@ func findRequireImports(source []byte) []string {
 			if end < 0 {
 				break
 			}
+			afterLiteral := strings.TrimSpace(after[end+2:])
+			if !strings.HasPrefix(afterLiteral, ")") {
+				rest = after[end+2:]
+				continue
+			}
 			modPath := after[1 : end+1]
 			modPath = strings.TrimPrefix(modPath, "node:")
 			if !seen[modPath] {

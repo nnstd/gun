@@ -150,7 +150,7 @@ func CreateRequire(filename *jsvalue.JSValue) *jsvalue.JSValue {
 			if strings.HasSuffix(c, ".json") {
 				var v any
 				if json.Unmarshal(data, &v) == nil {
-					return jsvalue.From(v)
+					return jsonToJSValue(v)
 				}
 			}
 			return jsvalue.NewString(string(data))
@@ -183,6 +183,33 @@ func CreateRequire(filename *jsvalue.JSValue) *jsvalue.JSValue {
 	requireFn.Set("main", jsvalue.NewUndefined())
 
 	return requireFn
+}
+
+func jsonToJSValue(v any) *jsvalue.JSValue {
+	switch val := v.(type) {
+	case nil:
+		return jsvalue.NewNull()
+	case bool:
+		return jsvalue.NewBool(val)
+	case float64:
+		return jsvalue.NewNumber(val)
+	case string:
+		return jsvalue.NewString(val)
+	case []any:
+		elems := make([]*jsvalue.JSValue, len(val))
+		for i, elem := range val {
+			elems[i] = jsonToJSValue(elem)
+		}
+		return jsvalue.NewArray(elems...)
+	case map[string]any:
+		pairs := make([]any, 0, len(val)*2)
+		for key, elem := range val {
+			pairs = append(pairs, key, jsonToJSValue(elem))
+		}
+		return jsvalue.ObjectFrom(pairs...)
+	default:
+		return jsvalue.NewUndefined()
+	}
 }
 
 // AsJSValue returns a JSValue object representing the 'module' module.

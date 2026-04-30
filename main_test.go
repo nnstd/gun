@@ -89,6 +89,7 @@ console.log(data.hello + ":" + data.nums[1]);
 
 	bin := buildFixture(t, entry)
 	cmd := exec.Command(bin)
+	cmd.Env = append(os.Environ(), "GUN_ENTRY_SCRIPT="+entry)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -114,6 +115,7 @@ console.log(some + ":" + nums[1]);
 
 	bin := buildFixture(t, entry)
 	cmd := exec.Command(bin)
+	cmd.Env = append(os.Environ(), "GUN_ENTRY_SCRIPT="+entry)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -139,6 +141,7 @@ console.log(some + ":" + nested.value);
 
 	bin := buildFixture(t, entry)
 	cmd := exec.Command(bin)
+	cmd.Env = append(os.Environ(), "GUN_ENTRY_SCRIPT="+entry)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -147,6 +150,60 @@ console.log(some + ":" + nested.value);
 	}
 	if got := strings.TrimSpace(stdout.String()); got != "ok:yes" {
 		t.Fatalf("stdout mismatch: got %q want %q\nstderr:\n%s", got, "ok:yes", stderr.String())
+	}
+}
+
+func TestBuildInlineFixtureWithDynamicJSONRequire(t *testing.T) {
+	fixtureRoot := t.TempDir()
+	entry := filepath.Join(fixtureRoot, "entry.ts")
+	if err := os.WriteFile(entry, []byte(`const name = "data";
+const data = require("./" + name + ".json");
+console.log(data.some + ":" + data.nums[1] + ":" + data.empty);
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixtureRoot, "data.json"), []byte(`{"some":"ok","nums":[1,2,3],"empty":null}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildFixture(t, entry)
+	cmd := exec.Command(bin)
+	cmd.Env = append(os.Environ(), "GUN_ENTRY_SCRIPT="+entry)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "ok:2:null" {
+		t.Fatalf("stdout mismatch: got %q want %q\nstderr:\n%s", got, "ok:2:null", stderr.String())
+	}
+}
+
+func TestBuildInlineFixtureWithDynamicExtensionlessJSONRequire(t *testing.T) {
+	fixtureRoot := t.TempDir()
+	entry := filepath.Join(fixtureRoot, "entry.ts")
+	if err := os.WriteFile(entry, []byte(`const name = "config";
+const data = require("./" + name);
+console.log(data.enabled);
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixtureRoot, "config.json"), []byte(`{"enabled":true}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildFixture(t, entry)
+	cmd := exec.Command(bin)
+	cmd.Env = append(os.Environ(), "GUN_ENTRY_SCRIPT="+entry)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "true" {
+		t.Fatalf("stdout mismatch: got %q want %q\nstderr:\n%s", got, "true", stderr.String())
 	}
 }
 

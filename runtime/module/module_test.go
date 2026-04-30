@@ -1,6 +1,12 @@
 package module
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	jsvalue "github.com/nnstd/gun/runtime/builtin"
+)
 
 func TestDgramIsBuiltin(t *testing.T) {
 	if !IsBuiltin("dgram") {
@@ -26,5 +32,39 @@ func TestURLRegisteredInModuleRegistry(t *testing.T) {
 	}
 	if mod, ok := lookupRegistry("node:url"); !ok || mod == nil || mod.Get("URL") == nil {
 		t.Fatal("expected node:url in module registry")
+	}
+}
+
+func TestCreateRequireLoadsJSONAsJSValue(t *testing.T) {
+	dir := t.TempDir()
+	entry := filepath.Join(dir, "entry.js")
+	if err := os.WriteFile(filepath.Join(dir, "data.json"), []byte(`{"some":"ok","nums":[1,null,true],"nested":{"value":2}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	require := CreateRequire(jsvalue.NewString(entry))
+	data := require.Call(jsvalue.NewString("./data.json"))
+	if got := data.Get("some").String(); got != "ok" {
+		t.Fatalf("some = %q", got)
+	}
+	if data.Get("nums").Index(1).Type() != jsvalue.TypeNull {
+		t.Fatalf("nums[1] should be null")
+	}
+	if got := data.Get("nested").Get("value").Number(); got != 2 {
+		t.Fatalf("nested.value = %v", got)
+	}
+}
+
+func TestCreateRequireLoadsExtensionlessJSON(t *testing.T) {
+	dir := t.TempDir()
+	entry := filepath.Join(dir, "entry.js")
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"enabled":true}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	require := CreateRequire(jsvalue.NewString(entry))
+	data := require.Call(jsvalue.NewString("./config"))
+	if !data.Get("enabled").Bool() {
+		t.Fatal("expected enabled=true")
 	}
 }
