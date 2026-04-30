@@ -57,6 +57,7 @@ type GithubStarsResponse = InferResponseType<
 >;
 
 const INSTALL_COMMANDS = {
+  curl: "curl -fsSL https://gun.nnstd.dev/install | bash",
   npm: "npm i -g gun-transpiler",
   bun: "bun add -g gun-transpiler",
   yarn: "yarn global add gun-transpiler",
@@ -74,10 +75,17 @@ function renderInstallCommand(command: string) {
       className = "text-amber-300";
     } else if (part.startsWith("-")) {
       className = "text-brand-200";
-    } else if (part === "gun-transpiler") {
+    } else if (part === "gun-transpiler" || part === "gun.nnstd.dev/install") {
       className = "text-green-300";
-    } else if (part === "i" || part === "add" || part === "global") {
+    } else if (
+      part === "i" ||
+      part === "add" ||
+      part === "global" ||
+      part === "|"
+    ) {
       className = "text-cyan-300";
+    } else if (part === "bash") {
+      className = "text-amber-200";
     }
 
     return (
@@ -268,7 +276,7 @@ export function SectionLabel({ children }: { children: ReactNode }) {
 
 export function InstallTabs({ size = "md" }: { size?: InstallTabSize }) {
   const [activeTab, setActiveTab] =
-    useState<keyof typeof INSTALL_COMMANDS>("npm");
+    useState<keyof typeof INSTALL_COMMANDS>("curl");
   const [copied, setCopied] = useState(false);
   const command = INSTALL_COMMANDS[activeTab];
   const large = size === "lg";
@@ -290,7 +298,7 @@ export function InstallTabs({ size = "md" }: { size?: InstallTabSize }) {
         large && "max-w-115",
       )}
     >
-      <div className="grid grid-cols-4 border-b border-white/10 bg-brand-500/10">
+      <div className="grid grid-cols-5 border-b border-white/10 bg-brand-500/10">
         {(
           Object.keys(INSTALL_COMMANDS) as Array<keyof typeof INSTALL_COMMANDS>
         ).map((tab) => (

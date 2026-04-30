@@ -1,0 +1,223 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Gun install script
+# Usage: curl -fsSL https://gun.nnstd.dev/install | bash
+#        curl -fsSL https://gun.nnstd.dev/install | bash -s -- v0.1.0
+
+platform=$(uname -ms)
+
+if [[ ${OS:-} = Windows_NT ]]; then
+  echo "error: Windows is not supported by this script. Use PowerShell or download from https://github.com/nnstd/gun/releases" >&2
+  exit 1
+fi
+
+# Colors
+Color_Off=''
+Red=''
+Green=''
+Dim=''
+Bold_Green=''
+Bold_White=''
+
+if [[ -t 1 ]]; then
+  Color_Off='\033[0m'
+  Red='\033[0;31m'
+  Green='\033[0;32m'
+  Dim='\033[0;2m'
+  Bold_Green='\033[1;32m'
+  Bold_White='\033[1m'
+fi
+
+error() {
+  echo -e "${Red}error${Color_Off}: $*" >&2
+  exit 1
+}
+
+info() {
+  echo -e "${Dim}$* ${Color_Off}"
+}
+
+info_bold() {
+  echo -e "${Bold_White}$* ${Color_Off}"
+}
+
+success() {
+  echo -e "${Green}$* ${Color_Off}"
+}
+
+command -v unzip >/dev/null ||
+  error 'unzip is required to install gun'
+
+if [[ $# -gt 1 ]]; then
+  error 'Too many arguments, only 1 is allowed. Specify a tag (e.g. "v0.1.0")'
+fi
+
+# Detect target
+case "$platform" in
+  'Darwin x86_64')
+    target=darwin-amd64
+    ;;
+  'Darwin arm64')
+    target=darwin-arm64
+    ;;
+  'Linux aarch64' | 'Linux arm64')
+    target=linux-arm64
+    ;;
+  'Linux x86_64' | *)
+    target=linux-amd64
+    ;;
+esac
+
+# AVX2 baseline fallback
+case "$target" in
+  *-amd64)
+    if [[ "$(uname)" = "Darwin" ]]; then
+      if [[ $(sysctl -a 2>/dev/null | grep machdep.cpu | grep AVX2) == '' ]]; then
+        target="${target}-baseline"
+        info "AVX2 not detected, using baseline build"
+      fi
+    elif [[ "$(uname)" = "Linux" ]]; then
+      if [[ $(grep -c avx2 /proc/cpuinfo 2>/dev/null || echo 0) -eq 0 ]]; then
+        target="${target}-baseline"
+        info "AVX2 not detected, using baseline build"
+      fi
+    fi
+    ;;
+esac
+
+GITHUB=${GITHUB:-"https://github.com"}
+github_repo="$GITHUB/nnstd/gun"
+
+ext=""
+[[ "$target" == windows-* ]] && ext=".exe"
+
+# Download URL
+if [[ $# -eq 0 ]]; then
+  release_uri="$github_repo/releases/latest/download/gun-${target}${ext}"
+else
+  release_uri="$github_repo/releases/download/$1/gun-${target}${ext}"
+fi
+
+install_dir=${GUN_INSTALL:-$HOME/.gun}
+bin_dir=$install_dir/bin
+exe=$bin_dir/gun
+
+if [[ ! -d $bin_dir ]]; then
+  mkdir -p "$bin_dir" ||
+    error "Failed to create install directory \"$bin_dir\""
+fi
+
+info "Downloading gun for $target..."
+
+curl --fail --location --progress-bar --output "$exe" "$release_uri" ||
+  error "Failed to download gun from \"$release_uri\""
+
+chmod +x "$exe" ||
+  error 'Failed to set permissions on gun executable'
+
+tildify() {
+  if [[ $1 = "$HOME"/* ]]; then
+    local replacement='~/'
+    echo "${1/$HOME\//$replacement}"
+  else
+    echo "$1"
+  fi
+}
+
+success "Gun was installed successfully to $Bold_Green$(tildify "$exe")"
+
+if command -v gun >/dev/null; then
+  echo "Run 'gun --help' to get started"
+  exit
+fi
+
+refresh_command=''
+tilde_bin_dir=$(tildify "$bin_dir")
+
+echo
+
+case $(basename "$SHELL") in
+  fish)
+    fish_config=$HOME/.config/fish/config.fish
+    commands=(
+      "set --export GUN_INSTALL $install_dir"
+      "set --export PATH $bin_dir \$PATH"
+    )
+    if [[ -w $fish_config ]]; then
+      {
+        echo -e '\n# gun'
+        for cmd in "${commands[@]}"; do echo "$cmd"; done
+      } >> "$fish_config"
+      info "Added \"$tilde_bin_dir\" to \$PATH in \"$(tildify "$fish_config")\""
+      refresh_command="source $(tildify "$fish_config")"
+    else
+      echo "Manually add the directory to $(tildify "$fish_config") (or similar):"
+      for cmd in "${commands[@]}"; do info_bold " $cmd"; done
+    fi
+    ;;
+  zsh)
+    zsh_config=$HOME/.zshrc
+    commands=(
+      "export GUN_INSTALL=\"$install_dir\""
+      "export PATH=\"$bin_dir:\$PATH\""
+    )
+    if [[ -w $zsh_config ]]; then
+      {
+        echo -e '\n# gun'
+        for cmd in "${commands[@]}"; do echo "$cmd"; done
+      } >> "$zsh_config"
+      info "Added \"$tilde_bin_dir\" to \$PATH in \"$(tildify "$zsh_config")\""
+      refresh_command="exec $SHELL"
+    else
+      echo "Manually add the directory to $(tildify "$zsh_config") (or similar):"
+      for cmd in "${commands[@]}"; do info_bold " $cmd"; done
+    fi
+    ;;
+  bash)
+    bash_configs=(
+      "$HOME/.bash_profile"
+      "$HOME/.bashrc"
+    )
+    if [[ -n ${XDG_CONFIG_HOME:-} ]]; then
+      bash_configs+=(
+        "$XDG_CONFIG_HOME/.bash_profile"
+        "$XDG_CONFIG_HOME/.bashrc"
+      )
+    fi
+    commands=(
+      "export GUN_INSTALL=\"$install_dir\""
+      "export PATH=\"$bin_dir:\$PATH\""
+    )
+    set_manually=true
+    for bash_config in "${bash_configs[@]}"; do
+      if [[ -w $bash_config ]]; then
+        {
+          echo -e '\n# gun'
+          for cmd in "${commands[@]}"; do echo "$cmd"; done
+        } >> "$bash_config"
+        info "Added \"$tilde_bin_dir\" to \$PATH in \"$(tildify "$bash_config")\""
+        refresh_command="source $bash_config"
+        set_manually=false
+        break
+      fi
+    done
+    if [[ $set_manually = true ]]; then
+      echo "Manually add the directory to ~/.bashrc (or similar):"
+      for cmd in "${commands[@]}"; do info_bold " $cmd"; done
+    fi
+    ;;
+  *)
+    echo 'Manually add the directory to ~/.bashrc (or similar):'
+    info_bold " export GUN_INSTALL=\"$install_dir\""
+    info_bold " export PATH=\"$bin_dir:\$PATH\""
+    ;;
+esac
+
+echo
+info "To get started, run:"
+echo
+if [[ -n $refresh_command ]]; then
+  info_bold " $refresh_command"
+fi
+info_bold " gun --help"
