@@ -1222,6 +1222,8 @@ func (l *Lowerer) resolveModule(modulePath string) (goImportPath, goPkgName stri
 		clean = strings.TrimSuffix(clean, ".js")
 		clean = strings.TrimSuffix(clean, ".mjs")
 		clean = strings.TrimSuffix(clean, ".json")
+		clean = strings.TrimSuffix(clean, ".yaml")
+		clean = strings.TrimSuffix(clean, ".yml")
 		pkgName := filepath.Base(clean)
 		modName := l.moduleName
 		if modName == "" {

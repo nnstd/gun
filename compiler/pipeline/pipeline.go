@@ -19,6 +19,7 @@ import (
 	"github.com/nnstd/gun/compiler/passes"
 	"github.com/nnstd/gun/compiler/ssa"
 	"github.com/nnstd/gun/compiler/symbol"
+	"github.com/nnstd/gun/compiler/yamlmodule"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
@@ -168,14 +169,14 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 	namespaceAliases := make(map[string]string)
 
 	for name, source := range files {
-		if isJSONModule(name) {
-			mod, err := jsonmodule.Parse(source)
+		if isDataModule(name) {
+			mod, err := parseDataModule(name, source)
 			if err != nil {
-				return nil, fmt.Errorf("parse json %s: %w", name, err)
+				return nil, err
 			}
 			exports := []backend.CrossFileExport{{OriginalName: "default", GoName: "Default", IsJSValue: true}}
 			names := []string{"Default"}
-			for _, exp := range mod.Exports {
+			for _, exp := range mod {
 				exports = append(exports, backend.CrossFileExport{OriginalName: exp.OriginalName, GoName: exp.GoName, IsJSValue: true})
 				names = append(names, exp.GoName)
 			}
@@ -377,7 +378,7 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 		goFiles[name] = backend.LowerWithExportsAndCPUProfile(hirMod, p.Ctx, moduleName, true, crossExports, reservedNames, importNameMap, exportAliases[name], localAliases[name], namespaceAliases[name], exportAliases[name], cpuProfile, p.OptLevel)
 	}
 	for name, source := range files {
-		if !isJSONModule(name) {
+		if !isDataModule(name) {
 			continue
 		}
 		defaultName := exportAliases[name]["default"]
@@ -390,7 +391,7 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 				namedAliases[originalName] = alias
 			}
 		}
-		out, err := jsonmodule.Compile(source, pkgName, defaultName, namedAliases)
+		out, err := compileDataModule(name, source, pkgName, defaultName, namedAliases)
 		if err != nil {
 			return nil, fmt.Errorf("compile %s: %w", name, err)
 		}
@@ -432,7 +433,7 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 		results[outName] = out
 	}
 	for name, out := range results {
-		if !isJSONModule(name) {
+		if !isDataModule(name) {
 			continue
 		}
 		delete(results, name)
@@ -444,6 +445,50 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 
 func isJSONModule(name string) bool {
 	return strings.EqualFold(filepath.Ext(name), ".json")
+}
+
+func isYAMLModule(name string) bool {
+	ext := filepath.Ext(name)
+	return strings.EqualFold(ext, ".yaml") || strings.EqualFold(ext, ".yml")
+}
+
+func isDataModule(name string) bool {
+	return isJSONModule(name) || isYAMLModule(name)
+}
+
+type dataExport struct {
+	OriginalName string
+	GoName       string
+}
+
+func parseDataModule(name string, source []byte) ([]dataExport, error) {
+	if isYAMLModule(name) {
+		mod, err := yamlmodule.Parse(source)
+		if err != nil {
+			return nil, fmt.Errorf("parse yaml %s: %w", name, err)
+		}
+		out := make([]dataExport, len(mod.Exports))
+		for i, exp := range mod.Exports {
+			out[i] = dataExport{OriginalName: exp.OriginalName, GoName: exp.GoName}
+		}
+		return out, nil
+	}
+	mod, err := jsonmodule.Parse(source)
+	if err != nil {
+		return nil, fmt.Errorf("parse json %s: %w", name, err)
+	}
+	out := make([]dataExport, len(mod.Exports))
+	for i, exp := range mod.Exports {
+		out[i] = dataExport{OriginalName: exp.OriginalName, GoName: exp.GoName}
+	}
+	return out, nil
+}
+
+func compileDataModule(name string, source []byte, pkgName, defaultName string, namedAliases map[string]string) ([]byte, error) {
+	if isYAMLModule(name) {
+		return yamlmodule.Compile(source, pkgName, defaultName, namedAliases)
+	}
+	return jsonmodule.Compile(source, pkgName, defaultName, namedAliases)
 }
 
 // fileDefaultName generates a file-specific name for renamed default exports.

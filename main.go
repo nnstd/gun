@@ -11,6 +11,7 @@ import (
 
 	"github.com/nnstd/gun/compiler"
 	"github.com/nnstd/gun/compiler/jsonmodule"
+	"github.com/nnstd/gun/compiler/yamlmodule"
 
 	"github.com/alecthomas/kong"
 )
@@ -427,7 +428,7 @@ func findRelativeImports(source []byte) []string {
 	return imports
 }
 
-// resolveImportFile resolves a relative import path like ./foo to an actual .ts/.js/.json file.
+// resolveImportFile resolves a relative import path like ./foo to an actual .ts/.js/.json/.yaml file.
 // Tries extensions in Node/Bun resolution order.
 func resolveImportFile(importPath, fromDir string) (string, error) {
 	clean := importPath
@@ -435,18 +436,20 @@ func resolveImportFile(importPath, fromDir string) (string, error) {
 	clean = strings.TrimSuffix(clean, ".js")
 	clean = strings.TrimSuffix(clean, ".mjs")
 	clean = strings.TrimSuffix(clean, ".json")
+	clean = strings.TrimSuffix(clean, ".yaml")
+	clean = strings.TrimSuffix(clean, ".yml")
 
 	base := filepath.Join(fromDir, clean)
 
 	// Try file extensions in order
-	for _, ext := range []string{".ts", ".js", ".mjs", ".json"} {
+	for _, ext := range []string{".ts", ".js", ".mjs", ".json", ".yaml", ".yml"} {
 		if _, err := os.Stat(base + ext); err == nil {
 			return base + ext, nil
 		}
 	}
 
 	// Try index files in directory
-	for _, idx := range []string{"index.ts", "index.js", "index.json"} {
+	for _, idx := range []string{"index.ts", "index.js", "index.json", "index.yaml", "index.yml"} {
 		candidate := filepath.Join(base, idx)
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate, nil
@@ -478,7 +481,7 @@ func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose b
 	if err != nil {
 		return err
 	}
-	if isJSONFile(tsFile) {
+	if isDataModuleFile(tsFile) {
 		return nil
 	}
 
@@ -522,8 +525,8 @@ func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose b
 		}
 
 		outFile := filepath.Join(outDir, filepath.Base(trimModuleExt(resolved))+".go")
-		if isJSONFile(resolved) {
-			if err := transpileJSONModuleFile(resolved, outFile, pkgName); err != nil {
+		if isDataModuleFile(resolved) {
+			if err := transpileDataModuleFile(resolved, outFile, pkgName); err != nil {
 				return err
 			}
 		} else if err := transpileFile(resolved, outFile, pkgName, moduleName, verbose, false, optLevel, opts); err != nil {
@@ -602,11 +605,22 @@ func trimModuleExt(path string) string {
 	path = strings.TrimSuffix(path, ".js")
 	path = strings.TrimSuffix(path, ".mjs")
 	path = strings.TrimSuffix(path, ".json")
+	path = strings.TrimSuffix(path, ".yaml")
+	path = strings.TrimSuffix(path, ".yml")
 	return path
 }
 
 func isJSONFile(path string) bool {
 	return strings.EqualFold(filepath.Ext(path), ".json")
+}
+
+func isYAMLFile(path string) bool {
+	ext := filepath.Ext(path)
+	return strings.EqualFold(ext, ".yaml") || strings.EqualFold(ext, ".yml")
+}
+
+func isDataModuleFile(path string) bool {
+	return isJSONFile(path) || isYAMLFile(path)
 }
 
 func transpileJSONModuleFile(inputPath, outputPath, pkgName string) error {
@@ -622,6 +636,28 @@ func transpileJSONModuleFile(inputPath, outputPath, pkgName string) error {
 		return fmt.Errorf("compile json %s: %w", inputPath, err)
 	}
 	return os.WriteFile(outputPath, source, 0644)
+}
+
+func transpileYAMLModuleFile(inputPath, outputPath, pkgName string) error {
+	data, err := os.ReadFile(inputPath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", inputPath, err)
+	}
+	if _, err := yamlmodule.Parse(data); err != nil {
+		return fmt.Errorf("parse yaml %s: %w", inputPath, err)
+	}
+	source, err := yamlmodule.Compile(data, pkgName, "Default", nil)
+	if err != nil {
+		return fmt.Errorf("compile yaml %s: %w", inputPath, err)
+	}
+	return os.WriteFile(outputPath, source, 0644)
+}
+
+func transpileDataModuleFile(inputPath, outputPath, pkgName string) error {
+	if isYAMLFile(inputPath) {
+		return transpileYAMLModuleFile(inputPath, outputPath, pkgName)
+	}
+	return transpileJSONModuleFile(inputPath, outputPath, pkgName)
 }
 
 // findNodeModuleImports scans TS/JS source for non-relative, non-known imports.
@@ -894,7 +930,7 @@ func collectAllSourceFiles(entryFile string) []string {
 		}
 		seen[abs] = true
 		files = append(files, abs)
-		if isJSONFile(tsFile) {
+		if isDataModuleFile(tsFile) {
 			return
 		}
 
@@ -926,7 +962,7 @@ func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName
 	var newSourceFiles []string
 
 	for _, srcFile := range sourceFiles {
-		if isJSONFile(srcFile) {
+		if isDataModuleFile(srcFile) {
 			continue
 		}
 		source, err := os.ReadFile(srcFile)
@@ -1006,7 +1042,7 @@ func transpileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string,
 	visited := map[string]bool{absEntry: true}
 	var discover func(string) error
 	discover = func(tsFile string) error {
-		if isJSONFile(tsFile) {
+		if isDataModuleFile(tsFile) {
 			return nil
 		}
 		src, err := os.ReadFile(tsFile)

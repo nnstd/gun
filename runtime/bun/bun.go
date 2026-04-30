@@ -4,17 +4,21 @@ import (
 	stdErrors "errors"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"runtime"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"syscall"
 
+	"github.com/goccy/go-yaml"
 	"github.com/valyala/fasthttp"
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
 	error "github.com/nnstd/gun/runtime/builtin/error"
 	"github.com/nnstd/gun/runtime/eventloop"
+	"github.com/nnstd/gun/runtime/module"
 	"github.com/nnstd/gun/runtime/promise"
 	"github.com/nnstd/gun/runtime/web"
 )
@@ -40,6 +44,7 @@ var (
 
 	AsJSValue = func() *jsvalue.JSValue {
 		obj := jsvalue.NewObject()
+		obj.Set("YAML", YAMLAsJSValue())
 		obj.Set("serve", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 			defer func() {
 				if r := recover(); r != nil {
@@ -57,6 +62,97 @@ var (
 		return obj
 	}()
 )
+
+func YAMLAsJSValue() *jsvalue.JSValue {
+	obj := jsvalue.NewObject()
+	obj.Set("parse", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		text := ""
+		if len(args) > 0 && args[0] != nil {
+			text = args[0].String()
+		}
+		var value any
+		if err := yaml.Unmarshal([]byte(text), &value); err != nil {
+			panic(error.SyntaxError.Call(jsvalue.NewString(err.Error())))
+		}
+		return module.DataToJSValue(module.NormalizeYAMLValue(value))
+	}))
+	obj.Set("stringify", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		var input *jsvalue.JSValue
+		if len(args) > 0 {
+			input = args[0]
+		}
+		opts := []yaml.EncodeOption{}
+		if len(args) < 3 || args[2] == nil || args[2].TypeString() == "undefined" || args[2].TypeString() == "null" {
+			opts = append(opts, yaml.Flow(true))
+		} else {
+			opts = append(opts, yaml.Indent(yamlSpace(args[2])))
+		}
+		out, err := yaml.MarshalWithOptions(jsValueToNative(input), opts...)
+		if err != nil {
+			panic(error.Error.Call(jsvalue.NewString(err.Error())))
+		}
+		return jsvalue.NewString(strings.TrimRight(string(out), "\n"))
+	}))
+	return obj
+}
+
+func yamlSpace(space *jsvalue.JSValue) int {
+	switch space.TypeString() {
+	case "number":
+		n := int(math.Trunc(space.Number()))
+		if n < 0 {
+			return 0
+		}
+		if n > 10 {
+			return 10
+		}
+		return n
+	case "string":
+		n := len([]rune(space.String()))
+		if n > 10 {
+			return 10
+		}
+		return n
+	default:
+		return 0
+	}
+}
+
+func jsValueToNative(v *jsvalue.JSValue) any {
+	if v == nil {
+		return nil
+	}
+	if v.Type() == jsvalue.TypeObject {
+		if raw := v.MethodCall("valueOf"); raw != nil && raw != v && raw.Type() != jsvalue.TypeObject && raw.Type() != jsvalue.TypeFunction {
+			return jsValueToNative(raw)
+		}
+	}
+	switch v.TypeString() {
+	case "string":
+		return v.String()
+	case "number":
+		return v.Number()
+	case "boolean":
+		return v.Bool()
+	case "null", "undefined":
+		return nil
+	case "object":
+		if v.IsArray() {
+			arr := make([]any, v.Len())
+			for i := 0; i < v.Len(); i++ {
+				arr[i] = jsValueToNative(v.Index(i))
+			}
+			return arr
+		}
+		m := make(map[string]any)
+		for _, key := range v.OwnKeys() {
+			m[key] = jsValueToNative(v.Get(key))
+		}
+		return m
+	default:
+		return v.String()
+	}
+}
 
 func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 	if options == nil {

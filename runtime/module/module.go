@@ -2,11 +2,13 @@ package module
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
+	"github.com/goccy/go-yaml"
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
 )
 
@@ -140,7 +142,7 @@ func CreateRequire(filename *jsvalue.JSValue) *jsvalue.JSValue {
 		}
 		candidates := []string{target}
 		if filepath.Ext(target) == "" {
-			candidates = append(candidates, target+".json", filepath.Join(target, "index.json"))
+			candidates = append(candidates, target+".json", target+".yaml", target+".yml", filepath.Join(target, "index.json"), filepath.Join(target, "index.yaml"), filepath.Join(target, "index.yml"))
 		}
 		for _, c := range candidates {
 			data, err := os.ReadFile(c)
@@ -150,7 +152,13 @@ func CreateRequire(filename *jsvalue.JSValue) *jsvalue.JSValue {
 			if strings.HasSuffix(c, ".json") {
 				var v any
 				if json.Unmarshal(data, &v) == nil {
-					return jsonToJSValue(v)
+					return DataToJSValue(v)
+				}
+			}
+			if hasYAMLExt(c) {
+				var v any
+				if yaml.Unmarshal(data, &v) == nil {
+					return DataToJSValue(NormalizeYAMLValue(v))
 				}
 			}
 			return jsvalue.NewString(string(data))
@@ -185,12 +193,34 @@ func CreateRequire(filename *jsvalue.JSValue) *jsvalue.JSValue {
 	return requireFn
 }
 
-func jsonToJSValue(v any) *jsvalue.JSValue {
+func DataToJSValue(v any) *jsvalue.JSValue {
 	switch val := v.(type) {
 	case nil:
 		return jsvalue.NewNull()
 	case bool:
 		return jsvalue.NewBool(val)
+	case int:
+		return jsvalue.NewNumber(float64(val))
+	case int8:
+		return jsvalue.NewNumber(float64(val))
+	case int16:
+		return jsvalue.NewNumber(float64(val))
+	case int32:
+		return jsvalue.NewNumber(float64(val))
+	case int64:
+		return jsvalue.NewNumber(float64(val))
+	case uint:
+		return jsvalue.NewNumber(float64(val))
+	case uint8:
+		return jsvalue.NewNumber(float64(val))
+	case uint16:
+		return jsvalue.NewNumber(float64(val))
+	case uint32:
+		return jsvalue.NewNumber(float64(val))
+	case uint64:
+		return jsvalue.NewNumber(float64(val))
+	case float32:
+		return jsvalue.NewNumber(float64(val))
 	case float64:
 		return jsvalue.NewNumber(val)
 	case string:
@@ -198,17 +228,47 @@ func jsonToJSValue(v any) *jsvalue.JSValue {
 	case []any:
 		elems := make([]*jsvalue.JSValue, len(val))
 		for i, elem := range val {
-			elems[i] = jsonToJSValue(elem)
+			elems[i] = DataToJSValue(elem)
 		}
 		return jsvalue.NewArray(elems...)
 	case map[string]any:
 		pairs := make([]any, 0, len(val)*2)
 		for key, elem := range val {
-			pairs = append(pairs, key, jsonToJSValue(elem))
+			pairs = append(pairs, key, DataToJSValue(elem))
 		}
 		return jsvalue.ObjectFrom(pairs...)
 	default:
 		return jsvalue.NewUndefined()
+	}
+}
+
+func hasYAMLExt(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".yaml" || ext == ".yml"
+}
+
+func NormalizeYAMLValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, elem := range v {
+			out[key] = NormalizeYAMLValue(elem)
+		}
+		return out
+	case map[any]any:
+		out := make(map[string]any, len(v))
+		for key, elem := range v {
+			out[fmt.Sprint(key)] = NormalizeYAMLValue(elem)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, elem := range v {
+			out[i] = NormalizeYAMLValue(elem)
+		}
+		return out
+	default:
+		return value
 	}
 }
 

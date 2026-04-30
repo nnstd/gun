@@ -68,3 +68,37 @@ func TestCreateRequireLoadsExtensionlessJSON(t *testing.T) {
 		t.Fatal("expected enabled=true")
 	}
 }
+
+func TestCreateRequireLoadsYAMLAsJSValue(t *testing.T) {
+	dir := t.TempDir()
+	entry := filepath.Join(dir, "entry.js")
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("some: ok\nnums: [1, null, true]\nnested:\n  value: 2\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	require := CreateRequire(jsvalue.NewString(entry))
+	data := require.Call(jsvalue.NewString("./config.yaml"))
+	if got := data.Get("some").String(); got != "ok" {
+		t.Fatalf("some = %q", got)
+	}
+	if data.Get("nums").Index(1).Type() != jsvalue.TypeNull {
+		t.Fatalf("nums[1] should be null")
+	}
+	if got := data.Get("nested").Get("value").Number(); got != 2 {
+		t.Fatalf("nested.value = %v", got)
+	}
+}
+
+func TestCreateRequireLoadsExtensionlessYAML(t *testing.T) {
+	dir := t.TempDir()
+	entry := filepath.Join(dir, "entry.js")
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("enabled: true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	require := CreateRequire(jsvalue.NewString(entry))
+	data := require.Call(jsvalue.NewString("./config"))
+	if !data.Get("enabled").Bool() {
+		t.Fatal("expected enabled=true")
+	}
+}

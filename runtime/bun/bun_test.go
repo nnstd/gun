@@ -66,6 +66,55 @@ func TestServeReturnsServerObject(t *testing.T) {
 	server.MethodCall("stop")
 }
 
+func TestYAMLParse(t *testing.T) {
+	parsed := AsJSValue.Get("YAML").Get("parse").Call(jsvalue.NewString("name: Jane\nhobbies:\n  - reading\n  - coding\n"))
+	if got := parsed.Get("name").String(); got != "Jane" {
+		t.Fatalf("name = %q", got)
+	}
+	if got := parsed.Get("hobbies").Index(1).String(); got != "coding" {
+		t.Fatalf("hobbies[1] = %q", got)
+	}
+}
+
+func TestYAMLParseInvalidThrowsSyntaxError(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic")
+		}
+		err, ok := r.(*jsvalue.JSValue)
+		if !ok {
+			t.Fatalf("panic = %T, want *jsvalue.JSValue", r)
+		}
+		if got := err.Get("name").String(); got != "SyntaxError" {
+			t.Fatalf("error name = %q, want SyntaxError", got)
+		}
+	}()
+	AsJSValue.Get("YAML").Get("parse").Call(jsvalue.NewString("invalid: yaml: content:"))
+}
+
+func TestYAMLStringifyFlowStyleByDefault(t *testing.T) {
+	obj := jsvalue.ObjectFrom(
+		"abc", jsvalue.NewString("def"),
+		"num", jsvalue.NewNumber(123),
+	)
+	got := AsJSValue.Get("YAML").Get("stringify").Call(obj).String()
+	if !strings.Contains(got, "{") || !strings.Contains(got, "abc: def") || !strings.Contains(got, "num: 123") {
+		t.Fatalf("unexpected flow YAML: %q", got)
+	}
+}
+
+func TestYAMLStringifyBlockStyleWithSpace(t *testing.T) {
+	obj := jsvalue.ObjectFrom(
+		"abc", jsvalue.NewString("def"),
+		"nested", jsvalue.ObjectFrom("num", jsvalue.NewNumber(123)),
+	)
+	got := AsJSValue.Get("YAML").Get("stringify").Call(obj, jsvalue.NewNull(), jsvalue.NewNumber(2)).String()
+	if !strings.Contains(got, "abc: def") || !strings.Contains(got, "\nnested:\n  num: 123") {
+		t.Fatalf("unexpected block YAML: %q", got)
+	}
+}
+
 func TestWriteResponseFromFetchResult(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil)

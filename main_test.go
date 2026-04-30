@@ -127,6 +127,67 @@ console.log(some + ":" + nums[1]);
 	}
 }
 
+func TestBuildInlineFixtureWithYAMLNamedImport(t *testing.T) {
+	fixtureRoot := t.TempDir()
+	entry := filepath.Join(fixtureRoot, "entry.ts")
+	if err := os.WriteFile(entry, []byte(`import config, { some, nums } from "./file.yaml";
+console.log(config.nested.value + ":" + some + ":" + nums[1]);
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixtureRoot, "file.yaml"), []byte(`some: ok
+nums:
+  - 1
+  - 2
+  - 3
+nested:
+  value: yes
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildFixture(t, entry)
+	cmd := exec.Command(bin)
+	cmd.Env = append(os.Environ(), "GUN_ENTRY_SCRIPT="+entry)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "yes:ok:2" {
+		t.Fatalf("stdout mismatch: got %q want %q\nstderr:\n%s", got, "yes:ok:2", stderr.String())
+	}
+}
+
+func TestBuildInlineFixtureWithYMLRequire(t *testing.T) {
+	fixtureRoot := t.TempDir()
+	entry := filepath.Join(fixtureRoot, "entry.ts")
+	if err := os.WriteFile(entry, []byte(`const config = require("./file.yml");
+console.log(config.some + ":" + config.nums[2]);
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixtureRoot, "file.yml"), []byte(`some: ok
+nums: [1, 2, 3]
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := buildFixture(t, entry)
+	cmd := exec.Command(bin)
+	cmd.Env = append(os.Environ(), "GUN_ENTRY_SCRIPT="+entry)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "ok:3" {
+		t.Fatalf("stdout mismatch: got %q want %q\nstderr:\n%s", got, "ok:3", stderr.String())
+	}
+}
+
 func TestBuildInlineFixtureWithJSONDestructuredRequire(t *testing.T) {
 	fixtureRoot := t.TempDir()
 	entry := filepath.Join(fixtureRoot, "entry.ts")
