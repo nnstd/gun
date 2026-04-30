@@ -15,6 +15,7 @@ import (
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
 	jserror "github.com/nnstd/gun/runtime/builtin/error"
 	"github.com/nnstd/gun/runtime/internal/tinycc"
+	"github.com/nnstd/gun/runtime/promise"
 )
 
 const (
@@ -238,7 +239,7 @@ func ccSource(v *jsvalue.JSValue) string {
 		return ""
 	}
 	if text := v.Get("text"); text != nil && text.TypeString() == "function" {
-		return text.Call().String()
+		return promise.Await(v.MethodCall("text")).String()
 	}
 	return v.String()
 }

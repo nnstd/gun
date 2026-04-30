@@ -6,6 +6,7 @@ import (
 	"unsafe"
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
+	"github.com/nnstd/gun/runtime/promise"
 )
 
 func TestExportsBunFFISurface(t *testing.T) {
@@ -29,6 +30,16 @@ func TestCCCompilesAndLinksSymbol(t *testing.T) {
 	defer lib.MethodCall("close")
 	if got := lib.Get("symbols").Get("add").Call(jsvalue.NewNumber(2), jsvalue.NewNumber(5)).Number(); got != 7 {
 		t.Fatalf("cc add(2, 5) = %v", got)
+	}
+}
+
+func TestCCSourceAwaitsThisBoundTextMethod(t *testing.T) {
+	source := jsvalue.ObjectFrom("_source", jsvalue.NewString("int seven(void) { return 7; }"))
+	source.Set("text", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		return promise.Promise.Get("resolve").Call(args[0].Get("_source"))
+	}).MarkAsMethod())
+	if got := ccSource(source); got != "int seven(void) { return 7; }" {
+		t.Fatalf("ccSource() = %q", got)
 	}
 }
 

@@ -65,7 +65,7 @@ func TestRegisterDefaultBuiltinsIncludesURLGlobals(t *testing.T) {
 	ctx := tcontext.New()
 	RegisterDefaultBuiltins(ctx)
 
-	for _, name := range []string{"URL", "URLSearchParams"} {
+	for _, name := range []string{"URL", "URLSearchParams", "FormData"} {
 		if !ctx.IsKnownGlobal(name) {
 			t.Fatalf("expected %s to be a known global", name)
 		}

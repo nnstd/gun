@@ -537,6 +537,14 @@ func TestRoundTripObjectDestructuring(t *testing.T) {
 	assertContains(t, out, `.Get("b")`)
 }
 
+func TestRoundTripTopLevelObjectDestructuring(t *testing.T) {
+	out := lowerTS(t, `const { symbols } = cc({ symbols: { show_window: {} } }); symbols.show_window();`)
+	assertContains(t, out, `var symbols *jsvalue.JSValue`)
+	assertContains(t, out, `func init()`)
+	assertContains(t, out, `.Get("symbols")`)
+	assertContains(t, out, `symbols.MethodCall("show_window")`)
+}
+
 func TestRoundTripArrayDestructuring(t *testing.T) {
 	out := lowerTS(t, `function f() { const [x, y] = arr; return x; }`)
 	assertContains(t, out, ".Index(0)")
@@ -1278,4 +1286,28 @@ console.log(u.href, p.get('x'))
 	assertContains(t, out, `"github.com/nnstd/gun/runtime/url"`)
 	assertContains(t, out, `url.URLConstructor.Call`)
 	assertContains(t, out, `url.URLSearchParamsConstructor.Call`)
+}
+
+func TestFormDataConstructorUsesWebRuntime(t *testing.T) {
+	const source = `const fd = new FormData(); fd.append("a", "1");`
+	tree := parseTS(t, source)
+	defer tree.Close()
+	mod := hir.BuildModule(tree.RootNode(), []byte(source), "main")
+	ctx := context.New()
+	ctx.RegisterConstructor(&context.Constructor{
+		Name: "FormData",
+		Transform: func(args []ast.Expr, imp context.Imports) ast.Expr {
+			imp.AddImport("github.com/nnstd/gun/runtime/web")
+			return callExpr(selectorExpr(selectorExpr(goIdent("web"), "FormData"), "Call"), args...)
+		},
+	})
+	file := Lower(mod, ctx, "", false, context.O0)
+	outBytes, err := Generate(file)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	out := string(outBytes)
+	assertContains(t, out, `"github.com/nnstd/gun/runtime/web"`)
+	assertContains(t, out, `web.FormData.Call`)
+	assertContains(t, out, `fd.MethodCall("append"`)
 }

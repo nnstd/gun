@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -13,6 +14,8 @@ import (
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
 	"github.com/nnstd/gun/runtime/eventloop"
+	"github.com/nnstd/gun/runtime/promise"
+	urlpkg "github.com/nnstd/gun/runtime/url"
 	"github.com/nnstd/gun/runtime/web"
 )
 
@@ -112,6 +115,179 @@ func TestYAMLStringifyBlockStyleWithSpace(t *testing.T) {
 	got := AsJSValue.Get("YAML").Get("stringify").Call(obj, jsvalue.NewNull(), jsvalue.NewNumber(2)).String()
 	if !strings.Contains(got, "abc: def") || !strings.Contains(got, "\nnested:\n  num: 123") {
 		t.Fatalf("unexpected block YAML: %q", got)
+	}
+}
+
+func TestBunFileExportsAndReadsFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.json")
+	if err := os.WriteFile(path, []byte(`{"ok":true,"n":7}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if AsJSValue.Get("file").TypeString() != "function" {
+		t.Fatal("expected Bun.file function")
+	}
+	if AsJSValue.Get("BunFile").TypeString() != "function" {
+		t.Fatal("expected Bun.BunFile class")
+	}
+
+	file := AsJSValue.Get("file").Call(jsvalue.NewString(path))
+	if !jsvalue.InstanceOf(file, BunFile).Bool() {
+		t.Fatal("Bun.file should return a BunFile")
+	}
+	if got := file.Get("name").String(); got != path {
+		t.Fatalf("name = %q, want %q", got, path)
+	}
+	if got := file.Get("type").String(); got != "application/json" {
+		t.Fatalf("type = %q", got)
+	}
+	if got := file.Get("size").Number(); got != 0 {
+		t.Fatalf("size before read = %v, want lazy 0", got)
+	}
+
+	text := promise.Await(file.MethodCall("text"))
+	if got := text.String(); got != `{"ok":true,"n":7}` {
+		t.Fatalf("text() = %q", got)
+	}
+	if got := int(file.Get("size").Number()); got != len(`{"ok":true,"n":7}`) {
+		t.Fatalf("size after read = %d", got)
+	}
+	parsed := promise.Await(file.MethodCall("json"))
+	if !parsed.Get("ok").Bool() || parsed.Get("n").Number() != 7 {
+		t.Fatalf("json() parsed unexpected object: ok=%v n=%v", parsed.Get("ok").Bool(), parsed.Get("n").Number())
+	}
+	bytes := promise.Await(file.MethodCall("bytes"))
+	if got := bytes.Index(0).Number(); got != float64('{') {
+		t.Fatalf("bytes()[0] = %v", got)
+	}
+	if got := int(bytes.Get("byteLength").Number()); got != len(`{"ok":true,"n":7}`) {
+		t.Fatalf("byteLength = %d", got)
+	}
+}
+
+func TestBunFileURLStatSliceWriteAndDelete(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "note.txt")
+	if err := os.WriteFile(path, []byte("hello world"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	file := AsJSValue.Get("file").Call(urlpkg.PathToFileURL(jsvalue.NewString(path)))
+	exists := promise.Await(file.MethodCall("exists"))
+	if !exists.Bool() {
+		t.Fatal("exists() = false")
+	}
+	stat := promise.Await(file.MethodCall("stat"))
+	if got := int(stat.Get("size").Number()); got != len("hello world") {
+		t.Fatalf("stat().size = %d", got)
+	}
+	if !stat.MethodCall("isFile").Bool() {
+		t.Fatal("stat().isFile() = false")
+	}
+
+	slice := file.MethodCall("slice", jsvalue.NewNumber(6), jsvalue.NewNumber(11), jsvalue.NewString("text/custom"))
+	if got := promise.Await(slice.MethodCall("text")).String(); got != "world" {
+		t.Fatalf("slice text = %q", got)
+	}
+	if got := slice.Get("type").String(); got != "text/custom" {
+		t.Fatalf("slice type = %q", got)
+	}
+
+	written := promise.Await(file.MethodCall("write", jsvalue.NewString("changed")))
+	if got := int(written.Number()); got != len("changed") {
+		t.Fatalf("write() = %d", got)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "changed" {
+		t.Fatalf("file contents = %q", string(data))
+	}
+
+	promise.Await(file.MethodCall("delete"))
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("file should be deleted, stat err = %v", err)
+	}
+}
+
+func TestBunFileWriterAndStream(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sink.txt")
+	file := AsJSValue.Get("file").Call(jsvalue.NewString(path))
+	sink := file.MethodCall("writer")
+	sink.MethodCall("write", jsvalue.NewString("ab"))
+	promise.Await(sink.MethodCall("end", jsvalue.NewString("cd")))
+
+	if got := promise.Await(file.MethodCall("text")).String(); got != "abcd" {
+		t.Fatalf("writer contents = %q", got)
+	}
+	readable := file.MethodCall("stream")
+	chunks := readable.Get("_chunks")
+	if !chunks.IsArray() || chunks.Len() != 1 {
+		t.Fatalf("stream chunks len = %d", chunks.Len())
+	}
+	if got := chunks.Index(0).MethodCall("toString").String(); got != "abcd" {
+		t.Fatalf("stream chunk = %q", got)
+	}
+}
+
+func TestBunFileInvalidPathMatchesBunShape(t *testing.T) {
+	for _, input := range []*jsvalue.JSValue{jsvalue.NewUndefined(), jsvalue.NewNull(), jsvalue.NewObject()} {
+		func() {
+			defer func() {
+				r := recover()
+				if r == nil {
+					t.Fatal("expected invalid path panic")
+				}
+				err, ok := r.(*jsvalue.JSValue)
+				if !ok {
+					t.Fatalf("panic = %T", r)
+				}
+				if got := err.Get("name").String(); got != "TypeError" {
+					t.Fatalf("name = %q", got)
+				}
+				if got := err.Get("code").String(); got != "ERR_INVALID_ARG_TYPE" {
+					t.Fatalf("code = %q", got)
+				}
+				if got := err.Get("message").String(); got != "Expected file path string or file descriptor" {
+					t.Fatalf("message = %q", got)
+				}
+			}()
+			AsJSValue.Get("file").Call(input)
+		}()
+	}
+}
+
+func TestBunFileErrorShapesMatchObservedBun(t *testing.T) {
+	dir := t.TempDir()
+	file := AsJSValue.Get("file").Call(jsvalue.NewString(dir))
+	errVal := promise.Await(file.MethodCall("text"))
+	if got := errVal.Get("code").String(); got != "EISDIR" {
+		t.Fatalf("directory read code = %q", got)
+	}
+	if got := errVal.Get("syscall").String(); got != "read" {
+		t.Fatalf("directory read syscall = %q", got)
+	}
+	if got := errVal.Get("errno").Number(); got != 0 {
+		t.Fatalf("directory read errno = %v", got)
+	}
+	if got := errVal.Get("message").String(); got != "Directories cannot be read like files" {
+		t.Fatalf("directory read message = %q", got)
+	}
+
+	jsonPath := filepath.Join(t.TempDir(), "bad.json")
+	if err := os.WriteFile(jsonPath, []byte("not json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	jsonFile := AsJSValue.Get("file").Call(jsvalue.NewString(jsonPath))
+	jsonErr := promise.Await(jsonFile.MethodCall("json"))
+	if got := jsonErr.Get("name").String(); got != "SyntaxError" {
+		t.Fatalf("json error name = %q", got)
+	}
+	if got := jsonErr.Get("message").String(); got != "Failed to parse JSON" {
+		t.Fatalf("json error message = %q", got)
 	}
 }
 

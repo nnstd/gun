@@ -393,6 +393,14 @@ func (l *Lowerer) lowerFuncDecl(d *hir.FuncDecl) {
 }
 func (l *Lowerer) lowerVarDecl(d *hir.VarDecl) {
 	for _, decl := range d.Declarators {
+		if decl.Pattern != nil && decl.Init != nil {
+			l.jsvalueImport()
+			for _, sym := range collectPatternSymbols(decl.Pattern) {
+				l.decls = append(l.decls, varDecl(l.emitName(sym), jsValuePtrType(), nil))
+			}
+			l.initStmts = append(l.initStmts, l.lowerDestructuring(decl.Pattern, l.lowerExpr(decl.Init), false)...)
+			continue
+		}
 		if decl.Symbol == nil {
 			continue
 		}
@@ -424,6 +432,47 @@ func (l *Lowerer) lowerVarDecl(d *hir.VarDecl) {
 			l.decls = append(l.decls, varDecl(name, nil, value))
 		}
 	}
+}
+
+func collectPatternSymbols(pat hir.Pattern) []*symbol.Symbol {
+	var out []*symbol.Symbol
+	var walk func(hir.Pattern)
+	walk = func(p hir.Pattern) {
+		switch p := p.(type) {
+		case *hir.ObjectPattern:
+			for _, prop := range p.Properties {
+				if prop == nil {
+					continue
+				}
+				if prop.Value != nil {
+					out = append(out, prop.Value)
+				}
+				if prop.Pattern != nil {
+					walk(prop.Pattern)
+				}
+			}
+			if p.Rest != nil {
+				out = append(out, p.Rest)
+			}
+		case *hir.ArrayPattern:
+			for _, elem := range p.Elements {
+				if elem == nil {
+					continue
+				}
+				if elem.Symbol != nil {
+					out = append(out, elem.Symbol)
+				}
+				if elem.Pattern != nil {
+					walk(elem.Pattern)
+				}
+			}
+			if p.Rest != nil {
+				out = append(out, p.Rest)
+			}
+		}
+	}
+	walk(pat)
+	return out
 }
 func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 	l.jsvalueImport()

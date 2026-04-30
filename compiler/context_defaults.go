@@ -459,7 +459,7 @@ func registerConstructors(ctx *tcontext.TranspilerContext) {
 		})
 	}
 
-	for _, ctorName := range []string{"Headers", "Request", "Response", "File"} {
+	for _, ctorName := range []string{"Headers", "Request", "Response", "File", "FormData"} {
 		name := ctorName
 		ctx.RegisterConstructor(&tcontext.Constructor{
 			Name: name,
@@ -661,7 +661,7 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		})
 	}
 
-	for _, identName := range []string{"Headers", "Request", "Response", "File", "RegExp", "fetch"} {
+	for _, identName := range []string{"Headers", "Request", "Response", "File", "FormData", "RegExp", "fetch"} {
 		name := identName
 		ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 			Name: name,
@@ -1065,6 +1065,7 @@ func registerKnownGlobals(ctx *tcontext.TranspilerContext) {
 	ctx.MarkKnownGlobal("URL")
 	ctx.MarkKnownGlobal("URLSearchParams")
 	ctx.MarkKnownGlobal("File")
+	ctx.MarkKnownGlobal("FormData")
 	ctx.MarkKnownGlobal("fetch")
 	ctx.MarkKnownGlobal("Symbol")
 	ctx.MarkKnownGlobal("module")
