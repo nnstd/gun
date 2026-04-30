@@ -154,6 +154,11 @@ func Await(v *jsvalue.JSValue) *jsvalue.JSValue {
 	return v.Get(promiseValueKey)
 }
 
+// IsRejected reports whether v is a Promise settled in the rejected state.
+func IsRejected(v *jsvalue.JSValue) bool {
+	return IsPromise(v) && getState(v) == stateRejected
+}
+
 func thenMethod(v *jsvalue.JSValue) *jsvalue.JSValue {
 	if v == nil {
 		return nil

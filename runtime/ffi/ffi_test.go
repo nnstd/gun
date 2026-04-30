@@ -43,6 +43,20 @@ func TestCCSourceAwaitsThisBoundTextMethod(t *testing.T) {
 	}
 }
 
+func TestCCSourcePanicsOnRejectedTextPromise(t *testing.T) {
+	source := jsvalue.ObjectFrom()
+	errVal := jsvalue.NewString("missing")
+	source.Set("text", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
+		return promise.Promise.Get("reject").Call(errVal)
+	}).MarkAsMethod())
+	defer func() {
+		if r := recover(); r != errVal {
+			t.Fatalf("panic = %#v, want rejected value", r)
+		}
+	}()
+	_ = ccSource(source)
+}
+
 func TestCStringClonesPointerString(t *testing.T) {
 	data := []byte("hello\x00ignored")
 	ptr := jsvalue.NewNumber(float64(uintptr(unsafe.Pointer(&data[0]))))

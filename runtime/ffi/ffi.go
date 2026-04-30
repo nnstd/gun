@@ -239,7 +239,12 @@ func ccSource(v *jsvalue.JSValue) string {
 		return ""
 	}
 	if text := v.Get("text"); text != nil && text.TypeString() == "function" {
-		return promise.Await(v.MethodCall("text")).String()
+		p := v.MethodCall("text")
+		value := promise.Await(p)
+		if promise.IsRejected(p) {
+			panic(value)
+		}
+		return value.String()
 	}
 	return v.String()
 }

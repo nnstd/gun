@@ -115,7 +115,7 @@ func (l *Lowerer) lowerExpr(e hir.Expr) ast.Expr {
 	case *hir.MetaPropertyExpr:
 		if e.Meta == "import" && e.Property == "meta" {
 			l.addImport("github.com/nnstd/gun/runtime/module")
-			out = callExpr(selectorExpr(goIdent("module"), "ImportMetaAsJSValue"))
+			out = callExpr(selectorExpr(goIdent("module"), "ImportMetaForFile"), stringLit(l.sourcePath))
 			break
 		}
 		out = goIdent("nil")
@@ -444,6 +444,7 @@ func (l *Lowerer) lowerObjectLiteral(e *hir.ObjectLiteral) ast.Expr {
 	}
 	return callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), args...)
 }
+
 // lowerObjectWithAccessors handles object literals with getter/setter properties.
 // Uses DefineProperty with get/set descriptors.
 func (l *Lowerer) lowerObjectWithAccessors(e *hir.ObjectLiteral) ast.Expr {
@@ -477,6 +478,7 @@ func (l *Lowerer) lowerObjectWithAccessors(e *hir.ObjectLiteral) ast.Expr {
 	}
 	return result
 }
+
 // lowerObjectWithComputed handles object literals with computed property names
 // like {[expr]: value}. Uses IIFE: func() *JSValue { obj := NewObject(); obj.Set(Sprint(expr), val); return obj }()
 func (l *Lowerer) lowerObjectWithComputed(e *hir.ObjectLiteral) ast.Expr {
@@ -510,6 +512,7 @@ func (l *Lowerer) lowerObjectWithComputed(e *hir.ObjectLiteral) ast.Expr {
 		},
 	}
 }
+
 // lowerObjectWithSpreads handles object literals with spread properties:
 // {a: 1, ...obj, b: 2} → jsvalue.Assign(jsvalue.ObjectFrom("a", 1), obj, jsvalue.ObjectFrom("b", 2))
 func (l *Lowerer) lowerObjectWithSpreads(e *hir.ObjectLiteral) ast.Expr {
@@ -653,6 +656,7 @@ func (l *Lowerer) lowerBinaryExpr(e *hir.BinaryExpr) ast.Expr {
 	return callExpr(selectorExpr(goIdent("jsvalue"), helperName),
 		jsvalueWrapLit(left), jsvalueWrapLit(right))
 }
+
 // hirExprHasSideEffects returns true when evaluating e could have an
 // observable side effect (a call, assignment, new, await, etc.). Used to
 // decide whether short-circuit operators need lazy IIFE lowering.
@@ -715,6 +719,7 @@ func hirExprHasSideEffects(e hir.Expr) bool {
 	}
 	return false
 }
+
 // lowerShortCircuitBinary emits a lazy IIFE for ||, &&, ??. The RHS is only
 // evaluated when the LHS cannot determine the result, matching JS semantics.
 func (l *Lowerer) lowerShortCircuitBinary(e *hir.BinaryExpr) ast.Expr {
@@ -1097,6 +1102,7 @@ func (l *Lowerer) lowerCallExpr(e *hir.CallExpr) ast.Expr {
 
 	return buildCallWithSpread(fn, args, hasSpread)
 }
+
 // lowerCallArgs lowers call arguments, handling spread expressions.
 // Returns the lowered args and whether the last arg has spread (Ellipsis).
 func (l *Lowerer) lowerCallArgs(hirArgs []hir.Expr, wrap bool) ([]ast.Expr, bool) {
@@ -1147,6 +1153,7 @@ func (l *Lowerer) lowerCallArgs(hirArgs []hir.Expr, wrap bool) ([]ast.Expr, bool
 	}
 	return args, hasTrailingSpread
 }
+
 // buildCallWithSpread creates a call expression, setting Ellipsis if the last arg is spread.
 func buildCallWithSpread(fun ast.Expr, args []ast.Expr, hasSpread bool) *ast.CallExpr {
 	c := callExpr(fun, args...)
@@ -1155,6 +1162,7 @@ func buildCallWithSpread(fun ast.Expr, args []ast.Expr, hasSpread bool) *ast.Cal
 	}
 	return c
 }
+
 // wrapAsJSValue wraps an expression to ensure it's *jsvalue.JSValue.
 func (l *Lowerer) wrapAsJSValue(expr ast.Expr) ast.Expr {
 	if isAlreadyJSValue(expr) {
@@ -1162,6 +1170,7 @@ func (l *Lowerer) wrapAsJSValue(expr ast.Expr) ast.Expr {
 	}
 	return jsvalueWrapLit(expr)
 }
+
 // isSimpleExpr returns true if the expression is safe to duplicate (ident or selector).
 func (l *Lowerer) isSimpleExpr(expr ast.Expr) bool {
 	switch expr.(type) {
@@ -1592,6 +1601,7 @@ func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 	l.jsvalueImport()
 	return callExpr(selectorExpr(obj, "Get"), key)
 }
+
 // lowerOptionalMember handles a?.b → IIFE with jsvalue.Eq null check.
 func (l *Lowerer) lowerOptionalMember(e *hir.MemberExpr) ast.Expr {
 	l.jsvalueImport()
@@ -1632,6 +1642,7 @@ func (l *Lowerer) lowerOptionalMember(e *hir.MemberExpr) ast.Expr {
 		},
 	}
 }
+
 // exprIsJSValue returns true if the HIR expression is known to produce *jsvalue.JSValue.
 func (l *Lowerer) exprIsJSValue(e hir.Expr) bool {
 	switch e := e.(type) {
@@ -1785,6 +1796,7 @@ func (l *Lowerer) lowerSequenceExpr(e *hir.SequenceExpr) ast.Expr {
 		},
 	}
 }
+
 // Lowerer implements context.Imports so it can be passed to TranspilerContext methods.
 
 func (l *Lowerer) AddImport(pkg string) {
@@ -1793,6 +1805,7 @@ func (l *Lowerer) AddImport(pkg string) {
 func (l *Lowerer) AddAliasedImport(pkg, alias string) {
 	l.addAliasedImport(pkg, alias)
 }
+
 // isValidGoIdent checks if a string is a valid Go identifier.
 func isValidGoIdent(s string) bool {
 	if s == "" {
@@ -1811,6 +1824,7 @@ func isValidGoIdent(s string) bool {
 	}
 	return true
 }
+
 // lowercaseFirst returns the string with the first character lowercased.
 // Used to convert Go capitalized names back to JS camelCase for .Get() lookups.
 func lowercaseFirst(s string) string {
@@ -1823,6 +1837,7 @@ func lowercaseFirst(s string) string {
 	}
 	return string(r)
 }
+
 // parseRegexLiteral splits /pattern/flags into pattern and flags.
 func parseRegexLiteral(s string) (pattern, flags string) {
 	if len(s) < 2 || s[0] != '/' {

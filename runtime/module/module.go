@@ -3,6 +3,7 @@ package module
 import (
 	"encoding/json"
 	"fmt"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -291,8 +292,19 @@ var AsJSValue = func() *jsvalue.JSValue {
 
 // ImportMetaAsJSValue returns the import.meta object as a *JSValue.
 func ImportMetaAsJSValue() *jsvalue.JSValue {
+	return ImportMetaForFile("")
+}
+
+// ImportMetaForFile returns import.meta for a specific source file.
+// Transpiled files use this so import.meta.url remains anchored to the
+// original .ts file instead of the temporary compiled binary.
+func ImportMetaForFile(file string) *jsvalue.JSValue {
 	obj := jsvalue.NewObject()
-	obj.Set("url", ImportMeta.Url)
+	if file != "" {
+		obj.Set("url", jsvalue.NewString(pathToFileURL(file)))
+	} else {
+		obj.Set("url", ImportMeta.Url)
+	}
 	obj.Set("resolve", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		if len(args) > 0 && ImportMeta.Resolve != nil {
 			return ImportMeta.Resolve(args[0])
@@ -300,4 +312,20 @@ func ImportMetaAsJSValue() *jsvalue.JSValue {
 		return jsvalue.NewUndefined()
 	}))
 	return obj
+}
+
+func pathToFileURL(path string) string {
+	if path == "" {
+		return ""
+	}
+	if !filepath.IsAbs(path) {
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+	}
+	slash := filepath.ToSlash(path)
+	if !strings.HasPrefix(slash, "/") {
+		slash = "/" + slash
+	}
+	return (&neturl.URL{Scheme: "file", Path: slash}).String()
 }

@@ -186,6 +186,11 @@ func TestGenerateWithSourceEmitsLineDirectiveForClassMethod(t *testing.T) {
 	assertContains(t, out, "//line /tmp/class.ts:3")
 }
 
+func TestImportMetaURLUsesSourcePath(t *testing.T) {
+	out := lowerTSWithPath(t, `const u = import.meta.url`, "/tmp/source-dir/app.ts")
+	assertContains(t, out, `module.ImportMetaForFile("/tmp/source-dir/app.ts")`)
+}
+
 func TestLowerIfStatement(t *testing.T) {
 	symtab := symbol.NewTable()
 	mod := &hir.Module{
