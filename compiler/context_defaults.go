@@ -1002,6 +1002,11 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 		GoPkgName:    "dgram",
 		UseAsJSValue: true,
 	})
+		ctx.RegisterModule("querystring", &tcontext.ModuleMapping{
+			GoImportPath: "github.com/nnstd/gun/runtime/querystring",
+			GoPkgName:    "querystring",
+			UseAsJSValue: true,
+		})
 	ctx.RegisterModule("net", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/net",
 		GoPkgName:    "nodenet",
