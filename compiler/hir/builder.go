@@ -53,6 +53,26 @@ func BuildModuleWithPath(root *sitter.Node, source []byte, pkgName, sourcePath s
 		b.buildTopLevel(mod, child)
 	}
 
+	// Hoist module-level var declarations (e.g. var inside for loops at
+	// module scope). Inside functions, prependHoistedVars handles this, but
+	// at module level nothing consumed hoistedSymbols yet.
+	if len(b.hoistedSymbols) > 0 {
+		seen := make(map[symbol.ID]bool)
+		var hoisted []Decl
+		for _, sym := range b.hoistedSymbols {
+			if seen[sym.ID] || sym.Kind == symbol.KindParameter {
+				continue
+			}
+			seen[sym.ID] = true
+			hoisted = append(hoisted, &VarDecl{
+				Declarators: []*Declarator{{Symbol: sym}},
+				Kind:        VarVar,
+			})
+		}
+		mod.Declarations = append(hoisted, mod.Declarations...)
+		b.hoistedSymbols = nil
+	}
+
 	mod.HasTopLevelAwait = scanForTopLevelAwait(mod)
 
 	return mod

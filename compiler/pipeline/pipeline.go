@@ -353,6 +353,12 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 			for _, n := range imp.Named {
 				if alias := targetAliases[n.OriginalName]; alias != "" {
 					importNameMap[imp.ModulePath+"\x00"+n.OriginalName] = alias
+				} else if defAlias := targetAliases["default"]; defAlias != "" {
+					// Named import not found as dedicated export, but target
+					// has a default export. Resolve via default.Get("name").
+					importNameMap[imp.ModulePath+"\x00"+n.OriginalName] = "@nsget:" + defAlias + ":" + n.OriginalName
+				} else if nsAlias := namespaceAliases[target]; nsAlias != "" {
+					importNameMap[imp.ModulePath+"\x00"+n.OriginalName] = "@nsget:" + nsAlias + ":" + n.OriginalName
 				}
 			}
 		}

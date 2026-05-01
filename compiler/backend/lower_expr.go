@@ -183,6 +183,9 @@ func (l *Lowerer) lowerIdentifier(e *hir.Identifier) ast.Expr {
 			}
 			// Same-package reference
 			if res.goPkgName == "" {
+				if res.namespaceGet {
+					return callExpr(selectorExpr(goIdent(res.goSymbol), "Get"), stringLit(res.jsExportName))
+				}
 				return goIdent(res.goSymbol)
 			}
 			// Named import from Gun runtime module → pkg.AsJSValue.Get("jsName")
@@ -225,6 +228,9 @@ func (l *Lowerer) lowerIdentifier(e *hir.Identifier) ast.Expr {
 			return goIdent(res.goPkgName)
 		}
 		if res.goPkgName == "" {
+			if res.namespaceGet {
+				return callExpr(selectorExpr(goIdent(res.goSymbol), "Get"), stringLit(res.jsExportName))
+			}
 			return goIdent(res.goSymbol)
 		}
 		if !res.isTranspiled && res.goPkgName != "" && isGunRuntimePkg(res.goImportPath) {
@@ -236,6 +242,10 @@ func (l *Lowerer) lowerIdentifier(e *hir.Identifier) ast.Expr {
 	}
 	if name, ok := l.topLevelNames[e.Name]; ok {
 		return goIdent(name)
+	}
+	if name == "exports" && l.namespaceAlias != "" {
+		l.jsvalueImport()
+		return goIdent(l.namespaceAlias)
 	}
 	if l.ctx != nil {
 		if expr := l.ctx.TransformIdentifier(e.Name, l); expr != nil {

@@ -66,19 +66,26 @@ func ScanHIRExports(mod *hir.Module) []CrossFileExport {
 					GoName:       "Default",
 					IsJSValue:    true,
 				})
-				// CJS module.exports = { X, Y } → extract named exports
+				// CJS module.exports = { X, Y } → extract named exports,
+				// but only when the value is a local identifier (shorthand
+				// or explicit ref). Skip inline values and imports that
+				// have no backing Go variable.
 				if d.Decl != nil {
 					if vd, ok := d.Decl.(*hir.VarDecl); ok {
 						for _, dec := range vd.Declarators {
 							if obj, ok := dec.Init.(*hir.ObjectLiteral); ok {
 								for _, prop := range obj.Properties {
-									if prop.KeyName != "" && !prop.Computed {
-										exports = append(exports, CrossFileExport{
-											OriginalName: prop.KeyName,
-											GoName:       symbol.Capitalize(symbol.Sanitize(prop.KeyName)),
-											IsJSValue:    true,
-										})
+									if prop.KeyName == "" || prop.Computed {
+										continue
 									}
+									if _, ok := prop.Value.(*hir.Identifier); !ok {
+										continue
+									}
+									exports = append(exports, CrossFileExport{
+										OriginalName: prop.KeyName,
+										GoName:       symbol.Capitalize(symbol.Sanitize(prop.KeyName)),
+										IsJSValue:    true,
+									})
 								}
 							}
 						}
@@ -155,6 +162,10 @@ func collectCJSExportsFromAssign(assign *hir.AssignExpr, seen map[string]bool, e
 			for _, prop := range obj.Properties {
 				name := prop.KeyName
 				if name == "" || seen[name] || prop.Computed {
+					continue
+				}
+				// Only extract if value is a local identifier reference
+				if _, ok := prop.Value.(*hir.Identifier); !ok {
 					continue
 				}
 				seen[name] = true

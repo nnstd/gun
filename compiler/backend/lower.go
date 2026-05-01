@@ -23,6 +23,7 @@ type importResolution struct {
 	moduleValue  string
 	jsExportName string
 	modulePath   string
+	namespaceGet bool // when true, emit goSymbol.Get(jsExportName)
 }
 
 // CrossFileExport describes a symbol exported from another file in the same package.
@@ -170,17 +171,22 @@ func LowerWithExportsAndCPUProfile(mod *hir.Module, ctx *context.TranspilerConte
 
 	if l.namespaceAlias != "" {
 		l.jsvalueImport()
-		props := make([]ast.Expr, 0, len(l.namespaceEntries)*2)
-		for exportName, alias := range l.namespaceEntries {
-			props = append(props, stringLit(exportName), goIdent(alias))
-		}
-		// Declare namespace var, but initialize in init() so all referenced vars
-		// (which may themselves be set in init()) are available.
+		// Declare namespace var at package level.
 		l.decls = append(l.decls, varDecl(l.namespaceAlias, jsValuePtrType(), nil))
-		l.initStmts = append(l.initStmts, assignStmt(
+		// Initialize early as empty object so exports.X = value → namespace.Set() works.
+		nsInit := assignStmt(
 			[]ast.Expr{goIdent(l.namespaceAlias)},
-			[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), props...)},
-		))
+			[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"))},
+		)
+		l.initStmts = append([]ast.Stmt{nsInit}, l.initStmts...)
+		// After all init stmts, set namespace entries for dedicated exports.
+		for exportName, alias := range l.namespaceEntries {
+			l.initStmts = append(l.initStmts, exprStmt(callExpr(
+				selectorExpr(goIdent(l.namespaceAlias), "Set"),
+				stringLit(exportName),
+				goIdent(alias),
+			)))
+		}
 	}
 
 	// Fix init cycles: split self-referencing vars into forward decl + init()
@@ -1182,6 +1188,23 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 		}
 		goSym := symbol.Capitalize(symbol.Sanitize(n.OriginalName))
 		if mapped, ok := l.importNameMap[d.ModulePath+"\x00"+n.OriginalName]; ok {
+			if strings.HasPrefix(mapped, "@nsget:") {
+				// Namespace-based resolution: emit baseVar.Get("propName")
+				parts := strings.SplitN(mapped[7:], ":", 2)
+				res := importResolution{
+					goPkgName:    "",
+					goSymbol:     parts[0],
+					isTranspiled: true,
+					modulePath:   d.ModulePath,
+				}
+				if len(parts) == 2 {
+					res.jsExportName = parts[1]
+				}
+				res.namespaceGet = true
+				l.importedSyms[n.Symbol] = res
+				l.importedNames[n.LocalName] = res
+				continue
+			}
 			res := importResolution{
 				goImportPath: "",
 				goPkgName:    "",
