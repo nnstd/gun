@@ -42,7 +42,7 @@ func pathString(path *jsvalue.JSValue) string {
 		return ""
 	}
 	if jsvalue.InstanceOf(path, buffer.Buffer).Bool() {
-		return path.Get("_data").String()
+		return string(path.Bytes())
 	}
 	return path.String()
 }
@@ -52,7 +52,7 @@ func dataBytes(data *jsvalue.JSValue) []byte {
 		return nil
 	}
 	if jsvalue.InstanceOf(data, buffer.Buffer).Bool() {
-		return []byte(data.Get("_data").String())
+		return append([]byte(nil), data.Bytes()...)
 	}
 	return []byte(data.String())
 }

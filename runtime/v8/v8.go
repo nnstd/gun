@@ -232,8 +232,8 @@ func deserializeBytes(v *jsvalue.JSValue) string {
 	if v == nil {
 		return ""
 	}
-	if data := v.Get("_data"); data != nil && data.TypeString() == "string" {
-		return data.String()
+	if bs := v.Bytes(); bs != nil {
+		return string(bs)
 	}
 	return v.String()
 }

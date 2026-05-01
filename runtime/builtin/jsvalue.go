@@ -29,6 +29,36 @@ const (
 	TypeSet
 )
 
+// typedArrayKind identifies the element type of a typed array or ArrayBuffer.
+type typedArrayKind int
+
+const (
+	taNone         typedArrayKind = iota // ArrayBuffer / SharedArrayBuffer
+	taInt8
+	taUint8
+	taUint8Clamped
+	taInt16
+	taUint16
+	taInt32
+	taUint32
+	taFloat32
+	taFloat64
+	taBigInt64
+	taBigUint64
+)
+
+// byteSlice holds raw binary data for ArrayBuffer, SharedArrayBuffer, and typed array views.
+type byteSlice struct {
+	data            []byte
+	offset          int
+	length          int          // in bytes
+	arrayBuffer     *JSValue     // backing ArrayBuffer (nil for standalone)
+	detached        bool
+	bytesPerElement int
+	kind            typedArrayKind
+	isShared        bool // true for SharedArrayBuffer-backed
+}
+
 // cacheEntry is a single inline cache slot for Get() optimization.
 // Fixed-size array on JSValue avoids allocation for the cache itself.
 // Stores the resolved value directly (not a *PropertyDescriptor pointer) to avoid
@@ -49,7 +79,15 @@ type jsValueExt struct {
 	mapVal     *jsMap
 	setVal     *jsSet
 	classInit  func(this *JSValue, args ...*JSValue) *JSValue
+	byteSlice  *byteSlice
+	dataView   *dataViewState
 	meta       atomic.Pointer[jsValueMeta]
+}
+
+type dataViewState struct {
+	buffer     *JSValue
+	byteOffset int
+	byteLength int
 }
 
 type jsValueMeta struct {
@@ -64,6 +102,7 @@ type JSValue struct {
 	numVal           float64
 	strVal           string
 	bigIntVal        int64
+	bigUintVal       uint64
 	boxedValue       *JSValue
 	symbolDesc       string
 	symbolID         uint64
@@ -597,6 +636,243 @@ func (v *JSValue) BigInt() int64 {
 	return v.unboxed().bigIntVal
 }
 
+// BigUint returns the unsigned bigint value (for BigUint64Array).
+func (v *JSValue) BigUint() uint64 {
+	return v.unboxed().bigUintVal
+}
+
+// ByteSliceData returns the byteSlice backing store, or nil.
+func (v *JSValue) ByteSliceData() *byteSlice {
+	if v == nil {
+		return nil
+	}
+	if ext := v.extOrNil(); ext != nil {
+		return ext.byteSlice
+	}
+	return nil
+}
+
+// Bytes returns the byte content of a typed array / ArrayBuffer.
+func (v *JSValue) Bytes() []byte {
+	bs := v.ByteSliceData()
+	if bs == nil || bs.detached {
+		return nil
+	}
+	return bs.data[bs.offset : bs.offset+bs.length]
+}
+
+// IsTypedArray returns true if the value is a typed array view (not ArrayBuffer itself).
+func (v *JSValue) IsTypedArray() bool {
+	bs := v.ByteSliceData()
+	return bs != nil && bs.kind != taNone
+}
+
+// SetByteSlice attaches a byteSlice to the JSValue's extension.
+
+// DataViewState returns the DataView state (buffer, byteOffset, byteLength), or nil.
+func (v *JSValue) DataViewState() *dataViewState {
+	if v == nil {
+		return nil
+	}
+	ext := v.extOrNil()
+	if ext == nil {
+		return nil
+	}
+	return ext.dataView
+}
+
+// SetDataViewState attaches DataView state to the JSValue's extension.
+func (v *JSValue) SetDataViewState(dv *dataViewState) {
+	if v == nil {
+		return
+	}
+	v.ensureExt().dataView = dv
+}
+func (v *JSValue) SetByteSlice(bs *byteSlice) {
+	v.ensureExt().byteSlice = bs
+}
+
+// getElement returns the JSValue at the given element index for a typed array.
+func (bs *byteSlice) getElement(idx int) *JSValue {
+	if idx < 0 || idx*bs.bytesPerElement >= bs.length || bs.detached {
+		return NewUndefined()
+	}
+	off := bs.offset + idx*bs.bytesPerElement
+	switch bs.kind {
+	case taInt8:
+		return NewNumber(float64(int8(bs.data[off])))
+	case taUint8:
+		return NewNumber(float64(bs.data[off]))
+	case taUint8Clamped:
+		return NewNumber(float64(bs.data[off]))
+	case taInt16:
+		return NewNumber(float64(int16(bs.data[off]) | int16(bs.data[off+1])<<8))
+	case taUint16:
+		return NewNumber(float64(uint16(bs.data[off]) | uint16(bs.data[off+1])<<8))
+	case taInt32:
+		return NewNumber(float64(int32(bs.data[off]) | int32(bs.data[off+1])<<8 | int32(bs.data[off+2])<<16 | int32(bs.data[off+3])<<24))
+	case taUint32:
+		return NewNumber(float64(uint32(bs.data[off]) | uint32(bs.data[off+1])<<8 | uint32(bs.data[off+2])<<16 | uint32(bs.data[off+3])<<24))
+	case taFloat32:
+		bits := uint32(bs.data[off]) | uint32(bs.data[off+1])<<8 | uint32(bs.data[off+2])<<16 | uint32(bs.data[off+3])<<24
+		return NewNumber(float64(math.Float32frombits(bits)))
+	case taFloat64:
+		bits := uint64(bs.data[off]) | uint64(bs.data[off+1])<<8 | uint64(bs.data[off+2])<<16 | uint64(bs.data[off+3])<<24 |
+			uint64(bs.data[off+4])<<32 | uint64(bs.data[off+5])<<40 | uint64(bs.data[off+6])<<48 | uint64(bs.data[off+7])<<56
+		return NewNumber(math.Float64frombits(bits))
+	case taBigInt64:
+		val := int64(bs.data[off]) | int64(bs.data[off+1])<<8 | int64(bs.data[off+2])<<16 | int64(bs.data[off+3])<<24 |
+			int64(bs.data[off+4])<<32 | int64(bs.data[off+5])<<40 | int64(bs.data[off+6])<<48 | int64(bs.data[off+7])<<56
+		return NewBigInt(val)
+	case taBigUint64:
+		val := uint64(bs.data[off]) | uint64(bs.data[off+1])<<8 | uint64(bs.data[off+2])<<16 | uint64(bs.data[off+3])<<24 |
+			uint64(bs.data[off+4])<<32 | uint64(bs.data[off+5])<<40 | uint64(bs.data[off+6])<<48 | uint64(bs.data[off+7])<<56
+		return NewBigUint(val)
+	default:
+		return NewUndefined()
+	}
+}
+
+// toUint8Clamp converts a float to a clamped uint8 using JS ToUint8Clamp semantics.
+func toUint8Clamp(f float64) uint8 {
+	if f != f { // NaN
+		return 0
+	}
+	if f <= 0 {
+		return 0
+	}
+	if f >= 255 {
+		return 255
+	}
+	// Round half to even (banker's rounding)
+	r := math.Round(f)
+	if r-f == 0.5 && uint8(r)%2 != 0 {
+		r--
+	}
+	return uint8(r)
+}
+
+// setElement writes a JSValue at the given element index for a typed array.
+func (bs *byteSlice) setElement(idx int, val *JSValue) {
+	if idx < 0 || idx*bs.bytesPerElement >= bs.length || bs.detached {
+		return
+	}
+	off := bs.offset + idx*bs.bytesPerElement
+	switch bs.kind {
+	case taInt8, taUint8:
+		bs.data[off] = byte(val.Number())
+	case taUint8Clamped:
+		bs.data[off] = toUint8Clamp(val.Number())
+	case taInt16:
+		v := int16(val.Number())
+		bs.data[off] = byte(v)
+		bs.data[off+1] = byte(v >> 8)
+	case taUint16:
+		v := uint16(val.Number())
+		bs.data[off] = byte(v)
+		bs.data[off+1] = byte(v >> 8)
+	case taInt32:
+		v := int32(val.Number())
+		bs.data[off] = byte(v)
+		bs.data[off+1] = byte(v >> 8)
+		bs.data[off+2] = byte(v >> 16)
+		bs.data[off+3] = byte(v >> 24)
+	case taUint32:
+		v := uint32(val.Number())
+		bs.data[off] = byte(v)
+		bs.data[off+1] = byte(v >> 8)
+		bs.data[off+2] = byte(v >> 16)
+		bs.data[off+3] = byte(v >> 24)
+	case taFloat32:
+		bits := math.Float32bits(float32(val.Number()))
+		bs.data[off] = byte(bits)
+		bs.data[off+1] = byte(bits >> 8)
+		bs.data[off+2] = byte(bits >> 16)
+		bs.data[off+3] = byte(bits >> 24)
+	case taFloat64:
+		bits := math.Float64bits(val.Number())
+		bs.data[off] = byte(bits)
+		bs.data[off+1] = byte(bits >> 8)
+		bs.data[off+2] = byte(bits >> 16)
+		bs.data[off+3] = byte(bits >> 24)
+		bs.data[off+4] = byte(bits >> 32)
+		bs.data[off+5] = byte(bits >> 40)
+		bs.data[off+6] = byte(bits >> 48)
+		bs.data[off+7] = byte(bits >> 56)
+	case taBigInt64:
+		v := val.BigInt()
+		bs.data[off] = byte(v)
+		bs.data[off+1] = byte(v >> 8)
+		bs.data[off+2] = byte(v >> 16)
+		bs.data[off+3] = byte(v >> 24)
+		bs.data[off+4] = byte(v >> 32)
+		bs.data[off+5] = byte(v >> 40)
+		bs.data[off+6] = byte(v >> 48)
+		bs.data[off+7] = byte(v >> 56)
+	case taBigUint64:
+		v := val.BigUint()
+		bs.data[off] = byte(v)
+		bs.data[off+1] = byte(v >> 8)
+		bs.data[off+2] = byte(v >> 16)
+		bs.data[off+3] = byte(v >> 24)
+		bs.data[off+4] = byte(v >> 32)
+		bs.data[off+5] = byte(v >> 40)
+		bs.data[off+6] = byte(v >> 48)
+		bs.data[off+7] = byte(v >> 56)
+	}
+}
+
+// elementCount returns the number of elements in the typed array view.
+func (bs *byteSlice) elementCount() int {
+	if bs.bytesPerElement == 0 {
+		return 0
+	}
+	return bs.length / bs.bytesPerElement
+}
+
+// --- Exported accessors for byteSlice (used by runtime/buffer) ---
+
+// Length returns the byte length of the slice.
+func (bs *byteSlice) Length() int {
+	if bs == nil {
+		return 0
+	}
+	return bs.length
+}
+
+// Offset returns the byte offset into the backing data.
+func (bs *byteSlice) Offset() int {
+	if bs == nil {
+		return 0
+	}
+	return bs.offset
+}
+
+// ArrayBuffer returns the backing ArrayBuffer, or nil.
+func (bs *byteSlice) ArrayBuffer() *JSValue {
+	if bs == nil {
+		return nil
+	}
+	return bs.arrayBuffer
+}
+
+// Kind returns the typed array kind as a TypedArrayKind.
+func (bs *byteSlice) Kind() TypedArrayKind {
+	if bs == nil {
+		return TypedArrayNone
+	}
+	return TypedArrayKind(bs.kind)
+}
+
+// DataSlice returns a slice of the raw byte data (offset to offset+length).
+// Callers can modify the returned slice in-place to write into the buffer.
+func (bs *byteSlice) DataSlice() []byte {
+	if bs == nil || bs.detached {
+		return nil
+	}
+	return bs.data[bs.offset : bs.offset+bs.length]
+}
+
 // SymbolDesc returns the symbol description.
 func (v *JSValue) SymbolDesc() string {
 	return v.unboxed().symbolDesc
@@ -679,6 +955,9 @@ func (v *JSValue) Len() int {
 		// In Go, we approximate this with rune count
 		return len([]rune(v.strVal))
 	case TypeObject:
+		if ext := v.extOrNil(); ext != nil && ext.byteSlice != nil && ext.byteSlice.kind != taNone {
+			return ext.byteSlice.elementCount()
+		}
 		if v.isArr {
 			return v.arrayListOrZero().Len()
 		}

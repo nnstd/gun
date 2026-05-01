@@ -210,10 +210,10 @@ func coercePayload(v *jsvalue.JSValue) ([]byte, error) {
 		return []byte(v.String()), nil
 	}
 	if jsvalue.InstanceOf(v, buffer.Buffer).Bool() {
-		if data := v.Get("_data"); data.TypeString() == "string" {
-			return []byte(data.String()), nil
+		if bs := v.Bytes(); bs != nil {
+			return append([]byte(nil), bs...), nil
 		}
-		return []byte(v.String()), nil
+		return nil, nil
 	}
 	return nil, fmt.Errorf("dgram.send() payload must be a string or Buffer")
 }

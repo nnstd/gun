@@ -54,10 +54,36 @@ func detach(v *JSValue) {
 			v.setState().items = nil
 		}
 	}
+	// Detach byteSlice (ArrayBuffer/TypedArray/DataView)
+	if bs := v.ByteSliceData(); bs != nil {
+		bs.data = nil
+		bs.length = 0
+		bs.detached = true
+	}
 	// Bump gen so any cached Gets are invalidated.
 	v.genAdd(1)
 }
 
+
+// cloneBinary clones an ArrayBuffer or TypedArray by copying its byteSlice data.
+func cloneBinary(v *JSValue, bs *byteSlice) *JSValue {
+	// Copy the underlying bytes
+	dataCopy := make([]byte, len(bs.data))
+	copy(dataCopy, bs.data)
+
+	clonedBS := &byteSlice{
+		data:           dataCopy,
+		offset:         bs.offset,
+		length:         bs.length,
+		bytesPerElement: bs.bytesPerElement,
+		kind:           bs.kind,
+		isShared:       bs.isShared,
+	}
+
+	clone := NewObject()
+	clone.ensureExt().byteSlice = clonedBS
+	return clone
+}
 func structuredCloneInner(v *JSValue, seen map[*JSValue]*JSValue) *JSValue {
 	if v == nil {
 		return nil
@@ -122,6 +148,10 @@ func structuredCloneInner(v *JSValue, seen map[*JSValue]*JSValue) *JSValue {
 			for i := 0; i < n; i++ {
 				clone.arrayListOrZero().Push(structuredCloneInner(v.arrayListOrZero().Get(i), seen))
 			}
+		} else if bs := v.ByteSliceData(); bs != nil {
+			clone = cloneBinary(v, bs)
+			seen[v] = clone
+			return clone
 		} else {
 			clone = NewObject()
 			seen[v] = clone

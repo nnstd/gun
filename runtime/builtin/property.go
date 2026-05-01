@@ -1,5 +1,7 @@
 package jsvalue
 
+import "strconv"
+
 // parseArrayIndex checks if a property name is a valid non-negative integer
 // index (like "0", "1", "42") and returns the index. This enables JS-style
 // arr["0"] === arr[0] semantics.
@@ -95,6 +97,13 @@ func (v *JSValue) Get(name string) *JSValue {
 	if v.typ == TypeString {
 		if idx, ok := parseArrayIndex(name); ok {
 			return v.Index(idx)
+		}
+	}
+
+	// Typed array / Buffer index fast path
+	if ext := v.extOrNil(); ext != nil && ext.byteSlice != nil && ext.byteSlice.kind != taNone {
+		if idx, ok := parseArrayIndex(name); ok {
+			return ext.byteSlice.getElement(idx)
 		}
 	}
 
@@ -236,6 +245,13 @@ func (v *JSValue) Set(name string, value *JSValue) {
 			return
 		}
 	}
+		// Typed array / Buffer index fast path
+		if ext := v.extOrNil(); ext != nil && ext.byteSlice != nil && ext.byteSlice.kind != taNone {
+			if idx, ok := parseArrayIndex(name); ok {
+				ext.byteSlice.setElement(idx, value)
+				return
+			}
+		}
 	// Array index fast path
 	if v.isArr {
 		if idx, ok := parseArrayIndex(name); ok {
@@ -310,6 +326,15 @@ func (v *JSValue) OwnKeys() []string {
 	if v.isPrimitiveValue() {
 		v = boxedPrimitiveOf(v)
 	}
+	// Typed array indices appear as own keys
+	if bs := v.ByteSliceData(); bs != nil && bs.kind != taNone {
+		n := bs.elementCount()
+		keys := make([]string, n)
+		for i := 0; i < n; i++ {
+			keys[i] = strconv.Itoa(i)
+		}
+		return keys
+	}
 	props := v.propertiesOrNil()
 	if props == nil {
 		return nil
@@ -324,6 +349,15 @@ func (v *JSValue) EnumerableOwnKeys() []string {
 	}
 	if v.isPrimitiveValue() {
 		v = boxedPrimitiveOf(v)
+	}
+	// Typed array indices are enumerable own keys
+	if bs := v.ByteSliceData(); bs != nil && bs.kind != taNone {
+		n := bs.elementCount()
+		keys := make([]string, n)
+		for i := 0; i < n; i++ {
+			keys[i] = strconv.Itoa(i)
+		}
+		return keys
 	}
 	props := v.propertiesOrNil()
 	if props == nil {

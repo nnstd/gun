@@ -239,7 +239,7 @@ func TestTCPEchoRoundTrip(t *testing.T) {
 		client.MethodCall("on", jsvalue.NewString("data"), jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 			mu.Lock()
 			if len(args) > 0 && args[0] != nil {
-				gotData = args[0].Get("_data").String()
+				gotData = args[0].MethodCall("toString").String()
 			}
 			mu.Unlock()
 			client.MethodCall("end")

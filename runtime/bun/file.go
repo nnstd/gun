@@ -274,6 +274,9 @@ func bytesFromWritable(v *jsvalue.JSValue) []byte {
 		return nil
 	}
 	if jsvalue.InstanceOf(v, buffer.Buffer).Bool() {
+		if bs := v.ByteSliceData(); bs != nil {
+			return append([]byte{}, v.Bytes()...)
+		}
 		return []byte(v.Get("_data").String())
 	}
 	if jsvalue.InstanceOf(v, BunFile).Bool() {

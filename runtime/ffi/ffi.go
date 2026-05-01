@@ -459,6 +459,13 @@ func ptrFromView(v *jsvalue.JSValue, offset int) uintptr {
 	if v == nil {
 		return 0
 	}
+	if bs := v.ByteSliceData(); bs != nil {
+		b := v.Bytes()
+		if offset >= len(b) {
+			return 0
+		}
+		return uintptr(unsafe.Pointer(&b[offset]))
+	}
 	if data := v.Get("_data"); data != nil && data.TypeString() == "string" {
 		b := []byte(data.String())
 		if offset >= len(b) {

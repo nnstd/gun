@@ -127,7 +127,7 @@ func TestBindSendReceiveLifecycle(t *testing.T) {
 			mu.Lock()
 			eventsSeen = append(eventsSeen, "message")
 			if len(args) > 0 && args[0] != nil {
-				gotMsg = args[0].Get("_data").String()
+				gotMsg = args[0].MethodCall("toString").String()
 			}
 			if len(args) > 1 && args[1] != nil {
 				gotAddr = args[1].Get("address").String()

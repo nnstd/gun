@@ -781,6 +781,102 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 	})
 
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Int8Array",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "Int8Array"})
+		},
+	})
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Uint8ClampedArray",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "Uint8ClampedArray"})
+		},
+	})
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Int16Array",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "Int16Array"})
+		},
+	})
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Uint16Array",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "Uint16Array"})
+		},
+	})
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Int32Array",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "Int32Array"})
+		},
+	})
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Uint32Array",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "Uint32Array"})
+		},
+	})
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Float32Array",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "Float32Array"})
+		},
+	})
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Float64Array",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "Float64Array"})
+		},
+	})
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "BigInt64Array",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "BigInt64Array"})
+		},
+	})
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "BigUint64Array",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "BigUint64Array"})
+		},
+	})
+
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "ArrayBuffer",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return selectorExpr(ident("jsvalue"), "ArrayBufferCtor")
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "SharedArrayBuffer",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return selectorExpr(ident("jsvalue"), "SharedArrayBufferCtor")
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "DataView",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return selectorExpr(ident("jsvalue"), "DataViewCtor")
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "Proxy",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")

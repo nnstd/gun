@@ -16,6 +16,16 @@ func newTypeErrorJSValue(message string) *JSValue {
 	return err
 }
 
+func newRangeErrorJSValue(message string) *JSValue {
+	if ctor, ok := Globals()["RangeError"]; ok && ctor != nil {
+		return ctor.Call(NewString(message))
+	}
+	err := NewObject()
+	err.Set("name", NewString("RangeError"))
+	err.Set("message", NewString(message))
+	return err
+}
+
 var Object *JSValue
 var Array *JSValue
 var String *JSValue
@@ -307,6 +317,12 @@ func init() {
 		}
 		return CompileFunctionFn(args...)
 	})
+
+	// ArrayBuffer, SharedArrayBuffer, and all TypedArray constructors
+	initTypedArrays()
+
+	// DataView (depends on ArrayBufferCtor from initTypedArrays)
+	initDataView()
 }
 
 // AtobFunc decodes a base64-encoded string.

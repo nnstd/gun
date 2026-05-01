@@ -42,8 +42,8 @@ func rawBytes(v *jsvalue.JSValue) []byte {
 	if v == nil {
 		return nil
 	}
-	if d := v.Get("_data"); d != nil && d.TypeString() == "string" {
-		return []byte(d.String())
+	if bs := v.Bytes(); bs != nil {
+		return append([]byte(nil), bs...)
 	}
 	return []byte(v.String())
 }

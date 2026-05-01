@@ -2,10 +2,14 @@ package util
 
 import (
 	"fmt"
-	"strings"
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
 )
+
+func isAnyArrayBuffer(v *jsvalue.JSValue) bool {
+	bs := v.ByteSliceData()
+	return bs != nil && bs.Kind() == 0
+}
 
 var AsJSValue = jsvalue.ObjectFrom(
 	"format", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
@@ -36,7 +40,7 @@ var AsJSValue = jsvalue.ObjectFrom(
 			if len(args) == 0 || args[0] == nil {
 				return jsvalue.NewBool(false)
 			}
-			return jsvalue.NewBool(strings.Contains(args[0].TypeString(), "object"))
+			return jsvalue.NewBool(isAnyArrayBuffer(args[0]))
 		}),
 	),
 )

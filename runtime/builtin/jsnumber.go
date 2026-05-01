@@ -64,7 +64,12 @@ func NewInt(i int) *JSValue {
 
 // NewBigInt creates a bigint JSValue.
 func NewBigInt(i int64) *JSValue {
-	return &JSValue{typ: TypeBigInt, bigIntVal: i, prototype: BigIntPrototype}
+	return &JSValue{typ: TypeBigInt, bigIntVal: i, bigUintVal: uint64(i), prototype: BigIntPrototype}
+}
+
+// NewBigUint creates a bigint JSValue from an unsigned value (for BigUint64Array).
+func NewBigUint(u uint64) *JSValue {
+	return &JSValue{typ: TypeBigInt, bigIntVal: int64(u), bigUintVal: u, prototype: BigIntPrototype}
 }
 
 // BigInt implements the JavaScript BigInt() coercion for basic number/string/bigint inputs.
