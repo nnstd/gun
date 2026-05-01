@@ -1316,3 +1316,373 @@ func TestFormDataConstructorUsesWebRuntime(t *testing.T) {
 	assertContains(t, out, `web.FormData.Call`)
 	assertContains(t, out, `fd.MethodCall("append"`)
 }
+
+// --- Var hoisting tests ---
+
+func TestVarHoistingFromIfBlock(t *testing.T) {
+	// var inside if block should be hoisted to function scope
+	out := lowerTS(t, `
+		function f(cond, val) {
+			if (cond) {
+				var x = val;
+			}
+			return x;
+		}
+	`)
+	// Bare var declaration must appear before the real if block
+	declIdx := strings.Index(out, "var x *jsvalue.JSValue")
+	realIfIdx := strings.Index(out, "(cond).Bool()")
+	if declIdx == -1 {
+		t.Fatalf("expected bare var x declaration in output:\n%s", out)
+	}
+	if realIfIdx == -1 || declIdx > realIfIdx {
+		t.Fatalf("var x declaration must precede if block:\n%s", out)
+	}
+	// Assignment inside if block must use = not :=
+	assignInIf := out[realIfIdx:]
+	assertContains(t, assignInIf, "x = ")
+	assertNotContains(t, assignInIf, "x :=")
+}
+
+func TestVarHoistingFromElseBlock(t *testing.T) {
+	// var inside else block should be hoisted to function scope
+	out := lowerTS(t, `
+		function f(cond, a, b) {
+			if (cond) {
+				return a;
+			} else {
+				var x = b;
+			}
+			return x;
+		}
+	`)
+	assertContains(t, out, "var x *jsvalue.JSValue")
+	// Assignment in else must be plain = not :=
+	elseIdx := strings.Index(out, "} else")
+	if elseIdx == -1 {
+		t.Fatalf("expected else block in output:\n%s", out)
+	}
+	elsePart := out[elseIdx:]
+	assertContains(t, elsePart, "x = ")
+	assertNotContains(t, elsePart, "x :=")
+}
+
+func TestVarHoistingFromBothIfAndElse(t *testing.T) {
+	// Same var name in both branches — should produce single hoisted declaration
+	out := lowerTS(t, `
+		function f(cond, a, b) {
+			if (cond) {
+				var grammar = a;
+			} else {
+				var grammar = b;
+			}
+			return grammar;
+		}
+	`)
+	// Exactly ONE bare var declaration for grammar
+	count := strings.Count(out, "var grammar *jsvalue.JSValue")
+	if count != 1 {
+		t.Fatalf("expected exactly 1 bare var grammar declaration, got %d:\n%s", count, out)
+	}
+	// Both branches must use = assignment
+	ifIdx := strings.Index(out, "if ")
+	assertContains(t, out[ifIdx:], "grammar = jsvalue.From(a)")
+	assertContains(t, out[ifIdx:], "grammar = jsvalue.From(b)")
+}
+
+func TestVarHoistingFromNestedIf(t *testing.T) {
+	// var inside nested if blocks should hoist to function scope
+	out := lowerTS(t, `
+		function f(a, b) {
+			if (a) {
+				if (b) {
+					var x = 1;
+				}
+			}
+			return x;
+		}
+	`)
+	// Single bare var at function scope
+	count := strings.Count(out, "var x *jsvalue.JSValue")
+	if count != 1 {
+		t.Fatalf("expected exactly 1 bare var x declaration, got %d:\n%s", count, out)
+	}
+	// Assignment in inner if
+	assertContains(t, out, "x = jsvalue.NewNumber")
+}
+
+func TestVarHoistingFromForLoopBody(t *testing.T) {
+	// var inside for loop body should hoist to function scope
+	out := lowerTS(t, `
+		function f(arr) {
+			for (var i = 0; i < arr.length; i++) {
+				var x = arr[i];
+			}
+			return x;
+		}
+	`)
+	assertContains(t, out, "var x *jsvalue.JSValue")
+}
+
+func TestVarHoistingFromWhileBody(t *testing.T) {
+	// var inside while body should hoist to function scope
+	out := lowerTS(t, `
+		function f(cond) {
+			while (cond) {
+				var x = 1;
+				cond = false;
+			}
+			return x;
+		}
+	`)
+	assertContains(t, out, "var x *jsvalue.JSValue")
+}
+
+func TestVarHoistingFromSwitchCase(t *testing.T) {
+	// var inside switch case should hoist to function scope
+	out := lowerTS(t, `
+		function f(val) {
+			switch (val) {
+				case 1:
+					var x = 10;
+					break;
+				case 2:
+					var x = 20;
+					break;
+			}
+			return x;
+		}
+	`)
+	assertContains(t, out, "var x *jsvalue.JSValue")
+}
+
+func TestVarHoistingFromTryCatch(t *testing.T) {
+	// var inside try/catch should hoist to function scope
+	out := lowerTS(t, `
+		function f() {
+			try {
+				var x = 1;
+			} catch (e) {
+				var x = 2;
+			}
+			return x;
+		}
+	`)
+	count := strings.Count(out, "var x *jsvalue.JSValue")
+	if count != 1 {
+		t.Fatalf("expected exactly 1 bare var x declaration, got %d:\n%s", count, out)
+	}
+}
+
+func TestVarHoistingMultipleVars(t *testing.T) {
+	// Multiple vars hoisted from same block
+	out := lowerTS(t, `
+		function f(cond, a, b) {
+			if (cond) {
+				var x = a;
+				var y = b;
+			}
+			return x + y;
+		}
+	`)
+	assertContains(t, out, "var x *jsvalue.JSValue")
+	assertContains(t, out, "var y *jsvalue.JSValue")
+}
+
+func TestVarNoHoistingAtFunctionScope(t *testing.T) {
+	// var at function scope should NOT produce duplicate declarations
+	out := lowerTS(t, `
+		function f(val) {
+			var x = val;
+			return x;
+		}
+	`)
+	// Single var declaration with := (no hoisting needed)
+	count := strings.Count(out, "var x")
+	if count > 2 {
+		// May appear in "var x *jsvalue.JSValue" and potentially once more
+		// but should NOT have a hoisted bare + an initialized one
+		t.Fatalf("expected at most 2 var x mentions, got %d:\n%s", count, out)
+	}
+	// Should be valid Go — either := or var + assignment
+	assertContains(t, out, "x")
+}
+
+func TestLetNotHoisted(t *testing.T) {
+	// let inside if block should NOT be hoisted
+	out := lowerTS(t, `
+		function f(cond, val) {
+			if (cond) {
+				let x = val;
+			}
+		}
+	`)
+	// Should NOT have bare var declaration before if
+	ifIdx := strings.Index(out, "if ")
+	if ifIdx == -1 {
+		t.Fatalf("expected if block in output:\n%s", out)
+	}
+	beforeIf := out[:ifIdx]
+	if strings.Contains(beforeIf, "var x") {
+		t.Fatalf("let should NOT produce hoisted var before if:\n%s", out)
+	}
+}
+
+func TestConstNotHoisted(t *testing.T) {
+	// const inside if block should NOT be hoisted
+	out := lowerTS(t, `
+		function f(cond, val) {
+			if (cond) {
+				const x = val;
+			}
+		}
+	`)
+	ifIdx := strings.Index(out, "if ")
+	beforeIf := out[:ifIdx]
+	if strings.Contains(beforeIf, "var x") {
+		t.Fatalf("const should NOT produce hoisted var before if:\n%s", out)
+	}
+}
+
+func TestVarHoistingInNestedFunction(t *testing.T) {
+	// var inside nested function should hoist to inner function scope, not outer
+	out := lowerTS(t, `
+		function outer() {
+			function inner(cond, val) {
+				if (cond) {
+					var x = val;
+				}
+				return x;
+			}
+		}
+	`)
+	// x should be declared inside inner, not at outer level
+	assertContains(t, out, "var x *jsvalue.JSValue")
+}
+
+func TestVarHoistingInArrowFunction(t *testing.T) {
+	// var inside arrow function block should hoist to arrow's function scope
+	out := lowerTS(t, `
+		const f = (cond, val) => {
+			if (cond) {
+				var x = val;
+			}
+			return x;
+		};
+	`)
+	assertContains(t, out, "var x *jsvalue.JSValue")
+}
+
+func TestVarHoistingInMethod(t *testing.T) {
+	// var inside class method should hoist to method scope
+	out := lowerTS(t, `
+		class Foo {
+			bar(cond, val) {
+				if (cond) {
+					var x = val;
+				}
+				return x;
+			}
+		}
+	`)
+	assertContains(t, out, "var x *jsvalue.JSValue")
+}
+
+func TestVarRedeclarationAcrossBlocks(t *testing.T) {
+	// var declared in one block, redeclared in another — same symbol
+	out := lowerTS(t, `
+		function f(a, b) {
+			if (a) {
+				var x = 1;
+			}
+			if (b) {
+				var x = 2;
+			}
+			return x;
+		}
+	`)
+	count := strings.Count(out, "var x *jsvalue.JSValue")
+	if count != 1 {
+		t.Fatalf("expected exactly 1 bare var x declaration, got %d:\n%s", count, out)
+	}
+}
+
+func TestVarUninitializedHoisting(t *testing.T) {
+	// var without initializer inside block
+	out := lowerTS(t, `
+		function f(cond) {
+			if (cond) {
+				var x;
+			}
+			return x;
+		}
+	`)
+	// Should still produce the bare declaration
+	assertContains(t, out, "var x *jsvalue.JSValue")
+}
+
+func TestVarHoistingWithGlobalScope(t *testing.T) {
+	// var at module/global scope should work normally (no hoisting)
+	out := lowerTS(t, `var globalVar = 42;`)
+	assertContains(t, out, "var globalVar")
+}
+
+func TestVarHoistingPreservesUseAfterBlock(t *testing.T) {
+	// Real-world pattern from nearley.js
+	out := lowerTS(t, `
+		function Parser(rules, start) {
+			if (rules instanceof Object) {
+				var grammar = rules;
+			} else {
+				var grammar = start;
+			}
+			this.grammar = grammar;
+		}
+	`)
+	// Single declaration
+	count := strings.Count(out, "var grammar *jsvalue.JSValue")
+	if count != 1 {
+		t.Fatalf("expected exactly 1 bare var grammar, got %d:\n%s", count, out)
+	}
+	// Usage after if/else should work (grammar is in scope)
+	assertContains(t, out, `Set("grammar",`)
+}
+
+func TestVarHoistingDoesNotAffectLetInSameBlock(t *testing.T) {
+	// var and let in same block — var hoists, let doesn't
+	out := lowerTS(t, `
+		function f(cond, a, b) {
+			if (cond) {
+				var x = a;
+				let y = b;
+			}
+			return x;
+		}
+	`)
+	assertContains(t, out, "var x *jsvalue.JSValue")
+	// y should use := inside the if block, not be hoisted
+	assertNotContains(t, out, "var y *jsvalue.JSValue")
+}
+
+func TestNamedFuncExprSelfReference(t *testing.T) {
+	// Named function expression referencing itself
+	out := lowerTS(t, `
+		const equal = function equal(a, b) {
+			if (a === b) return true;
+			return equal(a, b);
+		};
+	`)
+	// Should use var forward declaration + assignment pattern
+	assertContains(t, out, "var equal")
+	assertContains(t, out, "equal")
+	assertContains(t, out, "jsvalue.NewFunction")
+}
+
+func TestNamedFuncExprArrowNotAffected(t *testing.T) {
+	// Arrow functions don't have names, should not trigger IIFE wrapper
+	out := lowerTS(t, `
+		const f = (x) => { return x; };
+	`)
+	assertContains(t, out, "jsvalue.NewFunction")
+	assertNotContains(t, out, "var f *jsvalue.JSValue\n")
+}

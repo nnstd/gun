@@ -98,6 +98,7 @@ type Declarator struct {
 	Symbol  *symbol.Symbol // simple name binding
 	Pattern Pattern        // destructuring pattern
 	Init    Expr           // initial value (may be nil)
+	Hoisted bool           // true when var was hoisted out of a block to function scope
 }
 
 // ClassDecl represents a class declaration.
@@ -629,7 +630,8 @@ type ArrowFunc struct {
 
 // FuncExpr is a function expression.
 type FuncExpr struct {
-	Name    string // optional name (empty for anonymous)
+	Name    string          // optional name (empty for anonymous)
+	Symbol  *symbol.Symbol  // symbol for named self-reference (nil if anonymous)
 	Params  []*Param
 	Body    *BlockStmt
 	IsAsync bool

@@ -4,8 +4,9 @@ import "fmt"
 
 // Scope represents a lexical scope containing symbol definitions.
 type Scope struct {
-	Parent  *Scope
-	symbols map[string]*Symbol // originalName → symbol
+	Parent      *Scope
+	IsFuncScope bool // true for function-level scopes (params + body)
+	symbols     map[string]*Symbol // originalName → symbol
 }
 
 // Table is the central symbol table. It manages scopes and assigns unique IDs
@@ -55,6 +56,11 @@ func (t *Table) PopScope() {
 	t.current = t.scopeStack[len(t.scopeStack)-1]
 }
 
+// CurrentScope returns the current scope.
+func (t *Table) CurrentScope() *Scope {
+	return t.current
+}
+
 // Define creates a new symbol in the current scope with a unique ID.
 // If a symbol with the same name already exists in the current scope, it is
 // overwritten (redeclaration within the same scope).
@@ -67,6 +73,35 @@ func (t *Table) Define(name string, kind Kind) *Symbol {
 	}
 	t.nextID++
 	t.current.symbols[name] = sym
+	t.allSymbols[sym.ID] = sym
+	return sym
+}
+
+// DefineVar creates a symbol in the nearest function scope (JS var hoisting).
+// Falls back to the global scope if no function scope is found.
+func (t *Table) DefineVar(name string, kind Kind) *Symbol {
+	target := t.current
+	for s := t.current; s != nil; s = s.Parent {
+		if s.IsFuncScope {
+			target = s
+			break
+		}
+		if s.Parent == nil {
+			target = s // global scope
+		}
+	}
+	// If already defined in target scope, reuse it (var redeclaration)
+	if existing, ok := target.symbols[name]; ok {
+		return existing
+	}
+	sym := &Symbol{
+		ID:           t.nextID,
+		OriginalName: name,
+		Kind:         kind,
+		IsJSValue:    true,
+	}
+	t.nextID++
+	target.symbols[name] = sym
 	t.allSymbols[sym.ID] = sym
 	return sym
 }
@@ -91,11 +126,6 @@ func (t *Table) LookupLocal(name string) *Symbol {
 // Get retrieves a symbol by its unique ID. Returns nil if not found.
 func (t *Table) Get(id ID) *Symbol {
 	return t.allSymbols[id]
-}
-
-// CurrentScope returns the current scope.
-func (t *Table) CurrentScope() *Scope {
-	return t.current
 }
 
 // IsGlobalScope returns true if the current scope is the global (outermost) scope.

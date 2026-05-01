@@ -877,6 +877,15 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 	})
 
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "Buffer",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			imp.AddImport("github.com/nnstd/gun/runtime/buffer")
+			return selectorExpr(ident("buffer"), "Buffer")
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "Proxy",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
@@ -1188,4 +1197,21 @@ func registerKnownGlobals(ctx *tcontext.TranspilerContext) {
 	ctx.MarkKnownGlobal("decodeURI")
 	ctx.MarkKnownGlobal("decodeURIComponent")
 	ctx.MarkKnownGlobal("encodeURI")
+
+	// Binary data types
+	ctx.MarkKnownGlobal("Buffer")
+	ctx.MarkKnownGlobal("ArrayBuffer")
+	ctx.MarkKnownGlobal("SharedArrayBuffer")
+	ctx.MarkKnownGlobal("DataView")
+	ctx.MarkKnownGlobal("Uint8Array")
+	ctx.MarkKnownGlobal("Int8Array")
+	ctx.MarkKnownGlobal("Uint8ClampedArray")
+	ctx.MarkKnownGlobal("Int16Array")
+	ctx.MarkKnownGlobal("Uint16Array")
+	ctx.MarkKnownGlobal("Int32Array")
+	ctx.MarkKnownGlobal("Uint32Array")
+	ctx.MarkKnownGlobal("Float32Array")
+	ctx.MarkKnownGlobal("Float64Array")
+	ctx.MarkKnownGlobal("BigInt64Array")
+	ctx.MarkKnownGlobal("BigUint64Array")
 }

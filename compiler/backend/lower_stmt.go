@@ -201,7 +201,14 @@ func (l *Lowerer) lowerLocalVarStmts(d *hir.VarDecl) []ast.Stmt {
 		if decl.Init != nil {
 			value := l.lowerExpr(decl.Init)
 			value = jsvalueWrapLit(value)
-			if hirExprReferencesName(decl.Init, decl.Symbol.OriginalName) {
+			if decl.Hoisted {
+				// Hoisted var: bare declaration already emitted at function scope.
+				// Only emit the assignment here.
+				stmts = append(stmts, assignStmt(
+					[]ast.Expr{goIdent(name)},
+					[]ast.Expr{value},
+				))
+			} else if hirExprReferencesName(decl.Init, decl.Symbol.OriginalName) {
 				l.jsvalueImport()
 				stmts = append(stmts, &ast.DeclStmt{
 					Decl: varDecl(name, jsValuePtrType(), nil),

@@ -693,6 +693,7 @@ func (b *Builder) buildArrowFunc(node *sitter.Node) *ArrowFunc {
 	}
 
 	b.symtab.PushScope()
+	b.symtab.CurrentScope().IsFuncScope = true
 	defer b.symtab.PopScope()
 
 	var params []*Param
@@ -716,6 +717,8 @@ func (b *Builder) buildArrowFunc(node *sitter.Node) *ArrowFunc {
 	if bodyNode != nil {
 		if bodyNode.Kind() == "statement_block" {
 			af.Body = b.buildBlock(bodyNode)
+			af.Body = b.prependHoistedVars(af.Body)
+			b.hoistedSymbols = nil
 		} else {
 			// Concise body: () => expr
 			af.ExprBody = b.buildExpr(bodyNode)
@@ -744,7 +747,15 @@ func (b *Builder) buildFuncExpr(node *sitter.Node) *FuncExpr {
 	}
 
 	b.symtab.PushScope()
+	b.symtab.CurrentScope().IsFuncScope = true
 	defer b.symtab.PopScope()
+
+	// Register named function expression self-reference symbol
+	var fnSym *symbol.Symbol
+	if name != "" {
+		fnSym = b.symtab.Define(name, symbol.KindVariable)
+		fnSym.IsJSValue = true
+	}
 
 	params := b.buildParams(paramsNode)
 
@@ -753,8 +764,13 @@ func (b *Builder) buildFuncExpr(node *sitter.Node) *FuncExpr {
 		body = b.buildBlock(bodyNode)
 	}
 
+	// Prepend hoisted var declarations at function body top
+	body = b.prependHoistedVars(body)
+	b.hoistedSymbols = nil
+
 	return &FuncExpr{
 		Name:    name,
+		Symbol:  fnSym,
 		Params:  params,
 		Body:    body,
 		IsAsync: isAsync,

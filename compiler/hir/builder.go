@@ -9,10 +9,11 @@ import (
 
 // Builder walks a tree-sitter CST and produces an HIR Module.
 type Builder struct {
-	source  []byte
-	symtab  *symbol.Table
-	pkgName string
-	path    string
+	source         []byte
+	symtab         *symbol.Table
+	pkgName        string
+	path           string
+	hoistedSymbols []*symbol.Symbol // var symbols hoisted to function scope
 }
 
 type classParts struct {
@@ -182,6 +183,7 @@ func (b *Builder) buildFuncDecl(node *sitter.Node, exported bool) *FuncDecl {
 	// enclosing scope (e.g. sibling function declarations must not see
 	// each other's parameters).
 	b.symtab.PushScope()
+	b.symtab.CurrentScope().IsFuncScope = true
 
 	paramsNode := node.ChildByFieldName("parameters")
 	params := b.buildParams(paramsNode)
@@ -201,6 +203,10 @@ func (b *Builder) buildFuncDecl(node *sitter.Node, exported bool) *FuncDecl {
 		body = b.buildBlock(bodyNode)
 	}
 
+	// Prepend hoisted var declarations at function body top
+	body = b.prependHoistedVars(body)
+	b.hoistedSymbols = nil
+
 	b.symtab.PopScope()
 
 	// Record param count in symbol
@@ -216,11 +222,33 @@ func (b *Builder) buildFuncDecl(node *sitter.Node, exported bool) *FuncDecl {
 	}
 }
 
+// prependHoistedVars inserts bare VarDecls at the top of the function body
+// for all var symbols that were hoisted from inner blocks.
+func (b *Builder) prependHoistedVars(body *BlockStmt) *BlockStmt {
+	if len(b.hoistedSymbols) == 0 || body == nil {
+		return body
+	}
+	seen := make(map[symbol.ID]bool)
+	var hoisted []Stmt
+	for _, sym := range b.hoistedSymbols {
+		if seen[sym.ID] {
+			continue
+		}
+		seen[sym.ID] = true
+		hoisted = append(hoisted, &VarDecl{
+			Declarators: []*Declarator{{Symbol: sym}},
+			Kind:        VarVar,
+		})
+	}
+	body.Stmts = append(hoisted, body.Stmts...)
+	return body
+}
+
 func (b *Builder) buildVarDecl(node *sitter.Node, exported bool) *VarDecl {
 	return b.buildVarDeclSkipping(node, exported, nil)
 }
 
-func (b *Builder) buildDeclarator(node *sitter.Node, exported bool) *Declarator {
+func (b *Builder) buildDeclarator(node *sitter.Node, exported bool, kind VarKind) *Declarator {
 	nameNode := node.ChildByFieldName("name")
 	valueNode := node.ChildByFieldName("value")
 
@@ -236,18 +264,37 @@ func (b *Builder) buildDeclarator(node *sitter.Node, exported bool) *Declarator 
 	case "identifier":
 		name := b.nodeText(nameNode)
 		var sym *symbol.Symbol
+		hoisted := false
 		if b.symtab.IsGlobalScope() {
 			sym = b.symtab.LookupLocal(name)
 		}
 		if sym == nil {
-			sym = b.symtab.Define(name, symbol.KindVariable)
+			if kind == VarVar {
+				sym = b.symtab.DefineVar(name, symbol.KindVariable)
+				// If DefineVar placed the symbol in a parent scope (not the current one),
+				// mark as hoisted so the backend emits an assignment, not :=.
+				local := b.symtab.LookupLocal(name)
+				hoisted = local == nil || local.ID != sym.ID
+			} else {
+				sym = b.symtab.Define(name, symbol.KindVariable)
+			}
+		} else if kind == VarVar && sym != nil {
+			// Redeclaration of an already-hoisted var symbol
+			// Check if the existing symbol is NOT in the current scope
+			local := b.symtab.LookupLocal(name)
+			if local == nil || local.ID != sym.ID {
+				hoisted = true
+			}
 		}
 		sym.Exported = exported
 		var init Expr
 		if valueNode != nil {
 			init = b.buildExpr(valueNode)
 		}
-		return &Declarator{Symbol: sym, Init: init}
+		if hoisted {
+			b.hoistedSymbols = append(b.hoistedSymbols, sym)
+		}
+		return &Declarator{Symbol: sym, Init: init, Hoisted: hoisted}
 	case "object_pattern":
 		var init Expr
 		if valueNode != nil {
@@ -363,6 +410,8 @@ func (b *Builder) buildClassBody(parts *classParts, node *sitter.Node) {
 				}
 			}
 
+			b.symtab.PushScope()
+			b.symtab.CurrentScope().IsFuncScope = true
 			paramsNode := child.ChildByFieldName("parameters")
 			params := b.buildParams(paramsNode)
 
@@ -371,6 +420,9 @@ func (b *Builder) buildClassBody(parts *classParts, node *sitter.Node) {
 			if bodyNode != nil {
 				body = b.buildBlock(bodyNode)
 			}
+			body = b.prependHoistedVars(body)
+			b.hoistedSymbols = nil
+			b.symtab.PopScope()
 
 			isStatic := false
 			isGetter := false
@@ -1505,7 +1557,7 @@ func (b *Builder) buildVarDeclSkipping(node *sitter.Node, exported bool, skip ma
 		if skip[child.Id()] {
 			continue
 		}
-		d := b.buildDeclarator(child, exported)
+		d := b.buildDeclarator(child, exported, kind)
 		if d != nil {
 			declarators = append(declarators, d)
 		}

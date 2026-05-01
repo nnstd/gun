@@ -1764,8 +1764,29 @@ func (l *Lowerer) lowerFuncExpr(e *hir.FuncExpr) ast.Expr {
 		newFunc = callExpr(selectorExpr(newFunc, "MarkAsAsync"))
 	}
 	if usesThis {
-		return callExpr(selectorExpr(newFunc, "MarkAsMethod"))
+		newFunc = callExpr(selectorExpr(newFunc, "MarkAsMethod"))
 	}
+
+	// Named function expression: wrap in IIFE so the name is in scope for recursion.
+	if e.Name != "" && e.Symbol != nil {
+		goName := goIdent(l.emitName(e.Symbol))
+		return callExpr(&ast.FuncLit{
+			Type: &ast.FuncType{
+				Params: fieldList(),
+				Results: fieldList(&ast.Field{
+					Type: jsValuePtrType(),
+				}),
+			},
+			Body: &ast.BlockStmt{
+				List: []ast.Stmt{
+					&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{goName}, Type: jsValuePtrType()}}}},
+						assignStmt([]ast.Expr{goName}, []ast.Expr{newFunc}),
+					&ast.ReturnStmt{Results: []ast.Expr{goName}},
+				},
+			},
+		})
+	}
+
 	return newFunc
 }
 func (l *Lowerer) lowerSequenceExpr(e *hir.SequenceExpr) ast.Expr {
