@@ -1,5 +1,6 @@
 import { defineCollection, defineConfig } from '@content-collections/core'
 import { compileMarkdown } from '@content-collections/markdown'
+import remarkGfm from 'remark-gfm'
 import { codeToHtml } from 'shiki'
 import { z } from 'zod'
 import { GUN_SHIKI_THEME, SHIKI_LANGUAGE_MAP } from './src/lib/shiki-theme'
@@ -55,7 +56,7 @@ const blog = defineCollection({
   }),
   transform: async (document, context) => ({
     ...document,
-    html: await highlightMarkdownCode(await compileMarkdown(context, document)),
+    html: await highlightMarkdownCode(await compileMarkdown(context, document, { remarkPlugins: [remarkGfm] })),
   }),
 })
 
@@ -71,7 +72,7 @@ const docs = defineCollection({
   }),
   transform: async (document, context) => ({
     ...document,
-    html: await highlightMarkdownCode(await compileMarkdown(context, document)),
+    html: await highlightMarkdownCode(await compileMarkdown(context, document, { remarkPlugins: [remarkGfm] })),
   }),
 })
 
