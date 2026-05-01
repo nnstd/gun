@@ -728,6 +728,16 @@ func (l *Lowerer) lowerClassMethodValue(m *hir.ClassMethod) ast.Expr {
 		methodBody = l.lowerMethodBody(m.Params, m.Body)
 	} else {
 		methodBody = l.lowerFuncBody(m.Params, m.Body)
+		// Static methods that reference 'this' need it bound to the class
+		if m.Body != nil && hirBodyUsesThis(m.Body) && l.currentClassName != "" {
+			thisAssign := assignStmt([]ast.Expr{goIdent("this")}, []ast.Expr{goIdent(l.currentClassName)})
+			methodBody.List = append([]ast.Stmt{
+				&ast.DeclStmt{
+					Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{goIdent("this")}, Type: jsValuePtrType()}}},
+				},
+				thisAssign,
+			}, methodBody.List...)
+		}
 	}
 	methodBody = l.instrumentProfiledBody(m.Name, m.Span, methodBody)
 	methodLit := setFuncLitPos(l.wrapAsJSValueFunc(m.Params, methodBody), m.Span)

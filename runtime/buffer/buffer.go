@@ -17,8 +17,8 @@ var Blob *jsvalue.JSValue
 // Internal helpers
 // --------------------------------------------------------------------------
 
-// newBufferFromBytes creates a new Buffer instance backed by a copy of data.
-func newBufferFromBytes(data []byte) *jsvalue.JSValue {
+// NewBufferFromBytes creates a new Buffer instance backed by a copy of data.
+func NewBufferFromBytes(data []byte) *jsvalue.JSValue {
 	ab := jsvalue.NewArrayBuffer(len(data))
 	if len(data) > 0 {
 		copy(ab.Bytes(), data)
@@ -150,12 +150,12 @@ func init() {
 	// slice(start?, end?) — returns a VIEW (not a copy), per Node.js semantics
 	proto.Set("slice", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		if len(args) == 0 || args[0] == nil {
-			return newBufferFromBytes(nil)
+			return NewBufferFromBytes(nil)
 		}
 		this := args[0]
 		bs := this.ByteSliceData()
 		if bs == nil {
-			return newBufferFromBytes(nil)
+			return NewBufferFromBytes(nil)
 		}
 		length := bs.Length()
 		start := 0
@@ -197,12 +197,12 @@ func init() {
 	// subarray(start?, end?) — same as slice (view)
 	proto.Set("subarray", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		if len(args) == 0 || args[0] == nil {
-			return newBufferFromBytes(nil)
+			return NewBufferFromBytes(nil)
 		}
 		this := args[0]
 		bs := this.ByteSliceData()
 		if bs == nil {
-			return newBufferFromBytes(nil)
+			return NewBufferFromBytes(nil)
 		}
 		count := bs.Length()
 		begin := 0
@@ -663,7 +663,7 @@ func init() {
 	// Buffer.from(arrayBuffer, byteOffset?, length?)
 	Buffer.Set("from", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		if len(args) == 0 || args[0] == nil {
-			return newBufferFromBytes(nil)
+			return NewBufferFromBytes(nil)
 		}
 		first := args[0]
 
@@ -691,7 +691,7 @@ func init() {
 
 			// Buffer / TypedArray → copy
 			if fbs != nil && fbs.Kind() != jsvalue.TypedArrayNone {
-				return newBufferFromBytes(first.Bytes())
+				return NewBufferFromBytes(first.Bytes())
 			}
 		}
 
@@ -703,9 +703,9 @@ func init() {
 			}
 			data := encodeBytes(first.String(), enc)
 			if data == nil {
-				return newBufferFromBytes(nil)
+				return NewBufferFromBytes(nil)
 			}
-			return newBufferFromBytes(data)
+			return NewBufferFromBytes(data)
 		}
 
 		// Array of numbers
@@ -717,10 +717,10 @@ func init() {
 					data[i] = byte(int(e.Number()) & 0xFF)
 				}
 			}
-			return newBufferFromBytes(data)
+			return NewBufferFromBytes(data)
 		}
 
-		return newBufferFromBytes(nil)
+		return NewBufferFromBytes(nil)
 	}))
 
 	// Buffer.alloc(size, fill?, encoding?)
@@ -732,7 +732,7 @@ func init() {
 				size = 0
 			}
 		}
-		buf := newBufferFromBytes(make([]byte, size))
+		buf := NewBufferFromBytes(make([]byte, size))
 		// Apply fill if specified
 		if len(args) > 1 && args[1] != nil && size > 0 {
 			fill := args[1]
@@ -775,7 +775,7 @@ func init() {
 				size = 0
 			}
 		}
-		return newBufferFromBytes(make([]byte, size))
+		return NewBufferFromBytes(make([]byte, size))
 	}))
 
 	// Buffer.allocUnsafeSlow(size)
@@ -787,13 +787,13 @@ func init() {
 				size = 0
 			}
 		}
-		return newBufferFromBytes(make([]byte, size))
+		return NewBufferFromBytes(make([]byte, size))
 	}))
 
 	// Buffer.concat(list, totalLength?)
 	Buffer.Set("concat", jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		if len(args) == 0 || args[0] == nil || !args[0].IsArray() {
-			return newBufferFromBytes(nil)
+			return NewBufferFromBytes(nil)
 		}
 		list := args[0].Array()
 
@@ -821,7 +821,7 @@ func init() {
 		if len(args) > 1 && args[1] != nil && len(result) > totalLen {
 			result = result[:totalLen]
 		}
-		return newBufferFromBytes(result)
+		return NewBufferFromBytes(result)
 	}))
 
 	// Buffer.isBuffer(val)

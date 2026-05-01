@@ -195,6 +195,7 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 		}
 		hirModules[name] = hirMod
 		allExports[name] = backend.ScanHIRExports(hirMod)
+		allExports[name] = append(allExports[name], backend.ScanHIRCJSExports(hirMod)...)
 		allNames[name] = backend.ScanHIRTopLevelNames(hirMod)
 	}
 
@@ -593,9 +594,7 @@ func expandWildcardReexports(mods map[string]*hir.Module, allExports map[string]
 
 func collectTopLevelAliases(mod *hir.Module, fileName, entryFile string, exportAliases map[string]string, used map[string]int) map[symbol.ID]string {
 	aliases := make(map[symbol.ID]string)
-	if fileName == entryFile {
-		return aliases
-	}
+	isEntry := fileName == entryFile
 
 	assign := func(sym *symbol.Symbol, exported bool, exportName string) {
 		if sym == nil {
@@ -604,13 +603,21 @@ func collectTopLevelAliases(mod *hir.Module, fileName, entryFile string, exportA
 		if _, exists := aliases[sym.ID]; exists {
 			return
 		}
+		// Prefer export alias for any symbol whose name matches,
+		// even non-exported locals that back CJS named exports.
+		if alias := exportAliases[sym.OriginalName]; alias != "" {
+			aliases[sym.ID] = alias
+			return
+		}
 		if exported {
 			if alias := exportAliases[exportName]; alias != "" {
 				aliases[sym.ID] = alias
 				return
 			}
 		}
-		aliases[sym.ID] = makeUniqueAlias(fileSpecificExportName(fileName, sym.OriginalName), used)
+		if !isEntry {
+			aliases[sym.ID] = makeUniqueAlias(fileSpecificExportName(fileName, sym.OriginalName), used)
+		}
 	}
 
 	var walkDecl func(hir.Decl, bool)

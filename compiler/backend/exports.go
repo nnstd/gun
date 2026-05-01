@@ -66,11 +66,121 @@ func ScanHIRExports(mod *hir.Module) []CrossFileExport {
 					GoName:       "Default",
 					IsJSValue:    true,
 				})
+				// CJS module.exports = { X, Y } → extract named exports
+				if d.Decl != nil {
+					if vd, ok := d.Decl.(*hir.VarDecl); ok {
+						for _, dec := range vd.Declarators {
+							if obj, ok := dec.Init.(*hir.ObjectLiteral); ok {
+								for _, prop := range obj.Properties {
+									if prop.KeyName != "" && !prop.Computed {
+										exports = append(exports, CrossFileExport{
+											OriginalName: prop.KeyName,
+											GoName:       symbol.Capitalize(symbol.Sanitize(prop.KeyName)),
+											IsJSValue:    true,
+										})
+									}
+								}
+							}
+						}
+					}
+				}
 			}
 		}
 	}
 
 	return exports
+}
+
+// ScanHIRCJSExports detects CommonJS-style exports.X = ... assignments
+// and returns them as CrossFileExports so the pipeline can wire cross-file
+// import resolution for modules that use CJS export patterns.
+func ScanHIRCJSExports(mod *hir.Module) []CrossFileExport {
+	var exports []CrossFileExport
+	seen := map[string]bool{}
+	for _, d := range mod.Declarations {
+		switch d := d.(type) {
+		case *hir.VarDecl:
+			for _, dec := range d.Declarators {
+				if dec.Init != nil {
+					collectCJSExports(dec.Init, seen, &exports)
+				}
+			}
+		case *hir.TopLevelStmt:
+			es, ok := d.Stmt.(*hir.ExprStmt)
+			if !ok {
+				continue
+			}
+			assign, ok := es.Expr.(*hir.AssignExpr)
+			if !ok {
+				continue
+			}
+			// Only extract named exports from module.exports = { ... }
+			// in expression statements. The exports.X = value pattern
+			// in expression statements has no backing Go variable.
+			mem, ok := assign.Left.(*hir.MemberExpr)
+			if !ok {
+				continue
+			}
+			id, ok := mem.Object.(*hir.Identifier)
+			if !ok || id.Name != "module" || mem.Property != "exports" {
+				continue
+			}
+			collectCJSExportsFromAssign(assign, seen, &exports)
+		}
+	}
+	return exports
+}
+
+func collectCJSExports(expr hir.Expr, seen map[string]bool, exports *[]CrossFileExport) {
+	assign, ok := expr.(*hir.AssignExpr)
+	if !ok {
+		return
+	}
+	collectCJSExportsFromAssign(assign, seen, exports)
+}
+
+func collectCJSExportsFromAssign(assign *hir.AssignExpr, seen map[string]bool, exports *[]CrossFileExport) {
+	mem, ok := assign.Left.(*hir.MemberExpr)
+	if !ok {
+		return
+	}
+	id, ok := mem.Object.(*hir.Identifier)
+	if !ok {
+		return
+	}
+
+	// module.exports = { X, Y, Z } → extract named exports from object literal
+	if id.Name == "module" && mem.Property == "exports" {
+		if obj, ok := assign.Right.(*hir.ObjectLiteral); ok {
+			for _, prop := range obj.Properties {
+				name := prop.KeyName
+				if name == "" || seen[name] || prop.Computed {
+					continue
+				}
+				seen[name] = true
+				*exports = append(*exports, CrossFileExport{
+					OriginalName: name,
+					GoName:       symbol.Capitalize(symbol.Sanitize(name)),
+					IsJSValue:    true,
+				})
+			}
+		}
+		return
+	}
+
+	// exports.X = value → named export
+	if id.Name == "exports" {
+		propName := mem.Property
+		if propName == "" || seen[propName] {
+			return
+		}
+		seen[propName] = true
+		*exports = append(*exports, CrossFileExport{
+			OriginalName: propName,
+			GoName:       symbol.Capitalize(symbol.Sanitize(propName)),
+			IsJSValue:    true,
+		})
+	}
 }
 
 // ScanHIRTopLevelNames extracts Go-level top-level names declared by an HIR module.

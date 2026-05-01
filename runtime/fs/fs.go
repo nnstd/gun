@@ -57,9 +57,7 @@ func dataBytes(data *jsvalue.JSValue) []byte {
 	return []byte(data.String())
 }
 
-func bufferFromBytes(data []byte) *jsvalue.JSValue {
-	return buffer.Buffer.Get("from").Call(jsvalue.NewString(string(data)))
-}
+var bufferFromBytes = buffer.NewBufferFromBytes
 
 func readEncoding(opts ...*jsvalue.JSValue) (string, bool) {
 	if len(opts) == 0 || opts[0] == nil || opts[0].TypeString() == "undefined" || opts[0].TypeString() == "null" {
