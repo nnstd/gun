@@ -422,22 +422,29 @@ func (l *Lowerer) lowerForStmt(s *hir.ForStmt) ast.Stmt {
 
 	var post ast.Stmt
 	if s.Post != nil {
-		postExpr := l.lowerExpr(s.Post)
-		if postExpr != nil {
-			// Update expressions (i++, i--) must assign the result back since
-			// Inc/Dec return a new JSValue rather than mutating in place.
-			if update, ok := s.Post.(*hir.UpdateExpr); ok {
-				operand := l.lowerExpr(update.Operand)
-				post = &ast.AssignStmt{
-					Lhs: []ast.Expr{operand},
-					Tok: token.ASSIGN,
-					Rhs: []ast.Expr{postExpr},
+			postExpr := l.lowerExpr(s.Post)
+			if postExpr != nil {
+				// Update expressions (i++, i--) must assign the result back since
+				// Inc/Dec return a new JSValue rather than mutating in place.
+				if update, ok := s.Post.(*hir.UpdateExpr); ok {
+					if mem, ok := update.Operand.(*hir.MemberExpr); ok && l.exprIsJSValue(mem.Object) {
+						l.jsvalueImport()
+						obj := l.lowerExpr(mem.Object)
+						key := l.lowerClassMemberKey(mem.Property, mem.Private, nil)
+						post = exprStmt(callExpr(selectorExpr(obj, "Set"), key, postExpr))
+					} else {
+						operand := l.lowerExpr(update.Operand)
+						post = &ast.AssignStmt{
+							Lhs: []ast.Expr{operand},
+							Tok: token.ASSIGN,
+							Rhs: []ast.Expr{postExpr},
+						}
+					}
+				} else {
+					post = exprStmt(postExpr)
 				}
-			} else {
-				post = exprStmt(postExpr)
 			}
 		}
-	}
 
 	body := l.lowerBlock(s.Body)
 
@@ -465,10 +472,15 @@ func (l *Lowerer) lowerForInStmt(s *hir.ForInStmt) ast.Stmt {
 	value := l.lowerExpr(s.Value)
 	body := l.lowerBlock(s.Body)
 
-	// for _, key := range obj.OwnKeys()
+	// Wrap string keys from OwnKeys() as JSValue
+	keyStr := goIdent(keyName + "Str")
+	wrapStmt := &ast.AssignStmt{Lhs: []ast.Expr{goIdent(keyName)}, Rhs: []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "NewString"), keyStr)}, Tok: token.DEFINE}
+	body.List = append([]ast.Stmt{wrapStmt}, body.List...)
+
+	// for _, keyStr := range obj.OwnKeys()
 	return &ast.RangeStmt{
 		Key:   goIdent("_"),
-		Value: goIdent(keyName),
+		Value: keyStr,
 		Tok:   token.DEFINE,
 		X:     callExpr(selectorExpr(value, "OwnKeys")),
 		Body:  body,

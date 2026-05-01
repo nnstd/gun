@@ -927,6 +927,16 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 	})
 
 	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
+		Name: "Function",
+		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			ctor := selectorExpr(selectorExpr(ident("jsvalue"), "FunctionCtor"), "New")
+			return callExpr(ctor, args...)
+		},
+	})
+	ctx.MarkKnownGlobal("Function")
+
+	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
 		Name: "atob",
 		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
@@ -1197,6 +1207,18 @@ func registerKnownGlobals(ctx *tcontext.TranspilerContext) {
 	ctx.MarkKnownGlobal("decodeURI")
 	ctx.MarkKnownGlobal("decodeURIComponent")
 	ctx.MarkKnownGlobal("encodeURI")
+
+	// Browser/Node environment globals
+	for _, name := range []string{"global", "self", "window", "exports", "define"} {
+		ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+			Name: name,
+			Transform: func(imp tcontext.Imports) ast.Expr {
+				imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+				return callExpr(selectorExpr(ident("jsvalue"), "NewObject"))
+			},
+		})
+		ctx.MarkKnownGlobal(name)
+	}
 
 	// Binary data types
 	ctx.MarkKnownGlobal("Buffer")

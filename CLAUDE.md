@@ -283,6 +283,10 @@ Each new package has its own tests:
 - `compiler/backend/lower_test.go` — HIR → Go AST (unit tests and round-trip TS → Go)
 - `compiler/pipeline/pipeline_test.go` — full pipeline at O0/O1/O2, hooks, various TS snippets
 
+## Tooling
+
+Never call "cat -A". There no this flag in macOS
+
 ## Testing Transpilation with Real Projects
 
 ### gun-test Project

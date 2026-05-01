@@ -166,6 +166,9 @@ func isAlreadyJSValue(expr ast.Expr) bool {
 	case *ast.ParenExpr:
 		return isAlreadyJSValue(e.X)
 	case *ast.CallExpr:
+		if _, ok := e.Fun.(*ast.FuncLit); ok {
+			return true
+		}
 		if sel, ok := e.Fun.(*ast.SelectorExpr); ok {
 			if id, ok := sel.X.(*ast.Ident); ok && id.Name == "jsvalue" {
 				return true

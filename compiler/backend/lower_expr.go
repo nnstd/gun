@@ -1558,13 +1558,14 @@ func (l *Lowerer) lowerMemberExpr(e *hir.MemberExpr) ast.Expr {
 		return l.lowerPrivateGet(e)
 	}
 
-	// .length → .Len() for JSValue, len() for typed
-	if !e.Private && e.Property == "length" {
-		if l.exprIsJSValue(e.Object) {
-			return callExpr(selectorExpr(obj, "Len"))
+		// .length -> .Get("length") for JSValue, len() for typed
+		if !e.Private && e.Property == "length" {
+			if l.exprIsJSValue(e.Object) {
+				l.jsvalueImport()
+				return callExpr(selectorExpr(obj, "Get"), stringLit("length"))
+			}
+			return callExpr(goIdent("len"), obj)
 		}
-		return callExpr(goIdent("len"), obj)
-	}
 
 	// JSValue receivers → .Get("prop")
 	if l.exprIsJSValue(e.Object) {
@@ -1670,7 +1671,7 @@ func (l *Lowerer) exprIsJSValue(e hir.Expr) bool {
 			}
 			return res.isTranspiled
 		}
-		if e.Sym.Kind == symbol.KindParameter || e.Sym.Kind == symbol.KindVariable || e.Sym.Kind == symbol.KindImport {
+		if e.Sym.Kind == symbol.KindParameter || e.Sym.Kind == symbol.KindVariable || e.Sym.Kind == symbol.KindImport || e.Sym.Kind == symbol.KindFunction || e.Sym.Kind == symbol.KindClass {
 			return true
 		}
 		return false
@@ -1769,7 +1770,10 @@ func (l *Lowerer) lowerFuncExpr(e *hir.FuncExpr) ast.Expr {
 
 	// Named function expression: wrap in IIFE so the name is in scope for recursion.
 	if e.Name != "" && e.Symbol != nil {
-		goName := goIdent(l.emitName(e.Symbol))
+		nameStr := l.emitName(e.Symbol)
+		declIdent := goIdent(nameStr)
+		assignIdent := goIdent(nameStr)
+		retIdent := goIdent(nameStr)
 		return callExpr(&ast.FuncLit{
 			Type: &ast.FuncType{
 				Params: fieldList(),
@@ -1779,9 +1783,9 @@ func (l *Lowerer) lowerFuncExpr(e *hir.FuncExpr) ast.Expr {
 			},
 			Body: &ast.BlockStmt{
 				List: []ast.Stmt{
-					&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{goName}, Type: jsValuePtrType()}}}},
-						assignStmt([]ast.Expr{goName}, []ast.Expr{newFunc}),
-					&ast.ReturnStmt{Results: []ast.Expr{goName}},
+					&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{declIdent}, Type: jsValuePtrType()}}}},
+					assignStmt([]ast.Expr{assignIdent}, []ast.Expr{newFunc}),
+					&ast.ReturnStmt{Results: []ast.Expr{retIdent}},
 				},
 			},
 		})
