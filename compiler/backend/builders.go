@@ -35,6 +35,7 @@ func rawStringLit(s string) *ast.BasicLit {
 	// If the pattern contains backticks, fall back to double-quoted with escaping
 	if strings.Contains(s, "`") {
 		escaped := strings.ReplaceAll(s, `\`, `\\`)
+		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
 		return basicLit(token.STRING, `"`+escaped+`"`)
 	}
 	return basicLit(token.STRING, "`"+s+"`")

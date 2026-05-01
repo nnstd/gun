@@ -277,10 +277,24 @@ func init() {
 	}))
 
 	DateCtor = NewFunction(func(args ...*JSValue) *JSValue {
-		if len(args) == 0 {
-			return NewString(time.Now().Format(time.RFC1123Z))
-		}
-		return NewObject()
+		now := time.Now()
+		d := NewObject()
+		d.Set("getTime", NewFunction(func(_ ...*JSValue) *JSValue {
+			return NewNumber(float64(now.UnixMilli()))
+		}))
+		d.Set("toISOString", NewFunction(func(_ ...*JSValue) *JSValue {
+			return NewString(now.UTC().Format("2006-01-02T15:04:05.000Z"))
+		}))
+		d.Set("toUTCString", NewFunction(func(_ ...*JSValue) *JSValue {
+			return NewString(now.UTC().Format(time.RFC1123))
+		}))
+		d.Set("toString", NewFunction(func(_ ...*JSValue) *JSValue {
+			return NewString(now.Format(time.UnixDate))
+		}))
+		d.Set("valueOf", NewFunction(func(_ ...*JSValue) *JSValue {
+			return NewNumber(float64(now.UnixMilli()))
+		}))
+		return d
 	})
 	DateCtor.Set("now", NewFunction(func(args ...*JSValue) *JSValue {
 		return NewNumber(float64(time.Now().UnixMilli()))

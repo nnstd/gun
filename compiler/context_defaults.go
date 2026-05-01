@@ -398,13 +398,9 @@ func registerConstructors(ctx *tcontext.TranspilerContext) {
 		},
 	})
 
-	ctx.RegisterConstructor(&tcontext.Constructor{
-		Name: "Date",
-		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
-			imp.AddImport("time")
-			return callExpr(selectorExpr(ident("time"), "Now"))
-		},
-	})
+	// Date uses the identifier mapping to jsvalue.DateCtor.
+	// new Date() becomes DateCtor.New() which returns a proper JSValue.
+	// No constructor transform needed — the identifier path handles it.
 
 	ctx.RegisterConstructor(&tcontext.Constructor{
 		Name: "RegExp",
@@ -893,8 +889,8 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		Name: "Buffer",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			imp.AddImport("github.com/nnstd/gun/runtime/buffer")
-			return selectorExpr(ident("buffer"), "Buffer")
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/buffer", "_gun_buffer")
+			return selectorExpr(ident("_gun_buffer"), "Buffer")
 		},
 	})
 

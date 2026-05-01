@@ -479,14 +479,19 @@ func (b *Builder) buildTryCatchStmt(node *sitter.Node) *TryCatchStmt {
 	if handlerNode != nil {
 		catch := &CatchClause{}
 		paramNode := handlerNode.ChildByFieldName("parameter")
+		catchBody := handlerNode.ChildByFieldName("body")
+		// Scope the catch parameter to the catch body only (JS block scoping).
+		// Without this, nested catch (e) { ... catch (e) { ... } ... }
+		// the inner e shadows the outer e in the enclosing scope.
+		b.symtab.PushScope()
 		if paramNode != nil {
 			name := b.nodeText(paramNode)
 			catch.Param = b.symtab.Define(name, symbol.KindVariable)
 		}
-		catchBody := handlerNode.ChildByFieldName("body")
 		if catchBody != nil {
 			catch.Body = b.buildBlock(catchBody)
 		}
+		b.symtab.PopScope()
 		stmt.Catch = catch
 	}
 

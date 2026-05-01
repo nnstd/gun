@@ -53,6 +53,10 @@ func BuildModuleWithPath(root *sitter.Node, source []byte, pkgName, sourcePath s
 		b.buildTopLevel(mod, child)
 	}
 
+	// Hoist prototype constants: X.prototype.Y = value → also define var Y.
+	// JS code like jsbn.js uses bare identifiers for prototype constants.
+	b.hoistPrototypeConstants(mod)
+
 	// Hoist module-level var declarations (e.g. var inside for loops at
 	// module scope). Inside functions, prependHoistedVars handles this, but
 	// at module level nothing consumed hoistedSymbols yet.
@@ -1237,6 +1241,43 @@ func (b *Builder) buildArrayPatternLookup(node *sitter.Node) *ArrayPattern {
 
 // hoistTopLevelDecls pre-registers top-level declarations so later declarations
 // remain visible to earlier function bodies and module code.
+// hoistPrototypeConstants detects X.prototype.Y = value at top level and
+// creates a package-level var Y so bare identifier references to Y resolve.
+// Pattern found in jsbn.js: BigInteger.prototype.DV = (1 << dbits) used as bare DV.
+func (b *Builder) hoistPrototypeConstants(mod *Module) {
+	for _, d := range mod.Declarations {
+		tls, ok := d.(*TopLevelStmt)
+		if !ok {
+			continue
+		}
+		es, ok := tls.Stmt.(*ExprStmt)
+		if !ok {
+			continue
+		}
+		assign, ok := es.Expr.(*AssignExpr)
+		if !ok || assign.Op != OpAssign {
+			continue
+		}
+		member, ok := assign.Left.(*MemberExpr)
+		if !ok {
+			continue
+		}
+		objMember, ok := member.Object.(*MemberExpr)
+		if !ok || objMember.Property != "prototype" {
+			continue
+		}
+		propName := member.Property
+		if propName == "" || b.symtab.LookupLocal(propName) != nil {
+			continue
+		}
+		sym := b.symtab.Define(propName, symbol.KindVariable)
+		mod.Declarations = append(mod.Declarations, &VarDecl{
+			Declarators: []*Declarator{{Symbol: sym, Init: assign.Right}},
+			Kind:        VarVar,
+		})
+	}
+}
+
 func (b *Builder) hoistTopLevelDecls(root *sitter.Node) {
 	for i := uint(0); i < root.NamedChildCount(); i++ {
 		child := root.NamedChild(i)

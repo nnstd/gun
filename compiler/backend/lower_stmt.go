@@ -100,6 +100,11 @@ func (l *Lowerer) lowerStmt(s hir.Stmt) ast.Stmt {
 		if expr == nil {
 			return nil
 		}
+		// Skip bare identifier expression statements (JS switch fallthrough markers).
+		// Go rejects standalone identifier expressions as "variable not used".
+		if _, ok := expr.(*ast.Ident); ok {
+			return nil
+		}
 		out = exprStmt(expr)
 
 	case *hir.ReturnStmt:
@@ -422,29 +427,29 @@ func (l *Lowerer) lowerForStmt(s *hir.ForStmt) ast.Stmt {
 
 	var post ast.Stmt
 	if s.Post != nil {
-			postExpr := l.lowerExpr(s.Post)
-			if postExpr != nil {
-				// Update expressions (i++, i--) must assign the result back since
-				// Inc/Dec return a new JSValue rather than mutating in place.
-				if update, ok := s.Post.(*hir.UpdateExpr); ok {
-					if mem, ok := update.Operand.(*hir.MemberExpr); ok && l.exprIsJSValue(mem.Object) {
-						l.jsvalueImport()
-						obj := l.lowerExpr(mem.Object)
-						key := l.lowerClassMemberKey(mem.Property, mem.Private, nil)
-						post = exprStmt(callExpr(selectorExpr(obj, "Set"), key, postExpr))
-					} else {
-						operand := l.lowerExpr(update.Operand)
-						post = &ast.AssignStmt{
-							Lhs: []ast.Expr{operand},
-							Tok: token.ASSIGN,
-							Rhs: []ast.Expr{postExpr},
-						}
-					}
+		postExpr := l.lowerExpr(s.Post)
+		if postExpr != nil {
+			// Update expressions (i++, i--) must assign the result back since
+			// Inc/Dec return a new JSValue rather than mutating in place.
+			if update, ok := s.Post.(*hir.UpdateExpr); ok {
+				if mem, ok := update.Operand.(*hir.MemberExpr); ok && l.exprIsJSValue(mem.Object) {
+					l.jsvalueImport()
+					obj := l.lowerExpr(mem.Object)
+					key := l.lowerClassMemberKey(mem.Property, mem.Private, nil)
+					post = exprStmt(callExpr(selectorExpr(obj, "Set"), key, postExpr))
 				} else {
-					post = exprStmt(postExpr)
+					operand := l.lowerExpr(update.Operand)
+					post = &ast.AssignStmt{
+						Lhs: []ast.Expr{operand},
+						Tok: token.ASSIGN,
+						Rhs: []ast.Expr{postExpr},
+					}
 				}
+			} else {
+				post = exprStmt(postExpr)
 			}
 		}
+	}
 
 	body := l.lowerBlock(s.Body)
 

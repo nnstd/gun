@@ -74,34 +74,62 @@ type Lowerer struct {
 	cpuProfile          *CPUProfileConfig
 	profileRuntimeAlias string
 	isEntryFile         bool
+	otel                bool
 }
 
 // Lower converts an HIR module to a Go AST file.
 func Lower(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, optLevel context.OptLevel) *ast.File {
-	return LowerWithCPUProfile(mod, ctx, moduleName, samePackageImports, nil, optLevel)
+	return LowerWithConfig(mod, ctx, moduleName, samePackageImports, nil, optLevel)
 }
 
 // LowerWithCPUProfile converts an HIR module to a Go AST file with optional
 // generated-main CPU profiling support.
 func LowerWithCPUProfile(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, cpuProfile *CPUProfileConfig, optLevel context.OptLevel) *ast.File {
-	return LowerWithExportsAndCPUProfile(mod, ctx, moduleName, samePackageImports, nil, nil, nil, nil, nil, "", nil, cpuProfile, optLevel, true)
+	return LowerWithConfig(mod, ctx, moduleName, samePackageImports, &LowerConfig{CPUProfile: cpuProfile}, optLevel)
 }
 
 // LowerWithExports converts an HIR module to a Go AST file with knowledge of
 // symbols exported from other files in the same package.
 func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string, localAliasMap map[symbol.ID]string, namespaceAlias string, namespaceEntries map[string]string, optLevel context.OptLevel) *ast.File {
-	return LowerWithExportsAndCPUProfile(mod, ctx, moduleName, samePackageImports, crossFileExports, reservedNames, importNameMap, exportAliasMap, localAliasMap, namespaceAlias, namespaceEntries, nil, optLevel, true)
+	return LowerWithConfig(mod, ctx, moduleName, samePackageImports, &LowerConfig{
+		CrossFileExports: crossFileExports,
+		ReservedNames:    reservedNames,
+		ImportNameMap:    importNameMap,
+		ExportAliasMap:   exportAliasMap,
+		LocalAliasMap:    localAliasMap,
+		NamespaceAlias:   namespaceAlias,
+		NamespaceEntries: namespaceEntries,
+	}, optLevel)
 }
 
 // LowerWithExportsAndCPUProfile converts an HIR module to a Go AST file with
 // knowledge of same-package exports plus optional generated-main CPU profiling support.
 func LowerWithExportsAndCPUProfile(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string, localAliasMap map[symbol.ID]string, namespaceAlias string, namespaceEntries map[string]string, cpuProfile *CPUProfileConfig, optLevel context.OptLevel, isEntryFile bool) *ast.File {
+	return LowerWithConfig(mod, ctx, moduleName, samePackageImports, &LowerConfig{
+		CrossFileExports: crossFileExports,
+		ReservedNames:    reservedNames,
+		ImportNameMap:    importNameMap,
+		ExportAliasMap:   exportAliasMap,
+		LocalAliasMap:    localAliasMap,
+		NamespaceAlias:   namespaceAlias,
+		NamespaceEntries: namespaceEntries,
+		CPUProfile:       cpuProfile,
+		IsEntryFile:      isEntryFile,
+	}, optLevel)
+}
+
+// LowerWithConfig converts an HIR module to a Go AST file using a config struct.
+func LowerWithConfig(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, config *LowerConfig, optLevel context.OptLevel) *ast.File {
+	if config == nil {
+		config = &LowerConfig{IsEntryFile: true}
+	}
+
 	cfe := make(map[string]bool)
-	for _, exp := range crossFileExports {
+	for _, exp := range config.CrossFileExports {
 		cfe[exp.GoName] = true
 	}
 	reserved := make(map[string]bool)
-	for _, name := range reservedNames {
+	for _, name := range config.ReservedNames {
 		reserved[name] = true
 	}
 	l := &Lowerer{
@@ -114,11 +142,11 @@ func LowerWithExportsAndCPUProfile(mod *hir.Module, ctx *context.TranspilerConte
 		moduleName:         moduleName,
 		samePackage:        samePackageImports,
 		reservedNames:      reserved,
-		importNameMap:      importNameMap,
-		exportAliasMap:     exportAliasMap,
-		localAliasMap:      localAliasMap,
-		namespaceAlias:     namespaceAlias,
-		namespaceEntries:   namespaceEntries,
+		importNameMap:      config.ImportNameMap,
+		exportAliasMap:     config.ExportAliasMap,
+		localAliasMap:      config.LocalAliasMap,
+		namespaceAlias:     config.NamespaceAlias,
+		namespaceEntries:   config.NamespaceEntries,
 		topLevelNames:      make(map[string]string),
 		eagerVarInits:      make(map[symbol.ID]bool),
 		emittedExportNames: make(map[string]bool),
@@ -128,8 +156,9 @@ func LowerWithExportsAndCPUProfile(mod *hir.Module, ctx *context.TranspilerConte
 		sourcePath:         mod.SourcePath,
 		hasTopLevelAwait:   mod.HasTopLevelAwait,
 		arenaEnabled:       optLevel >= context.O2,
-		cpuProfile:         cpuProfile,
-		isEntryFile:        isEntryFile,
+		cpuProfile:         config.CPUProfile,
+		isEntryFile:        config.IsEntryFile,
+		otel:               config.Otel,
 	}
 
 	// Reserve cross-file export names in the symbol table so local symbols
@@ -181,6 +210,12 @@ func LowerWithExportsAndCPUProfile(mod *hir.Module, ctx *context.TranspilerConte
 		l.initStmts = append([]ast.Stmt{nsInit}, l.initStmts...)
 		// After all init stmts, set namespace entries for dedicated exports.
 		for exportName, alias := range l.namespaceEntries {
+			// Resolve through importedNames: barrel file exports like
+			// "clean" may alias to "Clean" but the actual Go var is
+			// "CleanDefault" (import-resolved from ./functions/clean).
+			if res, ok := l.importedNames[exportName]; ok && res.goSymbol != "" {
+				alias = res.goSymbol
+			}
 			l.initStmts = append(l.initStmts, exprStmt(callExpr(
 				selectorExpr(goIdent(l.namespaceAlias), "Set"),
 				stringLit(exportName),
@@ -225,8 +260,7 @@ func LowerWithExportsAndCPUProfile(mod *hir.Module, ctx *context.TranspilerConte
 		}
 	}
 	l.injectCPUProfileMain()
-
-	// Emit init() for collected setup statements (class methods, enum members, etc.)
+	l.injectOtelMain()
 	if len(l.initStmts) > 0 {
 		l.decls = append(l.decls, funcDecl("init", fieldList(), nil, &ast.BlockStmt{List: l.initStmts}))
 	}
@@ -1476,6 +1510,38 @@ func (l *Lowerer) injectCPUProfileMain() {
 	}
 
 	stmts := []ast.Stmt{startStmt, deferStmt}
+	body := append([]ast.Stmt{}, mainFn.Body.List[:insertAt]...)
+	body = append(body, stmts...)
+	mainFn.Body.List = append(body, mainFn.Body.List[insertAt:]...)
+}
+
+func (l *Lowerer) injectOtelMain() {
+	if !l.otel || l.pkgName != "main" {
+		return
+	}
+	mainFn := l.findMainFunc()
+	if mainFn == nil || mainFn.Body == nil {
+		return
+	}
+
+	alias := "otel"
+	l.addAliasedImport("github.com/nnstd/gun/runtime/otel", alias)
+
+	initCall := exprStmt(callExpr(selectorExpr(goIdent(alias), "Init")))
+	deferCall := &ast.DeferStmt{Call: callExpr(selectorExpr(goIdent(alias), "Shutdown"))}
+
+	insertAt := 0
+	if len(mainFn.Body.List) > 0 {
+		if deferStmtExisting, ok := mainFn.Body.List[0].(*ast.DeferStmt); ok && deferStmtExisting.Call != nil {
+			if sel, ok := deferStmtExisting.Call.Fun.(*ast.SelectorExpr); ok {
+				if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "error" && sel.Sel.Name == "RecoverMain" {
+					insertAt = 1
+				}
+			}
+		}
+	}
+
+	stmts := []ast.Stmt{initCall, deferCall}
 	body := append([]ast.Stmt{}, mainFn.Body.List[:insertAt]...)
 	body = append(body, stmts...)
 	mainFn.Body.List = append(body, mainFn.Body.List[insertAt:]...)
