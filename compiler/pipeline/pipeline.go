@@ -148,7 +148,7 @@ func (p *Pipeline) compileHIRModule(hirMod *hir.Module, moduleName string, sameP
 	if len(opts.crossFileExports) == 0 && len(opts.reservedNames) == 0 && len(opts.importNameMap) == 0 && len(opts.exportAliasMap) == 0 && len(opts.localAliasMap) == 0 && opts.namespaceAlias == "" && len(opts.namespaceEntries) == 0 {
 		goFile = backend.LowerWithCPUProfile(hirMod, p.Ctx, moduleName, samePackageImports, opts.cpuProfile, p.OptLevel)
 	} else {
-		goFile = backend.LowerWithExportsAndCPUProfile(hirMod, p.Ctx, moduleName, samePackageImports, opts.crossFileExports, opts.reservedNames, opts.importNameMap, opts.exportAliasMap, opts.localAliasMap, opts.namespaceAlias, opts.namespaceEntries, opts.cpuProfile, p.OptLevel)
+		goFile = backend.LowerWithExportsAndCPUProfile(hirMod, p.Ctx, moduleName, samePackageImports, opts.crossFileExports, opts.reservedNames, opts.importNameMap, opts.exportAliasMap, opts.localAliasMap, opts.namespaceAlias, opts.namespaceEntries, opts.cpuProfile, p.OptLevel, true)
 	}
 	return backend.GenerateWithSource(goFile, hirMod.SourcePath, hirMod.SourceSize)
 }
@@ -336,6 +336,9 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 			if imp.Default != nil {
 				if alias := targetAliases["default"]; alias != "" {
 					importNameMap[imp.ModulePath+"\x00default"] = alias
+				} else if nsAlias := namespaceAliases[target]; nsAlias != "" {
+					// CJS require("./module") with no explicit default -> use namespace object
+					importNameMap[imp.ModulePath+"\x00default"] = nsAlias
 				}
 			}
 			if imp.Namespace != nil {
@@ -375,7 +378,7 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 			}
 		}
 
-		goFiles[name] = backend.LowerWithExportsAndCPUProfile(hirMod, p.Ctx, moduleName, true, crossExports, reservedNames, importNameMap, exportAliases[name], localAliases[name], namespaceAliases[name], exportAliases[name], cpuProfile, p.OptLevel)
+		goFiles[name] = backend.LowerWithExportsAndCPUProfile(hirMod, p.Ctx, moduleName, true, crossExports, reservedNames, importNameMap, exportAliases[name], localAliases[name], namespaceAliases[name], exportAliases[name], cpuProfile, p.OptLevel, name == entryFile)
 	}
 	for name, source := range files {
 		if !isDataModule(name) {

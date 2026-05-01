@@ -1237,3 +1237,110 @@ func registerKnownGlobals(ctx *tcontext.TranspilerContext) {
 	ctx.MarkKnownGlobal("BigInt64Array")
 	ctx.MarkKnownGlobal("BigUint64Array")
 }
+
+// RegisterTest262Globals registers test262 harness functions and objects
+// (assert, print, $DONE, $DONOTEVALUATE, $262) in the transpiler context.
+// These generate direct Go function calls that match the harness Go source files
+// in test262/harness/.
+func RegisterTest262Globals(ctx *tcontext.TranspilerContext) {
+	// assert(condition) → Assert(jsvalueWrapLit(condition))
+	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
+		Name: "assert",
+		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			if len(args) > 0 {
+				args[0] = jsvalueWrapLit(args[0])
+			}
+			return callExpr(ident("Assert"), args...)
+		},
+	})
+
+	// assert is also a global object with methods: sameValue, notSameValue, throws
+	ctx.RegisterGlobal(&tcontext.GlobalObject{
+		Name: "assert",
+		TransformCall: func(method string, args []ast.Expr, _ bool, imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			for i, arg := range args {
+				args[i] = jsvalueWrapLit(arg)
+			}
+			switch method {
+			case "sameValue":
+				return callExpr(ident("AssertSameValue"), args...)
+			case "notSameValue":
+				return callExpr(ident("AssertNotSameValue"), args...)
+			case "throws":
+				// assert.throws(ErrorType, fn) → AssertThrows("ErrorType", fn)
+				var errorName ast.Expr
+				if len(args) > 0 {
+					// Skip jsvalue wrapping for the error type, use original expr
+					origArg := args[0]
+					args = args[1:]
+					if id, ok := origArg.(*ast.Ident); ok {
+						errorName = stringLit(id.Name)
+					} else {
+						errorName = stringLit("Error")
+					}
+				} else {
+					errorName = stringLit("Error")
+				}
+				return callExpr(ident("AssertThrows"), append([]ast.Expr{errorName}, args...)...)
+			case "deepEqual":
+				return callExpr(ident("AssertSameValue"), args...)
+			default:
+				return nil
+			}
+		},
+	})
+
+	// print(...) → Print(args...)
+	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
+		Name: "print",
+		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			for i, arg := range args {
+				args[i] = jsvalueWrapLit(arg)
+			}
+			return callExpr(ident("Print"), args...)
+		},
+	})
+
+	// $DONE(err?) → Done(err?)
+	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
+		Name: "$DONE",
+		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			if len(args) > 0 {
+				args[0] = jsvalueWrapLit(args[0])
+			}
+			return callExpr(ident("Done"), args...)
+		},
+	})
+
+	// $DONOTEVALUATE() → DontEvaluate()
+	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
+		Name: "$DONOTEVALUATE",
+		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+			return callExpr(ident("DontEvaluate"))
+		},
+	})
+
+	// $262 global object stub
+	ctx.RegisterGlobal(&tcontext.GlobalObject{
+		Name: "$262",
+		TransformCall: func(method string, args []ast.Expr, _ bool, imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(callExpr(ident("Global262")), "Get"), stringLit(method))
+		},
+		TransformMember: func(prop string, imp tcontext.Imports) ast.Expr {
+			return callExpr(selectorExpr(callExpr(ident("Global262")), "Get"), stringLit(prop))
+		},
+	})
+
+	// Test262Error constructor
+	ctx.RegisterConstructor(&tcontext.Constructor{
+		Name: "Test262Error",
+		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+			return callExpr(ident("Test262ErrorNew"), args...)
+		},
+	})
+}

@@ -1,27 +1,26 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/nnstd/gun/compiler"
-	"github.com/nnstd/gun/compiler/jsonmodule"
-	"github.com/nnstd/gun/compiler/yamlmodule"
+	"github.com/nnstd/gun/compiler/runner"
+	t262runner "github.com/nnstd/gun/test262/runner"
 
 	"github.com/alecthomas/kong"
-	sitter "github.com/tree-sitter/go-tree-sitter"
-	typescript "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 )
 
 var cli struct {
-	Transpile TranspileCmd `cmd:"" default:"withargs" help:"Transpile TypeScript to Go source."`
-	Build     BuildCmd     `cmd:"" help:"Transpile and compile TypeScript to a binary."`
-	Run       RunCmd       `cmd:"" help:"Transpile, build, and run a TypeScript file."`
+	Transpile TranspileCmd `cmd:"transpile" default:"withargs" help:"Transpile TypeScript to Go source."`
+	Build     BuildCmd     `cmd:"build" help:"Transpile and compile TypeScript to a binary."`
+	Run       RunCmd       `cmd:"run" help:"Transpile, build, and run a TypeScript file."`
+	Test262   Test262Cmd   `cmd:"" name:"test262" help:"Run test262 ECMAScript conformance tests."`
 }
 
 const defaultCPUProfIntervalMicros = 1000
@@ -74,15 +73,15 @@ func (cmd *TranspileCmd) Run() error {
 		return err
 	}
 	if info.IsDir() {
-		return transpileDir(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose, cmd.OptLevel)
+		return runner.TranspileDir(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose, cmd.OptLevel)
 	}
 
 	// No -o: just print to stdout
 	if cmd.Output == "" {
-		return transpileFile(cmd.Input, "", cmd.Pkg, "", cmd.Verbose, false, cmd.OptLevel, nil)
+		return runner.TranspileFile(cmd.Input, "", cmd.Pkg, "", cmd.Verbose, false, cmd.OptLevel, nil)
 	}
 
-	return transpileProject(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose, cmd.OptLevel, nil)
+	return runner.TranspileProject(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose, cmd.OptLevel, nil)
 }
 
 func (cmd *BuildCmd) Run() error {
@@ -100,7 +99,7 @@ func (cmd *BuildCmd) Run() error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	if err := transpileProject(cmd.Input, tmpDir, cmd.Pkg, cmd.Verbose, cmd.OptLevel, nil); err != nil {
+	if err := runner.TranspileProject(cmd.Input, tmpDir, cmd.Pkg, cmd.Verbose, cmd.OptLevel, nil); err != nil {
 		return err
 	}
 
@@ -110,7 +109,7 @@ func (cmd *BuildCmd) Run() error {
 	}
 	binPath, _ = filepath.Abs(binPath)
 
-	return goBuild(tmpDir, binPath, cmd.Verbose)
+	return runner.GoBuild(tmpDir, binPath, cmd.Verbose)
 }
 
 func (cmd *RunCmd) Run() error {
@@ -131,13 +130,13 @@ func (cmd *RunCmd) Run() error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	if err := transpileProject(cmd.Input, tmpDir, cmd.Pkg, cmd.Verbose, cmd.OptLevel, cmd.compileOptions()); err != nil {
+	if err := runner.TranspileProject(cmd.Input, tmpDir, cmd.Pkg, cmd.Verbose, cmd.OptLevel, cmd.compileOptions()); err != nil {
 		return err
 	}
 
 	binName := strings.TrimSuffix(filepath.Base(cmd.Input), ".ts")
 	binPath := filepath.Join(tmpDir, binName)
-	if err := goBuild(tmpDir, binPath, cmd.Verbose); err != nil {
+	if err := runner.GoBuild(tmpDir, binPath, cmd.Verbose); err != nil {
 		return err
 	}
 
@@ -173,55 +172,101 @@ func (cmd *RunCmd) compileOptions() *compiler.CompileOptions {
 	}
 }
 
-// transpileProject transpiles a .ts entry file and all its relative imports
-// into outDir, then scaffolds a go.mod so the result is go-buildable.
-func transpileProject(input, outDir, pkg string, verbose bool, optLevel int, opts *compiler.CompileOptions) error {
-	if err := os.MkdirAll(outDir, 0755); err != nil {
-		return err
-	}
+type Test262Cmd struct {
+	Repo      string `help:"Path to cloned test262 repository."`
+	Test      string `help:"Run a single test file (relative to test262/test/)."`
+	Dir       string `help:"Run all tests in a directory (relative to test262/test/)." default:"language"`
+	BatchSize int    `default:"20" help:"Number of tests per compiled binary."`
+	Timeout   int    `default:"10" help:"Per-test timeout in seconds."`
+	Verbose   bool   `short:"v" help:"Verbose output with skip reasons."`
+	Format    string `default:"text" help:"Output format: json or text."`
+	SkipList  string `help:"Path to custom skip list YAML (default: built-in)."`
+	OptLevel  int    `short:"O" default:"0" help:"Optimization level (0, 1, 2)."`
 
-	moduleName := "gunrun"
-	goFile := filepath.Join(outDir, strings.TrimSuffix(filepath.Base(input), ".ts")+".go")
-	if err := transpileFile(input, goFile, pkg, moduleName, verbose, false, optLevel, opts); err != nil {
-		return err
-	}
-
-	inputDir := filepath.Dir(input)
-	if inputDir == "" {
-		inputDir = "."
-	}
-	if err := transpileRelativeImports(input, inputDir, outDir, moduleName, verbose, optLevel, opts); err != nil {
-		return err
-	}
-
-	if err := transpileNodeModuleImports(input, inputDir, outDir, moduleName, verbose, optLevel, opts); err != nil {
-		return err
-	}
-
-	return scaffoldGoMod(outDir, verbose)
+	CloneRepo string `default:"/tmp/test262" help:"Where to clone test262 if not found."`
 }
 
-// goBuild runs `go mod tidy` then `go build` in dir and writes the binary to binPath.
-func goBuild(dir, binPath string, verbose bool) error {
-	// Run go mod tidy to ensure dependencies are consistent
-	tidy := exec.Command("go", "mod", "tidy")
-	tidy.Dir = dir
-	tidy.Stderr = os.Stderr
-	if err := tidy.Run(); err != nil {
-		return fmt.Errorf("go mod tidy failed: %w", err)
+func (cmd *Test262Cmd) Run() error {
+	test262Path := cmd.Repo
+	if test262Path == "" {
+		test262Path = cmd.CloneRepo
 	}
 
-	build := exec.Command("go", "build", "-o", binPath, ".")
-	build.Dir = dir
-	var stderr strings.Builder
-	build.Stderr = &stderr
-	if verbose {
-		fmt.Fprintf(os.Stderr, "building %s\n", dir)
+	// Auto-clone if needed
+	if _, err := os.Stat(filepath.Join(test262Path, "test")); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Cloning test262 into %s...\n", test262Path)
+		clone := exec.Command("git", "clone", "--depth", "1", "https://github.com/tc39/test262.git", test262Path)
+		clone.Stdout = os.Stderr
+		clone.Stderr = os.Stderr
+		if err := clone.Run(); err != nil {
+			return fmt.Errorf("clone test262: %w", err)
+		}
 	}
-	if err := build.Run(); err != nil {
-		return fmt.Errorf("go build failed:\n%s\ntranspiled source is at %s", stderr.String(), dir)
+
+	if cmd.Test == "" && cmd.Dir == "" {
+		return fmt.Errorf("either --test or --dir is required")
+	}
+
+	var skipList *t262runner.SkipList
+	if cmd.SkipList != "" {
+		var err error
+		skipList, err = t262runner.LoadSkipList(cmd.SkipList)
+		if err != nil {
+			return fmt.Errorf("load skip list: %w", err)
+		}
+	} else {
+		skipList = t262runner.DefaultSkipList()
+	}
+
+	timeout := time.Duration(cmd.Timeout) * time.Second
+	r := t262runner.NewRunner(test262Path, skipList, cmd.BatchSize, timeout, cmd.Verbose, cmd.Format, cmd.OptLevel)
+
+	if cmd.Test != "" {
+		result := r.RunSingle(cmd.Test)
+		printTest262Result(result, cmd.Format)
+	} else {
+		summary := r.RunDir(cmd.Dir)
+		printTest262Summary(summary, cmd.Format)
 	}
 	return nil
+}
+
+func printTest262Result(result t262runner.TestResult, format string) {
+	switch format {
+	case "text":
+		fmt.Printf("%s: %s", result.File, result.Status)
+		if result.DurationMs > 0 {
+			fmt.Printf(" (%dms)", result.DurationMs)
+		}
+		if result.Error != "" {
+			fmt.Printf(" - %s", result.Error)
+		}
+		if result.SkipReason != "" {
+			fmt.Printf(" [%s]", result.SkipReason)
+		}
+		fmt.Println()
+	default:
+		data, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Println(string(data))
+	}
+}
+
+func printTest262Summary(summary t262runner.RunSummary, format string) {
+	switch format {
+	case "text":
+		fmt.Printf("Results: %d passed (%.1f%%), %d failed (%.1f%%), %d skipped (%.1f%%), %d errors (%.1f%%)\n",
+			summary.Passed, summary.PassPercent,
+			summary.Failed, summary.FailPercent,
+			summary.Skipped, summary.SkipPercent,
+			summary.Errors, summary.ErrorPercent)
+		fmt.Printf("Total: %d\n", summary.Total)
+		nonSkipped := summary.Total - summary.Skipped
+		fmt.Printf("Pass rate: %.1f%% (%d/%d of non-skipped tests)\n",
+			summary.PassRate, summary.Passed, nonSkipped)
+	default:
+		data, _ := json.MarshalIndent(summary, "", "  ")
+		fmt.Println(string(data))
+	}
 }
 
 func main() {
@@ -234,1047 +279,4 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-}
-
-func transpileFile(inputPath, outputPath, pkgName, moduleName string, verbose, samePackageImports bool, optLevel int, opts *compiler.CompileOptions) error {
-	source, err := os.ReadFile(inputPath)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", inputPath, err)
-	}
-
-	if verbose {
-		fmt.Fprintf(os.Stderr, "compiling %s\n", inputPath)
-	}
-
-	if moduleName == "" {
-		moduleName = detectModuleName(inputPath)
-	}
-
-	result, err := compiler.CompileWithOptLevelAndPathOptions(source, pkgName, moduleName, inputPath, samePackageImports, optLevel, opts)
-	if err != nil {
-		return fmt.Errorf("compile %s: %w", inputPath, err)
-	}
-
-	if outputPath == "" {
-		_, err = os.Stdout.Write(result)
-		return err
-	}
-
-	return os.WriteFile(outputPath, result, 0644)
-}
-
-func transpileDir(dirPath, outputDir, pkgName string, verbose bool, optLevel int) error {
-	if outputDir == "" {
-		outputDir = dirPath
-	}
-
-	return filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() || !strings.HasSuffix(path, ".ts") {
-			return nil
-		}
-		if strings.HasSuffix(path, ".d.ts") {
-			return nil
-		}
-
-		rel, err := filepath.Rel(dirPath, path)
-		if err != nil {
-			return err
-		}
-
-		outPath := filepath.Join(outputDir, strings.TrimSuffix(rel, ".ts")+".go")
-
-		if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
-			return err
-		}
-
-		return transpileFile(path, outPath, pkgName, "", verbose, false, optLevel, nil)
-	})
-}
-
-// scaffoldGoMod creates a go.mod in tmpDir so that github.com/nnstd/gun/runtime/*
-// imports resolve during go build.
-//
-// In development (local source tree found): uses a replace directive for instant builds.
-// For distributed binaries (no local source): fetches the module from GitHub.
-func scaffoldGoMod(tmpDir string, verbose bool) error {
-	const modPath = "github.com/nnstd/gun"
-
-	gunRoot, localFound := findGunModuleRoot()
-
-	if localFound {
-		if verbose {
-			fmt.Fprintf(os.Stderr, "using local gun module at %s\n", gunRoot)
-		}
-		gomod := fmt.Sprintf("module gunrun\n\ngo 1.24.0\n\nrequire %s v0.0.0\n\nreplace %s => %s\n", modPath, modPath, gunRoot)
-		if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(gomod), 0644); err != nil {
-			return err
-		}
-		// Copy go.sum so dependency hashes are available
-		if data, err := os.ReadFile(filepath.Join(gunRoot, "go.sum")); err == nil {
-			os.WriteFile(filepath.Join(tmpDir, "go.sum"), data, 0644)
-		}
-		return nil
-	}
-
-	// No local source — fetch from GitHub
-	if verbose {
-		fmt.Fprintf(os.Stderr, "fetching %s from module proxy\n", modPath)
-	}
-	gomod := "module gunrun\n\ngo 1.24.0\n"
-	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(gomod), 0644); err != nil {
-		return err
-	}
-
-	get := exec.Command("go", "get", modPath+"@latest")
-	get.Dir = tmpDir
-	get.Stderr = os.Stderr
-	if err := get.Run(); err != nil {
-		return fmt.Errorf("go get %s: %w", modPath, err)
-	}
-	return nil
-}
-
-// gunModuleRoot can be set at build time via -ldflags:
-//
-//	go build -ldflags "-X main.gunModuleRoot=$(pwd)" -o gun .
-var gunModuleRoot string
-
-// findGunModuleRoot locates the gun source tree so runtime imports can be
-// resolved via a replace directive. Returns ("", false) when no local source
-// is available — the caller should fall back to fetching from GitHub.
-//
-// Tries in order:
-//  1. Build-time embedded path (gunModuleRoot, set via ldflags)
-//  2. Walk up from the executable (works for `go build . && ./gun`)
-//  3. Walk up from CWD (works for `go run . run ...` during development)
-func findGunModuleRoot() (string, bool) {
-	if gunModuleRoot != "" {
-		return gunModuleRoot, true
-	}
-
-	// Strategy 2: walk up from executable
-	if exe, err := os.Executable(); err == nil {
-		resolved := exe
-		if r, err := filepath.EvalSymlinks(exe); err == nil {
-			resolved = r
-		}
-		if dir, ok := findModuleDir(filepath.Dir(resolved)); ok {
-			return dir, true
-		}
-	}
-
-	// Strategy 3: walk up from CWD
-	if wd, err := os.Getwd(); err == nil {
-		if dir, ok := findModuleDir(wd); ok {
-			return dir, true
-		}
-	}
-
-	return "", false
-}
-
-// findModuleDir walks up from start looking for a go.mod containing
-// "module github.com/nnstd/gun".
-func findModuleDir(start string) (string, bool) {
-	dir, _ := filepath.Abs(start)
-	for {
-		if data, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil {
-			for _, line := range strings.Split(string(data), "\n") {
-				if strings.TrimSpace(line) == "module github.com/nnstd/gun" {
-					return dir, true
-				}
-			}
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", false
-		}
-		dir = parent
-	}
-}
-
-// findRelativeImports scans TS source for relative import paths (./foo or ../foo).
-func findRelativeImports(source []byte) []string {
-	var imports []string
-	lines := strings.Split(string(source), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") || strings.HasPrefix(line, "*") || strings.HasPrefix(line, "*/") {
-			continue
-		}
-		// Match: from "./..." or from '../...'
-		idx := strings.Index(line, "from ")
-		if idx < 0 {
-			continue
-		}
-		// Verify this is an import statement, not the word "from" in a string
-		prefix := strings.TrimSpace(line[:idx])
-		if !strings.HasSuffix(prefix, "import") && !strings.Contains(prefix, " import ") && prefix != "import" && !strings.HasPrefix(line, "import ") {
-			continue
-		}
-		rest := strings.TrimSpace(line[idx+5:])
-		if len(rest) < 3 {
-			continue
-		}
-		quote := rest[0]
-		if quote != '\'' && quote != '"' {
-			continue
-		}
-		end := strings.IndexByte(rest[1:], quote)
-		if end < 0 {
-			continue
-		}
-		modPath := rest[1 : end+1]
-		if strings.HasPrefix(modPath, ".") {
-			imports = append(imports, modPath)
-		}
-	}
-	return imports
-}
-
-// resolveImportFile resolves a relative import path like ./foo to an actual .ts/.js/.json/.yaml file.
-// Tries extensions in Node/Bun resolution order.
-func resolveImportFile(importPath, fromDir string) (string, error) {
-	clean := importPath
-	clean = strings.TrimSuffix(clean, ".ts")
-	clean = strings.TrimSuffix(clean, ".js")
-	clean = strings.TrimSuffix(clean, ".mjs")
-	clean = strings.TrimSuffix(clean, ".json")
-	clean = strings.TrimSuffix(clean, ".yaml")
-	clean = strings.TrimSuffix(clean, ".yml")
-
-	base := filepath.Join(fromDir, clean)
-
-	// Try file extensions in order
-	for _, ext := range []string{".ts", ".js", ".mjs", ".json", ".yaml", ".yml"} {
-		if _, err := os.Stat(base + ext); err == nil {
-			return base + ext, nil
-		}
-	}
-
-	// Try index files in directory
-	for _, idx := range []string{"index.ts", "index.js", "index.json", "index.yaml", "index.yml"} {
-		candidate := filepath.Join(base, idx)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-
-	return "", fmt.Errorf("cannot resolve import %q from %s", importPath, fromDir)
-}
-
-// transpileRelativeImports recursively discovers and transpiles relative imports
-// from a TS entry file into the correct subdirectories of tmpDir.
-func transpileRelativeImports(entryFile, inputDir, tmpDir, moduleName string, verbose bool, optLevel int, opts *compiler.CompileOptions) error {
-	absInputDir, err := filepath.Abs(inputDir)
-	if err != nil {
-		return err
-	}
-	visited := map[string]bool{}
-	return walkImports(entryFile, absInputDir, absInputDir, tmpDir, moduleName, verbose, visited, optLevel, opts)
-}
-
-func walkImports(tsFile, inputDir, baseDir, tmpDir, moduleName string, verbose bool, visited map[string]bool, optLevel int, opts *compiler.CompileOptions) error {
-	absFile, _ := filepath.Abs(tsFile)
-	if visited[absFile] {
-		return nil
-	}
-	visited[absFile] = true
-
-	source, err := os.ReadFile(tsFile)
-	if err != nil {
-		return err
-	}
-	if isDataModuleFile(tsFile) {
-		return nil
-	}
-
-	fileDir := filepath.Dir(tsFile)
-	imports := findRelativeImports(source)
-	optionalRequires := findOptionalRequireImports(source)
-	for _, imp := range findRequireImports(source) {
-		if strings.HasPrefix(imp, ".") {
-			imports = append(imports, imp)
-		}
-	}
-
-	for _, imp := range imports {
-		resolved, err := resolveImportFile(imp, fileDir)
-		if err != nil {
-			if optionalRequires[imp] {
-				continue
-			}
-			return err
-		}
-
-		// Determine the relative path from baseDir to the resolved file's directory
-		absResolved, _ := filepath.Abs(resolved)
-		resolvedDir := filepath.Dir(absResolved)
-		relDir, err := filepath.Rel(filepath.Join(baseDir), resolvedDir)
-		if err != nil {
-			return err
-		}
-
-		// The Go package name is the last segment of the relative path
-		pkgName := filepath.Base(relDir)
-		if pkgName == "." {
-			// File is in the same directory — use the import name as subdir
-			clean := strings.TrimPrefix(imp, "./")
-			clean = strings.TrimPrefix(clean, "../")
-			clean = strings.TrimSuffix(clean, ".ts")
-			clean = trimModuleExt(clean)
-			pkgName = filepath.Base(clean)
-			relDir = clean
-		}
-
-		outDir := filepath.Join(tmpDir, relDir)
-		if err := os.MkdirAll(outDir, 0755); err != nil {
-			return err
-		}
-
-		outFile := filepath.Join(outDir, filepath.Base(trimModuleExt(resolved))+".go")
-		if isDataModuleFile(resolved) {
-			if err := transpileDataModuleFile(resolved, outFile, pkgName); err != nil {
-				return err
-			}
-		} else if err := transpileFile(resolved, outFile, pkgName, moduleName, verbose, false, optLevel, opts); err != nil {
-			return err
-		}
-
-		// Recurse into this file's imports
-		if err := walkImports(resolved, inputDir, baseDir, tmpDir, moduleName, verbose, visited, optLevel, opts); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-type requireImport struct {
-	Path     string
-	Optional bool
-}
-
-// findRequireImports scans TS/JS source for static require("...") calls.
-// Returned specifiers may be relative (./..., ../...) or bare; callers are
-// responsible for classification.
-func findRequireImports(source []byte) []string {
-	specs, ok := scanRequireImports(source)
-	if !ok {
-		return findRequireImportsText(source)
-	}
-	var imports []string
-	seen := map[string]bool{}
-	for _, spec := range specs {
-		if !seen[spec.Path] {
-			seen[spec.Path] = true
-			imports = append(imports, spec.Path)
-		}
-	}
-	return imports
-}
-
-func findOptionalRequireImports(source []byte) map[string]bool {
-	optional := map[string]bool{}
-	specs, ok := scanRequireImports(source)
-	if !ok {
-		return optional
-	}
-	for _, spec := range specs {
-		if spec.Optional {
-			optional[spec.Path] = true
-		}
-	}
-	return optional
-}
-
-func scanRequireImports(source []byte) ([]requireImport, bool) {
-	parser := sitter.NewParser()
-	defer parser.Close()
-
-	lang := sitter.NewLanguage(typescript.LanguageTypescript())
-	if err := parser.SetLanguage(lang); err != nil {
-		return nil, false
-	}
-	tree := parser.Parse(source, nil)
-	if tree == nil {
-		return nil, false
-	}
-	defer tree.Close()
-
-	root := tree.RootNode()
-	if root == nil || root.HasError() {
-		return nil, false
-	}
-
-	var imports []requireImport
-	var walk func(*sitter.Node, bool)
-	walk = func(node *sitter.Node, inCatchableTry bool) {
-		if node == nil {
-			return
-		}
-		switch node.Kind() {
-		case "function_declaration", "function_expression", "arrow_function", "method_definition", "generator_function_declaration", "generator_function":
-			inCatchableTry = false
-		}
-		if path, ok := requireCallStringArg(node, source); ok {
-			imports = append(imports, requireImport{Path: path, Optional: inCatchableTry})
-		}
-
-		childOptional := inCatchableTry
-		if node.Kind() == "try_statement" && node.ChildByFieldName("handler") != nil {
-			childOptional = true
-		}
-		for i := uint(0); i < node.NamedChildCount(); i++ {
-			walk(node.NamedChild(i), childOptional)
-		}
-	}
-	walk(root, false)
-	return imports, true
-}
-
-func requireCallStringArg(callNode *sitter.Node, source []byte) (string, bool) {
-	if callNode == nil || callNode.Kind() != "call_expression" {
-		return "", false
-	}
-	fnNode := callNode.ChildByFieldName("function")
-	argsNode := callNode.ChildByFieldName("arguments")
-	if fnNode == nil || argsNode == nil {
-		return "", false
-	}
-	if fnNode.Kind() != "identifier" || fnNode.Utf8Text(source) != "require" {
-		return "", false
-	}
-	if argsNode.NamedChildCount() != 1 {
-		return "", false
-	}
-	arg := argsNode.NamedChild(0)
-	if arg.Kind() != "string" {
-		return "", false
-	}
-	raw := arg.Utf8Text(source)
-	if len(raw) < 2 {
-		return "", false
-	}
-	quote := raw[0]
-	if quote != '\'' && quote != '"' || raw[len(raw)-1] != quote {
-		return "", false
-	}
-	return strings.TrimPrefix(raw[1:len(raw)-1], "node:"), true
-}
-
-func findRequireImportsText(source []byte) []string {
-	var imports []string
-	seen := map[string]bool{}
-	lines := strings.Split(string(source), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") || strings.HasPrefix(line, "*") || strings.HasPrefix(line, "*/") {
-			continue
-		}
-		rest := line
-		for {
-			idx := strings.Index(rest, "require(")
-			if idx < 0 {
-				break
-			}
-			// Ensure require is a standalone identifier (not .require or $require).
-			if idx > 0 {
-				prev := rest[idx-1]
-				if prev == '.' || prev == '_' || prev == '$' || (prev >= 'A' && prev <= 'Z') || (prev >= 'a' && prev <= 'z') || (prev >= '0' && prev <= '9') {
-					rest = rest[idx+len("require("):]
-					continue
-				}
-			}
-			after := strings.TrimSpace(rest[idx+len("require("):])
-			if len(after) < 2 {
-				break
-			}
-			quote := after[0]
-			if quote != '\'' && quote != '"' {
-				rest = rest[idx+len("require("):]
-				continue
-			}
-			end := strings.IndexByte(after[1:], quote)
-			if end < 0 {
-				break
-			}
-			afterLiteral := strings.TrimSpace(after[end+2:])
-			if !strings.HasPrefix(afterLiteral, ")") {
-				rest = after[end+2:]
-				continue
-			}
-			modPath := after[1 : end+1]
-			modPath = strings.TrimPrefix(modPath, "node:")
-			if !seen[modPath] {
-				seen[modPath] = true
-				imports = append(imports, modPath)
-			}
-			rest = after[end+2:]
-		}
-	}
-	return imports
-}
-
-func trimModuleExt(path string) string {
-	path = strings.TrimSuffix(path, ".ts")
-	path = strings.TrimSuffix(path, ".js")
-	path = strings.TrimSuffix(path, ".mjs")
-	path = strings.TrimSuffix(path, ".json")
-	path = strings.TrimSuffix(path, ".yaml")
-	path = strings.TrimSuffix(path, ".yml")
-	return path
-}
-
-func isJSONFile(path string) bool {
-	return strings.EqualFold(filepath.Ext(path), ".json")
-}
-
-func isYAMLFile(path string) bool {
-	ext := filepath.Ext(path)
-	return strings.EqualFold(ext, ".yaml") || strings.EqualFold(ext, ".yml")
-}
-
-func isDataModuleFile(path string) bool {
-	return isJSONFile(path) || isYAMLFile(path)
-}
-
-func transpileJSONModuleFile(inputPath, outputPath, pkgName string) error {
-	data, err := os.ReadFile(inputPath)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", inputPath, err)
-	}
-	if _, err := jsonmodule.Parse(data); err != nil {
-		return fmt.Errorf("parse json %s: %w", inputPath, err)
-	}
-	source, err := jsonmodule.Compile(data, pkgName, "Default", nil)
-	if err != nil {
-		return fmt.Errorf("compile json %s: %w", inputPath, err)
-	}
-	return os.WriteFile(outputPath, source, 0644)
-}
-
-func transpileYAMLModuleFile(inputPath, outputPath, pkgName string) error {
-	data, err := os.ReadFile(inputPath)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", inputPath, err)
-	}
-	if _, err := yamlmodule.Parse(data); err != nil {
-		return fmt.Errorf("parse yaml %s: %w", inputPath, err)
-	}
-	source, err := yamlmodule.Compile(data, pkgName, "Default", nil)
-	if err != nil {
-		return fmt.Errorf("compile yaml %s: %w", inputPath, err)
-	}
-	return os.WriteFile(outputPath, source, 0644)
-}
-
-func transpileDataModuleFile(inputPath, outputPath, pkgName string) error {
-	if isYAMLFile(inputPath) {
-		return transpileYAMLModuleFile(inputPath, outputPath, pkgName)
-	}
-	return transpileJSONModuleFile(inputPath, outputPath, pkgName)
-}
-
-// findNodeModuleImports scans TS/JS source for non-relative, non-known imports.
-func findNodeModuleImports(source []byte) []string {
-	var imports []string
-	seen := map[string]bool{}
-	lines := strings.Split(string(source), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") || strings.HasPrefix(line, "*") || strings.HasPrefix(line, "*/") {
-			continue
-		}
-		idx := strings.Index(line, "from ")
-		if idx < 0 {
-			continue
-		}
-		// Verify this is an import statement, not the word "from" in a string
-		prefix := strings.TrimSpace(line[:idx])
-		if !strings.HasSuffix(prefix, "import") && !strings.Contains(prefix, " import ") && prefix != "import" && !strings.HasPrefix(line, "import ") {
-			continue
-		}
-		rest := strings.TrimSpace(line[idx+5:])
-		if len(rest) < 3 {
-			continue
-		}
-		quote := rest[0]
-		if quote != '\'' && quote != '"' {
-			continue
-		}
-		end := strings.IndexByte(rest[1:], quote)
-		if end < 0 {
-			continue
-		}
-		modPath := rest[1 : end+1]
-		// Skip relative imports
-		if strings.HasPrefix(modPath, ".") {
-			continue
-		}
-		// Strip node: prefix
-		modPath = strings.TrimPrefix(modPath, "node:")
-		// Skip known/polyfilled modules
-		if compiler.IsKnownModule(modPath) {
-			continue
-		}
-		if !seen[modPath] {
-			seen[modPath] = true
-			imports = append(imports, modPath)
-		}
-	}
-	return imports
-}
-
-// resolveNodeModule walks up from fromDir looking for node_modules/<pkgName>/.
-func resolveNodeModule(pkgName, fromDir string) (string, error) {
-	dir, _ := filepath.Abs(fromDir)
-	for {
-		candidate := filepath.Join(dir, "node_modules", pkgName)
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return candidate, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("cannot find node_modules/%s from %s", pkgName, fromDir)
-		}
-		dir = parent
-	}
-}
-
-// getNodeModuleEntry reads package.json and determines the entry point file.
-func getNodeModuleEntry(pkgDir string) (string, error) {
-	pjPath := filepath.Join(pkgDir, "package.json")
-	data, err := os.ReadFile(pjPath)
-	if err != nil {
-		return "", fmt.Errorf("read package.json: %w", err)
-	}
-
-	var pj struct {
-		Exports json.RawMessage `json:"exports"`
-		Module  string          `json:"module"`
-		Main    string          `json:"main"`
-	}
-	if err := json.Unmarshal(data, &pj); err != nil {
-		return "", fmt.Errorf("parse package.json: %w", err)
-	}
-
-	// Try exports field
-	if len(pj.Exports) > 0 {
-		entry := resolveExportsField(pj.Exports)
-		if entry != "" {
-			return resolvePackageEntryPath(pkgDir, entry)
-		}
-	}
-
-	// Try module field
-	if pj.Module != "" {
-		return resolvePackageEntryPath(pkgDir, pj.Module)
-	}
-
-	// Try main field
-	if pj.Main != "" {
-		return resolvePackageEntryPath(pkgDir, pj.Main)
-	}
-
-	// Fallback to index files
-	for _, name := range []string{"index.ts", "index.js"} {
-		candidate := filepath.Join(pkgDir, name)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-
-	return "", fmt.Errorf("cannot determine entry point for %s", pkgDir)
-}
-
-func resolvePackageEntryPath(pkgDir, entry string) (string, error) {
-	if resolved, err := resolveImportFile(entry, pkgDir); err == nil {
-		return resolved, nil
-	}
-	return "", fmt.Errorf("cannot resolve package entry %q in %s", entry, pkgDir)
-}
-
-// resolveExportsField extracts an entry path from a package.json "exports" field.
-func resolveExportsField(raw json.RawMessage) string {
-	// Case 1: exports is a string — "exports": "./index.js"
-	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		return s
-	}
-
-	// Case 2: exports is an object — check "." key, then "import"/"default"
-	var obj map[string]json.RawMessage
-	if json.Unmarshal(raw, &obj) != nil {
-		return ""
-	}
-
-	// Check "." entry (the main export)
-	dot, ok := obj["."]
-	if ok {
-		return resolveExportValue(dot)
-	}
-
-	// No "." key — the object itself might be conditions
-	return pickCondition(obj)
-}
-
-func pickCondition(conds map[string]json.RawMessage) string {
-	for _, key := range []string{"import", "default", "require"} {
-		raw, ok := conds[key]
-		if !ok {
-			continue
-		}
-		var s string
-		if json.Unmarshal(raw, &s) == nil {
-			return s
-		}
-		// Nested conditions object (e.g. "import": {"types": "...", "default": "..."})
-		var nested map[string]json.RawMessage
-		if json.Unmarshal(raw, &nested) == nil {
-			if def, ok := nested["default"]; ok {
-				if json.Unmarshal(def, &s) == nil {
-					return s
-				}
-			}
-		}
-	}
-	return ""
-}
-
-// resolveExportValue resolves an export value that can be a string, conditions object, or array of those.
-func resolveExportValue(raw json.RawMessage) string {
-	// String
-	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		return s
-	}
-	// Conditions object
-	var conds map[string]json.RawMessage
-	if json.Unmarshal(raw, &conds) == nil {
-		if entry := pickCondition(conds); entry != "" {
-			return entry
-		}
-	}
-	// Array — try each element in order
-	var arr []json.RawMessage
-	if json.Unmarshal(raw, &arr) == nil {
-		for _, elem := range arr {
-			if entry := resolveExportValue(elem); entry != "" {
-				return entry
-			}
-		}
-	}
-	return ""
-}
-
-// resolveSubpathEntry handles subpath exports like "yargs/helpers" by looking up
-// the subpath in the root package's exports field.
-func resolveSubpathEntry(pkgName, fromDir string) (string, error) {
-	root, subpath := splitPkgSubpath(pkgName)
-	if subpath == "" {
-		return "", fmt.Errorf("cannot determine entry point for %s", pkgName)
-	}
-
-	rootDir, err := resolveNodeModule(root, fromDir)
-	if err != nil {
-		return "", err
-	}
-
-	data, err := os.ReadFile(filepath.Join(rootDir, "package.json"))
-	if err != nil {
-		return "", fmt.Errorf("cannot determine entry point for %s", pkgName)
-	}
-
-	var pj struct {
-		Exports json.RawMessage `json:"exports"`
-	}
-	if err := json.Unmarshal(data, &pj); err != nil || len(pj.Exports) == 0 {
-		return "", fmt.Errorf("cannot determine entry point for %s", pkgName)
-	}
-
-	var obj map[string]json.RawMessage
-	if json.Unmarshal(pj.Exports, &obj) != nil {
-		return "", fmt.Errorf("cannot determine entry point for %s", pkgName)
-	}
-
-	key := "./" + subpath
-	raw, ok := obj[key]
-	if !ok {
-		return "", fmt.Errorf("no subpath export %s in %s", key, root)
-	}
-
-	if entry := resolveExportValue(raw); entry != "" {
-		return resolvePackageEntryPath(rootDir, entry)
-	}
-
-	return "", fmt.Errorf("cannot resolve subpath export %s in %s", key, root)
-}
-
-// splitPkgSubpath splits "pkg/sub" into ("pkg", "sub") and "@scope/pkg/sub" into ("@scope/pkg", "sub").
-func splitPkgSubpath(pkgName string) (string, string) {
-	if strings.HasPrefix(pkgName, "@") {
-		parts := strings.SplitN(pkgName, "/", 3)
-		if len(parts) < 3 {
-			return pkgName, ""
-		}
-		return parts[0] + "/" + parts[1], parts[2]
-	}
-	parts := strings.SplitN(pkgName, "/", 2)
-	if len(parts) < 2 {
-		return pkgName, ""
-	}
-	return parts[0], parts[1]
-}
-
-// transpileNodeModuleImports discovers and transpiles node_modules dependencies
-// from the entry file and all its relative imports.
-func transpileNodeModuleImports(entryFile, inputDir, tmpDir, moduleName string, verbose bool, optLevel int, opts *compiler.CompileOptions) error {
-	absInputDir, _ := filepath.Abs(inputDir)
-
-	// Collect all source files (entry + relative imports) to scan
-	sourceFiles := collectAllSourceFiles(entryFile)
-
-	visited := map[string]bool{}
-	return processNodeModuleImports(sourceFiles, absInputDir, tmpDir, moduleName, verbose, visited, optLevel, opts)
-}
-
-// collectAllSourceFiles returns the entry file plus all transitively-imported relative files.
-func collectAllSourceFiles(entryFile string) []string {
-	var files []string
-	seen := map[string]bool{}
-	var walk func(string)
-	walk = func(tsFile string) {
-		abs, _ := filepath.Abs(tsFile)
-		if seen[abs] {
-			return
-		}
-		seen[abs] = true
-		files = append(files, abs)
-		if isDataModuleFile(tsFile) {
-			return
-		}
-
-		source, err := os.ReadFile(tsFile)
-		if err != nil {
-			return
-		}
-		optionalRequires := findOptionalRequireImports(source)
-		for _, imp := range findRelativeImports(source) {
-			resolved, err := resolveImportFile(imp, filepath.Dir(tsFile))
-			if err == nil {
-				walk(resolved)
-			}
-		}
-		for _, imp := range findRequireImports(source) {
-			if !strings.HasPrefix(imp, ".") {
-				continue
-			}
-			resolved, err := resolveImportFile(imp, filepath.Dir(tsFile))
-			if err == nil {
-				walk(resolved)
-			} else if !optionalRequires[imp] {
-				return
-			}
-		}
-	}
-	walk(entryFile)
-	return files
-}
-
-func processNodeModuleImports(sourceFiles []string, inputDir, tmpDir, moduleName string, verbose bool, visited map[string]bool, optLevel int, opts *compiler.CompileOptions) error {
-	var newSourceFiles []string
-
-	for _, srcFile := range sourceFiles {
-		if isDataModuleFile(srcFile) {
-			continue
-		}
-		source, err := os.ReadFile(srcFile)
-		if err != nil {
-			continue
-		}
-		optionalRequires := findOptionalRequireImports(source)
-		nodeImports := findNodeModuleImports(source)
-		for _, imp := range findRequireImports(source) {
-			if strings.HasPrefix(imp, ".") {
-				continue
-			}
-			if compiler.IsKnownModule(imp) {
-				continue
-			}
-			nodeImports = append(nodeImports, imp)
-		}
-		for _, pkgName := range nodeImports {
-			if visited[pkgName] {
-				continue
-			}
-
-			pkgDir, err := resolveNodeModule(pkgName, filepath.Dir(srcFile))
-			if err != nil {
-				if optionalRequires[pkgName] {
-					continue
-				}
-				return err
-			}
-			visited[pkgName] = true
-			entryPath, err := getNodeModuleEntry(pkgDir)
-			if err != nil {
-				// Try subpath export resolution (e.g. "yargs/helpers" → yargs exports["./helpers"])
-				entryPath, err = resolveSubpathEntry(pkgName, filepath.Dir(srcFile))
-				if err != nil {
-					return err
-				}
-			}
-
-			sanitized := compiler.SanitizeGoPkgName(pkgName)
-			outDir := filepath.Join(tmpDir, sanitized)
-			if err := os.MkdirAll(outDir, 0755); err != nil {
-				return err
-			}
-
-			if verbose {
-				fmt.Fprintf(os.Stderr, "transpiling node_module %s → %s\n", pkgName, sanitized)
-			}
-
-			// Discover all files in this package and compile together
-			allPkgFiles, err := transpileNodeModuleAsPackage(entryPath, outDir, moduleName, sanitized, verbose, optLevel, opts)
-			if err != nil {
-				return fmt.Errorf("transpile node_module %s: %w", pkgName, err)
-			}
-			newSourceFiles = append(newSourceFiles, allPkgFiles...)
-		}
-	}
-
-	// Recursively process any node_module imports found in the newly transpiled packages
-	if len(newSourceFiles) > 0 {
-		return processNodeModuleImports(newSourceFiles, inputDir, tmpDir, moduleName, verbose, visited, optLevel, opts)
-	}
-	return nil
-}
-
-// transpileNodeModuleAsPackage discovers all files in an npm package and compiles
-// them together using CompilePackage, so cross-file exports are shared.
-func transpileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string, verbose bool, optLevel int, opts *compiler.CompileOptions) ([]string, error) {
-	// Phase 1: Discover all files in the package
-	files := map[string][]byte{}
-	allPaths := []string{}
-
-	absEntry, _ := filepath.Abs(entryPath)
-	source, err := os.ReadFile(entryPath)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", entryPath, err)
-	}
-	files[absEntry] = source
-	allPaths = append(allPaths, absEntry)
-
-	visited := map[string]bool{absEntry: true}
-	var discover func(string) error
-	discover = func(tsFile string) error {
-		if isDataModuleFile(tsFile) {
-			return nil
-		}
-		src, err := os.ReadFile(tsFile)
-		if err != nil {
-			return err
-		}
-		optionalRequires := findOptionalRequireImports(src)
-		relImports := findRelativeImports(src)
-		for _, imp := range findRequireImports(src) {
-			if strings.HasPrefix(imp, ".") {
-				relImports = append(relImports, imp)
-			}
-		}
-		for _, imp := range relImports {
-			resolved, err := resolveImportFile(imp, filepath.Dir(tsFile))
-			if err != nil {
-				if optionalRequires[imp] {
-					continue
-				}
-				return err
-			}
-			absResolved, _ := filepath.Abs(resolved)
-			if visited[absResolved] {
-				continue
-			}
-			visited[absResolved] = true
-			data, err := os.ReadFile(resolved)
-			if err != nil {
-				return err
-			}
-			files[absResolved] = data
-			allPaths = append(allPaths, absResolved)
-			if err := discover(resolved); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if err := discover(entryPath); err != nil {
-		return nil, err
-	}
-
-	if verbose {
-		fmt.Fprintf(os.Stderr, "  package %s: %d files\n", pkgName, len(files))
-	}
-
-	// Phase 2: Compile all files together
-	results, err := compiler.CompilePackageWithOptLevelOptions(files, pkgName, moduleName, absEntry, optLevel, opts)
-	if err != nil {
-		return nil, err
-	}
-
-	// Phase 3: Write results
-	// Use relative path from package dir for unique filenames when basenames collide.
-	pkgDir := filepath.Dir(absEntry)
-	for absPath, output := range results {
-		rel, err := filepath.Rel(pkgDir, absPath)
-		if err != nil {
-			rel = filepath.Base(absPath)
-		}
-		// Flatten relative path: build/lib/index.js → build-lib-index.go
-		// Strip leading ".." components (Go ignores files starting with ".")
-		goName := strings.TrimSuffix(rel, filepath.Ext(rel))
-		goName = strings.ReplaceAll(goName, string(filepath.Separator), "-")
-		goName = strings.TrimLeft(goName, ".-")
-		if goName == "" {
-			goName = "file"
-		}
-		goName += ".go"
-		outFile := filepath.Join(outDir, goName)
-		if verbose {
-			fmt.Fprintf(os.Stderr, "  writing %s\n", outFile)
-		}
-		if err := os.WriteFile(outFile, output, 0644); err != nil {
-			return nil, err
-		}
-	}
-
-	return allPaths, nil
-}
-
-// detectModuleName walks up from the input file to find a go.mod and returns
-// the module name. Returns empty string if not found.
-func detectModuleName(inputPath string) string {
-	dir, _ := filepath.Abs(filepath.Dir(inputPath))
-	for {
-		gomod := filepath.Join(dir, "go.mod")
-		if f, err := os.Open(gomod); err == nil {
-			defer f.Close()
-			scanner := bufio.NewScanner(f)
-			for scanner.Scan() {
-				line := scanner.Text()
-				if strings.HasPrefix(line, "module ") {
-					return strings.TrimSpace(strings.TrimPrefix(line, "module "))
-				}
-			}
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return ""
 }

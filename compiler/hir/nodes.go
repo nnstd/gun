@@ -32,6 +32,7 @@ type Module struct {
 	SourcePath        string
 	SourceSize        int
 	SynthesizeDefault string // if set, emit var Default = <this Go name> (SWC interop)
+	HasDefaultExport   bool   // true if module declares its own Default variable
 	HasTopLevelAwait  bool  // true if module uses await at top level
 }
 

@@ -34,6 +34,20 @@ func CompileWithOptLevel(source []byte, pkgName, moduleName string, samePackageI
 	return CompileWithOptLevelAndPath(source, pkgName, moduleName, "", samePackageImports, optLevel)
 }
 
+// CompileWithContext transpiles TypeScript source using a pre-built context.
+// Use this when you need to augment the context with additional builtins
+// (e.g., test262 harness functions) before compilation.
+func CompileWithContext(source []byte, pkgName, moduleName string, samePackageImports bool, optLevel int, ctx *tcontext.TranspilerContext) ([]byte, error) {
+	tree, err := parseTypeScript(source)
+	if err != nil {
+		return nil, fmt.Errorf("parse: %w", err)
+	}
+	defer tree.Close()
+
+	p := pipeline.NewWithContext(tcontext.OptLevel(optLevel), ctx)
+	return p.CompileTreeWithPathOptions(tree.RootNode(), source, pkgName, moduleName, "", samePackageImports, nil)
+}
+
 func CompileWithOptLevelAndPath(source []byte, pkgName, moduleName, sourcePath string, samePackageImports bool, optLevel int) ([]byte, error) {
 	return CompileWithOptLevelAndPathOptions(source, pkgName, moduleName, sourcePath, samePackageImports, optLevel, nil)
 }
@@ -96,9 +110,15 @@ func CompilePackageWithOptLevelOptions(files map[string][]byte, pkgName, moduleN
 }
 
 func newDefaultPipeline(optLevel int) *pipeline.Pipeline {
+	return pipeline.NewWithContext(tcontext.OptLevel(optLevel), NewDefaultContext())
+}
+
+// NewDefaultContext creates a TranspilerContext with all default builtins registered.
+// Use this when you need to augment the context before passing it to the pipeline.
+func NewDefaultContext() *tcontext.TranspilerContext {
 	ctx := tcontext.New()
 	RegisterDefaultBuiltins(ctx)
-	return pipeline.NewWithContext(tcontext.OptLevel(optLevel), ctx)
+	return ctx
 }
 
 func compileWithExportsMetadata(exports PackageExports, currentFile string) ([]backend.CrossFileExport, []string) {

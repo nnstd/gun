@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nnstd/gun/compiler/runner"
 )
 
 func gunTestEntry(t *testing.T) string {
@@ -42,7 +44,7 @@ func TestGetNodeModuleEntryResolvesExtensionlessMain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := getNodeModuleEntry(pkgDir)
+	got, err := runner.GetNodeModuleEntry(pkgDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +67,7 @@ func TestResolveSubpathEntryResolvesExtensionlessExport(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := resolveSubpathEntry("pkg/feature", fixtureRoot)
+	got, err := runner.ResolveSubpathEntry("pkg/feature", fixtureRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +87,7 @@ try { require("node:crypto"); } catch {}
 const required = require("required");
 `)
 
-	optional := findOptionalRequireImports(source)
+	optional := runner.FindOptionalRequireImports(source)
 	if !optional["encoding"] {
 		t.Fatal("expected encoding require inside try/catch to be optional")
 	}
@@ -123,11 +125,11 @@ console.log(!!pkg);
 	}
 
 	outDir := t.TempDir()
-	if err := transpileFile(entry, filepath.Join(outDir, "entry.go"), "main", "gunrun", false, false, 0, nil); err != nil {
+	if err := runner.TranspileFile(entry, filepath.Join(outDir, "entry.go"), "main", "gunrun", false, false, 0, nil); err != nil {
 		t.Fatal(err)
 	}
 	visited := map[string]bool{}
-	err := processNodeModuleImports([]string{entry}, fixtureRoot, outDir, "gunrun", false, visited, 0, nil)
+	err := runner.ProcessNodeModuleImports([]string{entry}, fixtureRoot, outDir, "gunrun", false, visited, 0, nil)
 	if err != nil {
 		t.Fatalf("optional missing require should not fail node_module discovery: %v", err)
 	}
@@ -172,11 +174,11 @@ module.exports = {};
 	}
 
 	outDir := t.TempDir()
-	if err := transpileFile(entry, filepath.Join(outDir, "entry.go"), "main", "gunrun", false, false, 0, nil); err != nil {
+	if err := runner.TranspileFile(entry, filepath.Join(outDir, "entry.go"), "main", "gunrun", false, false, 0, nil); err != nil {
 		t.Fatal(err)
 	}
 	visited := map[string]bool{}
-	err := processNodeModuleImports([]string{entry}, fixtureRoot, outDir, "gunrun", false, visited, 0, nil)
+	err := runner.ProcessNodeModuleImports([]string{entry}, fixtureRoot, outDir, "gunrun", false, visited, 0, nil)
 	if err != nil {
 		t.Fatalf("resolvable optional require should be included even if runtime evaluation may throw: %v", err)
 	}
@@ -394,7 +396,7 @@ module.exports = features;
 	}
 
 	outDir := t.TempDir()
-	files, err := transpileNodeModuleAsPackage(entry, outDir, "gunrun", "pkg", false, 0, nil)
+	files, err := runner.TranspileNodeModuleAsPackage(entry, outDir, "gunrun", "pkg", false, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,11 +423,11 @@ func TestTranspileProject_BuiltGunTestMatchesCLIParity(t *testing.T) {
 
 	t.Setenv("GOCACHE", filepath.Join(outDir, "gocache"))
 
-	if err := transpileProject(entry, outDir, "main", false, 0, nil); err != nil {
+	if err := runner.TranspileProject(entry, outDir, "main", false, 0, nil); err != nil {
 		maybeSkipAsyncPhase0Boundary(t, err)
 		t.Fatal(err)
 	}
-	if err := goBuild(outDir, bin, false); err != nil {
+	if err := runner.GoBuild(outDir, bin, false); err != nil {
 		if strings.Contains(err.Error(), "invalid character U+0023 '#'") {
 			t.Skip("gun-test fixture is currently blocked on general JS private field support in transpiled Hono")
 		}
@@ -541,7 +543,7 @@ console.log(JSON.stringify({ argv: process.argv, acc }));
 
 	bin := filepath.Join(tempDir, "gun-bin")
 	cacheDir := filepath.Join(tempDir, "gocache")
-	cmd := exec.Command("go", "build", "-ldflags", "-X main.gunModuleRoot=/Users/nikita/Work/gun", "-o", bin, ".")
+	cmd := exec.Command("go", "build", "-ldflags", "-X github.com/nnstd/gun/compiler/runner.GunModuleRoot=/Users/nikita/Work/gun", "-o", bin, ".")
 	cmd.Dir = "/Users/nikita/Work/gun"
 	cmd.Env = append(os.Environ(), "GOCACHE="+cacheDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -705,11 +707,11 @@ func buildFixture(t *testing.T, fixture string) string {
 
 	t.Setenv("GOCACHE", filepath.Join(outDir, "gocache"))
 
-	if err := transpileProject(fixture, outDir, "main", false, 0, nil); err != nil {
+	if err := runner.TranspileProject(fixture, outDir, "main", false, 0, nil); err != nil {
 		maybeSkipAsyncPhase0Boundary(t, err)
 		t.Fatal(err)
 	}
-	if err := goBuild(outDir, bin, false); err != nil {
+	if err := runner.GoBuild(outDir, bin, false); err != nil {
 		t.Fatal(err)
 	}
 	return bin
@@ -1365,11 +1367,11 @@ console.log("Listening on " + port);
 
 	t.Setenv("GOCACHE", filepath.Join(outDir, "gocache"))
 
-	if err := transpileProject(fixture, outDir, "main", false, 0, nil); err != nil {
+	if err := runner.TranspileProject(fixture, outDir, "main", false, 0, nil); err != nil {
 		maybeSkipAsyncPhase0Boundary(t, err)
 		t.Fatal(err)
 	}
-	if err := goBuild(outDir, bin, false); err != nil {
+	if err := runner.GoBuild(outDir, bin, false); err != nil {
 		if strings.Contains(err.Error(), "invalid character U+0023 '#'") {
 			t.Skip("Hono fixture is still blocked on general JS private field support")
 		}

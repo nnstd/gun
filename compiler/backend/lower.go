@@ -72,6 +72,7 @@ type Lowerer struct {
 	hasArenaVar         int
 	cpuProfile          *CPUProfileConfig
 	profileRuntimeAlias string
+	isEntryFile         bool
 }
 
 // Lower converts an HIR module to a Go AST file.
@@ -82,18 +83,18 @@ func Lower(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, s
 // LowerWithCPUProfile converts an HIR module to a Go AST file with optional
 // generated-main CPU profiling support.
 func LowerWithCPUProfile(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, cpuProfile *CPUProfileConfig, optLevel context.OptLevel) *ast.File {
-	return LowerWithExportsAndCPUProfile(mod, ctx, moduleName, samePackageImports, nil, nil, nil, nil, nil, "", nil, cpuProfile, optLevel)
+	return LowerWithExportsAndCPUProfile(mod, ctx, moduleName, samePackageImports, nil, nil, nil, nil, nil, "", nil, cpuProfile, optLevel, true)
 }
 
 // LowerWithExports converts an HIR module to a Go AST file with knowledge of
 // symbols exported from other files in the same package.
 func LowerWithExports(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string, localAliasMap map[symbol.ID]string, namespaceAlias string, namespaceEntries map[string]string, optLevel context.OptLevel) *ast.File {
-	return LowerWithExportsAndCPUProfile(mod, ctx, moduleName, samePackageImports, crossFileExports, reservedNames, importNameMap, exportAliasMap, localAliasMap, namespaceAlias, namespaceEntries, nil, optLevel)
+	return LowerWithExportsAndCPUProfile(mod, ctx, moduleName, samePackageImports, crossFileExports, reservedNames, importNameMap, exportAliasMap, localAliasMap, namespaceAlias, namespaceEntries, nil, optLevel, true)
 }
 
 // LowerWithExportsAndCPUProfile converts an HIR module to a Go AST file with
 // knowledge of same-package exports plus optional generated-main CPU profiling support.
-func LowerWithExportsAndCPUProfile(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string, localAliasMap map[symbol.ID]string, namespaceAlias string, namespaceEntries map[string]string, cpuProfile *CPUProfileConfig, optLevel context.OptLevel) *ast.File {
+func LowerWithExportsAndCPUProfile(mod *hir.Module, ctx *context.TranspilerContext, moduleName string, samePackageImports bool, crossFileExports []CrossFileExport, reservedNames []string, importNameMap map[string]string, exportAliasMap map[string]string, localAliasMap map[symbol.ID]string, namespaceAlias string, namespaceEntries map[string]string, cpuProfile *CPUProfileConfig, optLevel context.OptLevel, isEntryFile bool) *ast.File {
 	cfe := make(map[string]bool)
 	for _, exp := range crossFileExports {
 		cfe[exp.GoName] = true
@@ -127,6 +128,7 @@ func LowerWithExportsAndCPUProfile(mod *hir.Module, ctx *context.TranspilerConte
 		hasTopLevelAwait:   mod.HasTopLevelAwait,
 		arenaEnabled:       optLevel >= context.O2,
 		cpuProfile:         cpuProfile,
+		isEntryFile:        isEntryFile,
 	}
 
 	// Reserve cross-file export names in the symbol table so local symbols
@@ -152,6 +154,18 @@ func LowerWithExportsAndCPUProfile(mod *hir.Module, ctx *context.TranspilerConte
 	// SWC interop: synthesize var Default = PrimaryExport when requested
 	if mod.SynthesizeDefault != "" {
 		l.decls = append(l.decls, varDecl("Default", nil, goIdent(mod.SynthesizeDefault)))
+	}
+
+	// Ensure every transpiled module has a Default variable for cross-package imports.
+	// If no explicit default exists, point to the namespace object.
+	// Only synthesize for the entry file to avoid duplicate declarations.
+	_, hasDefaultEntry := l.namespaceEntries["default"]
+	if mod.SynthesizeDefault == "" && l.isEntryFile && l.namespaceAlias != "" && !hasDefaultEntry {
+		l.decls = append(l.decls, varDecl("Default", jsValuePtrType(), nil))
+		l.initStmts = append(l.initStmts, assignStmt(
+			[]ast.Expr{goIdent("Default")},
+			[]ast.Expr{goIdent(l.namespaceAlias)},
+		))
 	}
 
 	if l.namespaceAlias != "" {

@@ -1,0 +1,54 @@
+# Default skip list for test262 runner.
+# Tests matching any of these criteria will be skipped.
+
+skip_features:
+  - SharedArrayBuffer
+  - Atomics
+  - generators
+  - async-iteration
+  - regexp-unicode-property-escapes
+  - regexp-named-groups
+  - tail-call-optimization
+  - Symbol.species
+  - cross-realm
+  - realm
+
+skip_flags:
+  - module
+  - onlyStrict
+  - raw
+
+skip_negative_phases:
+  - parse
+  - early
+  - resolution
+
+skip_patterns:
+  - "test/intl402/**"
+  - "test/annexB/**"
+  - "test/staging/**"
+
+skip_includes:
+  - propertyHelper.js
+  - deepEqual.js
+  - compareArray.js
+  - compareIterator.js
+  - isConstructor.js
+  - proxyTrapsHelper.js
+  - regExpUtils.js
+  - resizableArrayBufferUtils.js
+  - temporalHelpers.js
+  - testIntl.js
+  - testTypedArray.js
+  - atomicsHelper.js
+  - byteConversionValues.js
+  - dateConstants.js
+  - decimalToHexString.js
+  - detachArrayBuffer.js
+  - fnGlobalObject.js
+  - nativeFunctionMatcher.js
+  - nans.js
+  - promiseHelper.js
+  - tcoHelper.js
+  - typeCoercion.js
+  - wellKnownIntrinsicObjects.js
