@@ -11,12 +11,14 @@ type DocPage = {
 }
 
 const SIDEBAR = [
-  { label: 'Getting Started', icon: '01', items: ['Introduction', 'Installation', 'Quick Start'] },
-  { label: 'Core Concepts', icon: '02', items: ['How It Works', 'Runtime Semantics', 'Event Loop'] },
+  { label: 'Get Started', icon: '01', items: ['Introduction', 'Installation', 'Quick Start'] },
+  { label: 'Core Runtime', icon: '02', items: ['How It Works', 'Runtime Semantics', 'Event Loop', 'Debugging'] },
   { label: 'Language', icon: '03', items: ['Variables', 'Functions', 'Classes', 'Async / Await', 'Modules'] },
-  { label: 'APIs', icon: '04', items: ['Node.js Compat', 'Bun Compat', 'npm Dependencies'] },
-  { label: 'Configuration', icon: '05', items: ['Project Scripts', 'CLI Reference', 'Source Maps'] },
-  { label: 'Advanced', icon: '06', items: ['Incremental Builds', 'CI Integration', 'Debugging'] },
+  { label: 'HTTP & Networking', icon: '04', items: ['HTTP Server', 'Fetch', 'OpenTelemetry'] },
+  { label: 'File & Module System', icon: '05', items: ['npm Dependencies', 'Source Maps'] },
+  { label: 'Interop & Tooling', icon: '06', items: ['Node.js Compat', 'Bun Compat', 'FFI', 'C Compiler'] },
+  { label: 'Configuration', icon: '07', items: ['Project Scripts', 'CLI Reference'] },
+  { label: 'Advanced', icon: '08', items: ['Incremental Builds', 'CI Integration'] },
 ] as const
 
 export const ALL_PAGES = SIDEBAR.flatMap((group) => group.items)
