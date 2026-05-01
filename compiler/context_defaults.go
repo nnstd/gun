@@ -516,7 +516,7 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		Name: "console",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddImport("github.com/nnstd/gun/runtime/builtin/console")
-			return ident("console")
+			return selectorExpr(ident("console"), "AsJSValue")
 		},
 	})
 

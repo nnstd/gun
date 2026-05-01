@@ -294,9 +294,18 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 			}
 			alias := exportName
 			if fileName != entryFile {
-				alias = fileSpecificExportName(fileName, originalName)
+				nameForAlias := originalName
+				if exp.ValueName != "" {
+					nameForAlias = exp.ValueName
+				}
+				alias = fileSpecificExportName(fileName, nameForAlias)
 			}
 			aliases[originalName] = makeUniqueAlias(alias, globalUsedAliases)
+				// Also register under ValueName so collectTopLevelAliases
+				// resolves the backing symbol to the same alias.
+				if exp.ValueName != "" {
+					aliases[exp.ValueName] = aliases[originalName]
+				}
 		}
 		exportAliases[fileName] = aliases
 		namespaceAliases[fileName] = makeUniqueAlias(fileSpecificExportName(fileName, "namespace"), globalUsedAliases)

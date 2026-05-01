@@ -31,6 +31,7 @@ type CrossFileExport struct {
 	OriginalName string
 	GoName       string
 	IsJSValue    bool
+	ValueName    string // local identifier name on RHS (e.g. "addKeyword" for `module.exports = { add: addKeyword }`)
 }
 
 // Lowerer converts an HIR Module into a go/ast.File.

@@ -78,14 +78,23 @@ func ScanHIRExports(mod *hir.Module) []CrossFileExport {
 									if prop.KeyName == "" || prop.Computed {
 										continue
 									}
-									if _, ok := prop.Value.(*hir.Identifier); !ok {
+									valIdent, ok := prop.Value.(*hir.Identifier)
+									if !ok {
 										continue
 									}
-									exports = append(exports, CrossFileExport{
+									exp := CrossFileExport{
 										OriginalName: prop.KeyName,
 										GoName:       symbol.Capitalize(symbol.Sanitize(prop.KeyName)),
 										IsJSValue:    true,
-									})
+									}
+									vName := valIdent.Name
+									if valIdent.Sym != nil {
+										vName = valIdent.Sym.OriginalName
+									}
+									if vName != prop.KeyName {
+										exp.ValueName = vName
+									}
+									exports = append(exports, exp)
 								}
 							}
 						}
@@ -165,15 +174,24 @@ func collectCJSExportsFromAssign(assign *hir.AssignExpr, seen map[string]bool, e
 					continue
 				}
 				// Only extract if value is a local identifier reference
-				if _, ok := prop.Value.(*hir.Identifier); !ok {
+				valIdent, ok := prop.Value.(*hir.Identifier)
+				if !ok {
 					continue
 				}
 				seen[name] = true
-				*exports = append(*exports, CrossFileExport{
+				exp := CrossFileExport{
 					OriginalName: name,
 					GoName:       symbol.Capitalize(symbol.Sanitize(name)),
 					IsJSValue:    true,
-				})
+				}
+				vName := valIdent.Name
+				if valIdent.Sym != nil {
+					vName = valIdent.Sym.OriginalName
+				}
+				if vName != name {
+					exp.ValueName = vName
+				}
+				*exports = append(*exports, exp)
 			}
 		}
 		return
