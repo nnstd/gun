@@ -283,6 +283,39 @@ Each new package has its own tests:
 - `compiler/backend/lower_test.go` — HIR → Go AST (unit tests and round-trip TS → Go)
 - `compiler/pipeline/pipeline_test.go` — full pipeline at O0/O1/O2, hooks, various TS snippets
 
+## Landing Site
+
+The landing site lives in `landing/` and uses TanStack Start with React 19. Doc pages are markdown files in `landing/src/content/docs/` with YAML frontmatter (`title`, `lead`, `sections`).
+
+### Version bumping
+
+**When making any changes to the landing site**, increment the version in both files:
+
+1. `landing/package.json` — `"version"` field
+2. `landing/k8s/deployment.yaml` — container image tag
+
+Both must match. Use semver (e.g. `1.3.0` → `1.4.0` for new pages).
+
+### Adding a doc page
+
+Create a new `.md` file in `landing/src/content/docs/` following this format:
+
+```yaml
+---
+title: Page Title
+lead: One-line description shown in navigation and SEO.
+sections:
+  - First section
+  - Second section
+---
+
+## First section
+
+Content with code blocks...
+```
+
+Build to verify: `cd landing && npx vite build`
+
 ## Tooling
 
 Never call "cat -A". There no this flag in macOS
