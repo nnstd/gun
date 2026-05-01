@@ -13,7 +13,7 @@ function cx(...parts: Array<string | false | null | undefined>) {
 }
 
 const NAV_ITEMS = [
-  { label: "Docs", href: "/docs", page: "docs" as const },
+  { label: "Docs", href: "/docs/introduction", page: "docs" as const },
   { label: "Benchmarks", href: "/#benchmarks", page: "home" as const },
   { label: "Examples", href: "/#examples", page: "home" as const },
   { label: "Blog", href: "/blog", page: "blog" as const },
@@ -23,7 +23,7 @@ const FOOTER_COLUMNS = [
   {
     title: "Product",
     links: [
-      { label: "Docs", href: "/docs" },
+      { label: "Docs", href: "/docs/introduction" },
       { label: "Benchmarks", href: "/#benchmarks" },
       { label: "Changelog", href: "#" },
       { label: "Roadmap", href: "#" },
@@ -33,9 +33,9 @@ const FOOTER_COLUMNS = [
     title: "Resources",
     links: [
       { label: "Examples", href: "/#examples" },
-      { label: "Migration guide", href: "/docs" },
-      { label: "Source maps", href: "/docs" },
-      { label: "API reference", href: "/docs" },
+      { label: "Migration guide", href: "/docs/introduction" },
+      { label: "Source maps", href: "/docs/source-maps" },
+      { label: "API reference", href: "/docs/cli-reference" },
     ],
   },
   {

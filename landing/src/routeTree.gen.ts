@@ -13,6 +13,7 @@ import { Route as DocsRouteImport } from './routes/docs'
 import { Route as BlogRouteImport } from './routes/blog'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as OgSplatRouteImport } from './routes/og/$'
+import { Route as DocsSlugRouteImport } from './routes/docs/$slug'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
 
 const DocsRoute = DocsRouteImport.update({
@@ -35,6 +36,11 @@ const OgSplatRoute = OgSplatRouteImport.update({
   path: '/og/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DocsSlugRoute = DocsSlugRouteImport.update({
+  id: '/$slug',
+  path: '/$slug',
+  getParentRoute: () => DocsRoute,
+} as any)
 const ApiSplatRoute = ApiSplatRouteImport.update({
   id: '/api/$',
   path: '/api/$',
@@ -44,37 +50,40 @@ const ApiSplatRoute = ApiSplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/blog': typeof BlogRoute
-  '/docs': typeof DocsRoute
+  '/docs': typeof DocsRouteWithChildren
   '/api/$': typeof ApiSplatRoute
+  '/docs/$slug': typeof DocsSlugRoute
   '/og/$': typeof OgSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/blog': typeof BlogRoute
-  '/docs': typeof DocsRoute
+  '/docs': typeof DocsRouteWithChildren
   '/api/$': typeof ApiSplatRoute
+  '/docs/$slug': typeof DocsSlugRoute
   '/og/$': typeof OgSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/blog': typeof BlogRoute
-  '/docs': typeof DocsRoute
+  '/docs': typeof DocsRouteWithChildren
   '/api/$': typeof ApiSplatRoute
+  '/docs/$slug': typeof DocsSlugRoute
   '/og/$': typeof OgSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/blog' | '/docs' | '/api/$' | '/og/$'
+  fullPaths: '/' | '/blog' | '/docs' | '/api/$' | '/docs/$slug' | '/og/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/blog' | '/docs' | '/api/$' | '/og/$'
-  id: '__root__' | '/' | '/blog' | '/docs' | '/api/$' | '/og/$'
+  to: '/' | '/blog' | '/docs' | '/api/$' | '/docs/$slug' | '/og/$'
+  id: '__root__' | '/' | '/blog' | '/docs' | '/api/$' | '/docs/$slug' | '/og/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BlogRoute: typeof BlogRoute
-  DocsRoute: typeof DocsRoute
+  DocsRoute: typeof DocsRouteWithChildren
   ApiSplatRoute: typeof ApiSplatRoute
   OgSplatRoute: typeof OgSplatRoute
 }
@@ -109,6 +118,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OgSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/docs/$slug': {
+      id: '/docs/$slug'
+      path: '/$slug'
+      fullPath: '/docs/$slug'
+      preLoaderRoute: typeof DocsSlugRouteImport
+      parentRoute: typeof DocsRoute
+    }
     '/api/$': {
       id: '/api/$'
       path: '/api/$'
@@ -119,10 +135,20 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface DocsRouteChildren {
+  DocsSlugRoute: typeof DocsSlugRoute
+}
+
+const DocsRouteChildren: DocsRouteChildren = {
+  DocsSlugRoute: DocsSlugRoute,
+}
+
+const DocsRouteWithChildren = DocsRoute._addFileChildren(DocsRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BlogRoute: BlogRoute,
-  DocsRoute: DocsRoute,
+  DocsRoute: DocsRouteWithChildren,
   ApiSplatRoute: ApiSplatRoute,
   OgSplatRoute: OgSplatRoute,
 }

@@ -1,5 +1,6 @@
 import { Search } from 'lucide-react'
 import { startTransition, useDeferredValue, useMemo, useState } from 'react'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { allDocs } from '../../.content-collections/generated'
 import { MarkdownContent } from '../components/markdown'
 import { SiteFooter, SiteHeader } from '../components/site'
@@ -23,23 +24,45 @@ const SIDEBAR = [
 
 export const ALL_PAGES = SIDEBAR.flatMap((group) => group.items)
 
-export const DOC_PAGES: Record<string, DocPage> = Object.fromEntries(
-  allDocs.map((doc) => [
+export const DOC_PAGES: Record<string, DocPage> = {
+  ...Object.fromEntries(allDocs.map((doc) => [
     doc.title,
     {
       lead: doc.lead,
       html: withSectionAnchors(doc.html, doc.sections),
       sections: doc.sections,
     },
-  ]),
-)
+  ])),
+  'Event Loop': {
+    lead: 'Gun supports the async patterns backend JavaScript uses most often: promises, async functions, timers, and request callbacks.',
+    html: '<h2 id="supported-patterns">Supported patterns</h2><p>Use <code>async</code> and <code>await</code> for ordinary asynchronous work:</p><p>Promise chains are supported too, but <code>async</code> functions usually produce clearer diagnostics.</p><h2 id="timers">Timers</h2><p>Timer APIs work for common scheduling patterns:</p><p>Avoid using timers as a substitute for durable queues.</p><h2 id="request-handlers">Request handlers</h2><p>HTTP handlers can be synchronous or async:</p><p>Keep handler state explicit.</p><h2 id="practical-limits">Practical limits</h2><p>Gun is best with async flows that are visible in the source graph.</p>',
+    sections: ['Supported patterns', 'Timers', 'Request handlers', 'Practical limits'],
+  },
+}
 
-export function DocsPage() {
-  const [active, setActive] = useState('Introduction')
+export const TITLE_TO_SLUG: Record<string, string> = {
+  ...Object.fromEntries(allDocs.map((doc) => [doc.title, doc._meta.path])),
+  'Event Loop': 'event-loop',
+}
+
+export const SLUG_TO_TITLE: Record<string, string> = {
+  ...Object.fromEntries(allDocs.map((doc) => [doc._meta.path, doc.title])),
+  'event-loop': 'Event Loop',
+}
+
+function slugifyHeading(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+export function DocsPage({ active }: { active: string }) {
+  const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const deferredSearch = useDeferredValue(search)
 
-  const page = DOC_PAGES[active] ?? DOC_PAGES.Introduction
+  const page = DOC_PAGES[active] ?? DOC_PAGES['Introduction']
   const activeIndex = ALL_PAGES.indexOf(active)
 
   const filteredSidebar = useMemo(() => {
@@ -53,10 +76,12 @@ export function DocsPage() {
   }, [deferredSearch])
 
   function setActivePage(next: string) {
-    startTransition(() => {
-      setActive(next)
-      window.location.hash = ''
-    })
+    const slug = TITLE_TO_SLUG[next]
+    if (slug) {
+      startTransition(() => {
+        navigate({ to: '/docs/$slug', params: { slug } })
+      })
+    }
   }
 
   function groupOf(item: string) {
@@ -96,15 +121,16 @@ export function DocsPage() {
                 <div>
                   {group.items.map((item) => {
                     const isActive = item === active
+                    const slug = TITLE_TO_SLUG[item]
                     return (
-                      <button
+                      <Link
                         key={item}
-                        type="button"
-                        onClick={() => setActivePage(item)}
+                        to="/docs/$slug"
+                        params={{ slug }}
                         className={isActive ? 'block w-full border-l-2 border-brand-400 bg-brand-500/15 px-4 py-2 text-left text-[14px] font-semibold text-white transition lg:px-5' : 'block w-full border-l-2 border-transparent px-4 py-2 text-left text-[14px] text-white/60 transition hover:bg-brand-500/8 hover:text-white lg:px-5'}
                       >
                         {item}
-                      </button>
+                      </Link>
                     )
                   })}
                 </div>
@@ -173,13 +199,6 @@ export function DocsPage() {
       <SiteFooter />
     </div>
   )
-}
-
-function slugifyHeading(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
 }
 
 function withSectionAnchors(html: string, sections: string[]) {
