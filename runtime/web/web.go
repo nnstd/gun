@@ -518,6 +518,10 @@ func DecodeURI(raw *jsvalue.JSValue) *jsvalue.JSValue {
 	return jsvalue.NewString(raw.String())
 }
 
+func Unescape(raw *jsvalue.JSValue) *jsvalue.JSValue {
+	return DecodeURI(raw)
+}
+
 func DecodeURIComponent(raw *jsvalue.JSValue) *jsvalue.JSValue {
 	if raw == nil {
 		return jsvalue.NewString("")
@@ -556,4 +560,11 @@ func EncodeURI(raw *jsvalue.JSValue) *jsvalue.JSValue {
 	escaped = strings.ReplaceAll(escaped, "%3B", ";")
 	escaped = strings.ReplaceAll(escaped, "%3D", "=")
 	return jsvalue.NewString(escaped)
+}
+
+func EncodeURIComponent(raw *jsvalue.JSValue) *jsvalue.JSValue {
+	if raw == nil {
+		return jsvalue.NewString("")
+	}
+	return jsvalue.NewString(neturl.QueryEscape(raw.String()))
 }

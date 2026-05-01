@@ -279,7 +279,7 @@ func registerGlobalFunctions(ctx *tcontext.TranspilerContext) {
 		})
 	}
 
-	for _, fnName := range []string{"decodeURI", "decodeURIComponent", "encodeURI"} {
+	for _, fnName := range []string{"decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent"} {
 		name := fnName
 		ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
 			Name: name,
@@ -293,6 +293,8 @@ func registerGlobalFunctions(ctx *tcontext.TranspilerContext) {
 					callName = "DecodeURIComponent"
 				case "encodeURI":
 					callName = "EncodeURI"
+				case "encodeURIComponent":
+					callName = "EncodeURIComponent"
 				}
 				if len(args) > 0 {
 					return callExpr(selectorExpr(ident("web"), callName), jsvalueWrapLit(args[0]))
@@ -301,6 +303,17 @@ func registerGlobalFunctions(ctx *tcontext.TranspilerContext) {
 			},
 		})
 	}
+
+	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
+		Name: "unescape",
+		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+			imp.AddImport("github.com/nnstd/gun/runtime/web")
+			if len(args) > 0 {
+				return callExpr(selectorExpr(ident("web"), "Unescape"), jsvalueWrapLit(args[0]))
+			}
+			return callExpr(selectorExpr(ident("web"), "Unescape"), callExpr(selectorExpr(ident("jsvalue"), "NewString"), stringLit("")))
+		},
+	})
 
 	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
 		Name: "addEventListener",
@@ -719,7 +732,7 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		},
 	})
 
-	for _, identName := range []string{"decodeURI", "decodeURIComponent", "encodeURI"} {
+	for _, identName := range []string{"decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent"} {
 		name := identName
 		ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 			Name: name,
@@ -784,56 +797,56 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		Name: "Int8Array",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "Int8Array"})
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), stringLit("Int8Array"))
 		},
 	})
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "Uint8ClampedArray",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "Uint8ClampedArray"})
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), stringLit("Uint8ClampedArray"))
 		},
 	})
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "Int16Array",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "Int16Array"})
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), stringLit("Int16Array"))
 		},
 	})
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "Uint16Array",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "Uint16Array"})
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), stringLit("Uint16Array"))
 		},
 	})
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "Int32Array",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "Int32Array"})
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), stringLit("Int32Array"))
 		},
 	})
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "Uint32Array",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "Uint32Array"})
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), stringLit("Uint32Array"))
 		},
 	})
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "Float32Array",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "Float32Array"})
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), stringLit("Float32Array"))
 		},
 	})
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "Float64Array",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), &ast.BasicLit{Kind: token.STRING, Value: "Float64Array"})
+			return callExpr(selectorExpr(ident("jsvalue"), "GetTypedArrayCtor"), stringLit("Float64Array"))
 		},
 	})
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
@@ -906,6 +919,51 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			return selectorExpr(ident("jsvalue"), "Btoa")
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "parseInt",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "NewFunction"), &ast.FuncLit{
+				Type: &ast.FuncType{
+					Params:  fieldList(&ast.Field{Names: []*ast.Ident{ident("_a")}, Type: &ast.Ellipsis{Elt: ptrType(selectorExpr(ident("jsvalue"), "JSValue"))}}),
+					Results: fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue")))),
+				},
+				Body: &ast.BlockStmt{List: []ast.Stmt{
+					&ast.IfStmt{
+						Cond: &ast.BinaryExpr{X: callExpr(ident("len"), ident("_a")), Op: token.GTR, Y: intLit("1")},
+						Body: &ast.BlockStmt{List: []ast.Stmt{
+							&ast.ReturnStmt{Results: []ast.Expr{
+								callExpr(selectorExpr(ident("jsvalue"), "ParseInt"), &ast.IndexExpr{X: ident("_a"), Index: intLit("0")}, &ast.IndexExpr{X: ident("_a"), Index: intLit("1")}),
+							}},
+						}},
+					},
+					&ast.ReturnStmt{Results: []ast.Expr{
+						callExpr(selectorExpr(ident("jsvalue"), "ParseInt"), &ast.IndexExpr{X: ident("_a"), Index: intLit("0")}, callExpr(selectorExpr(ident("jsvalue"), "NewNumber"), floatLit("10"))),
+					}},
+				}},
+			})
+		},
+	})
+
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "unescape",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddImport("github.com/nnstd/gun/runtime/web")
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+			return callExpr(selectorExpr(ident("jsvalue"), "NewFunction"), &ast.FuncLit{
+				Type: &ast.FuncType{
+					Params:  fieldList(&ast.Field{Names: []*ast.Ident{ident("_a")}, Type: &ast.Ellipsis{Elt: ptrType(selectorExpr(ident("jsvalue"), "JSValue"))}}),
+					Results: fieldList(field("", ptrType(selectorExpr(ident("jsvalue"), "JSValue")))),
+				},
+				Body: &ast.BlockStmt{List: []ast.Stmt{
+					&ast.ReturnStmt{Results: []ast.Expr{
+						callExpr(selectorExpr(ident("web"), "Unescape"), &ast.IndexExpr{X: ident("_a"), Index: intLit("0")}),
+					}},
+				}},
+			})
 		},
 	})
 
@@ -1207,6 +1265,7 @@ func registerKnownGlobals(ctx *tcontext.TranspilerContext) {
 	ctx.MarkKnownGlobal("decodeURI")
 	ctx.MarkKnownGlobal("decodeURIComponent")
 	ctx.MarkKnownGlobal("encodeURI")
+	ctx.MarkKnownGlobal("encodeURIComponent")
 
 	// Browser/Node environment globals
 	for _, name := range []string{"global", "self", "window", "exports", "define"} {
@@ -1236,6 +1295,15 @@ func registerKnownGlobals(ctx *tcontext.TranspilerContext) {
 	ctx.MarkKnownGlobal("Float64Array")
 	ctx.MarkKnownGlobal("BigInt64Array")
 	ctx.MarkKnownGlobal("BigUint64Array")
+
+		ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+			Name: "crypto",
+			Transform: func(imp tcontext.Imports) ast.Expr {
+				imp.AddImport("github.com/nnstd/gun/runtime/crypto")
+				return selectorExpr(ident("crypto"), "AsJSValue")
+			},
+		})
+		ctx.MarkKnownGlobal("crypto")
 }
 
 // RegisterTest262Globals registers test262 harness functions and objects

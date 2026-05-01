@@ -223,7 +223,7 @@ func FindModuleDir(start string) (string, bool) {
 	dir, _ := filepath.Abs(start)
 	for {
 		if data, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil {
-			for _, line := range strings.Split(string(data), "\n") {
+			for line := range strings.SplitSeq(string(data), "\n") {
 				if strings.TrimSpace(line) == "module github.com/nnstd/gun" {
 					return dir, true
 				}
@@ -240,23 +240,22 @@ func FindModuleDir(start string) (string, bool) {
 // FindRelativeImports scans TS source for relative import paths (./foo or ../foo).
 func FindRelativeImports(source []byte) []string {
 	var imports []string
-	lines := strings.Split(string(source), "\n")
-	for _, line := range lines {
+	for line := range strings.SplitSeq(string(source), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") || strings.HasPrefix(line, "*") || strings.HasPrefix(line, "*/") {
 			continue
 		}
 		// Match: from "./..." or from '../...'
-		idx := strings.Index(line, "from ")
-		if idx < 0 {
+		prefix, rest, ok := strings.Cut(line, "from ")
+		if !ok {
 			continue
 		}
 		// Verify this is an import statement, not the word "from" in a string
-		prefix := strings.TrimSpace(line[:idx])
-		if !strings.HasSuffix(prefix, "import") && !strings.Contains(prefix, " import ") && prefix != "import" && !strings.HasPrefix(line, "import ") {
+		prefix = strings.TrimSpace(prefix)
+		if !strings.HasSuffix(prefix, "import") && !strings.Contains(prefix, " import ") && prefix != "import" && !strings.HasPrefix(line, "import ") && !strings.Contains(prefix, "export") && !strings.HasPrefix(line, "export ") {
 			continue
 		}
-		rest := strings.TrimSpace(line[idx+5:])
+		rest = strings.TrimSpace(rest)
 		if len(rest) < 3 {
 			continue
 		}
@@ -506,8 +505,7 @@ func requireCallStringArg(callNode *sitter.Node, source []byte) (string, bool) {
 func findRequireImportsText(source []byte) []string {
 	var imports []string
 	seen := map[string]bool{}
-	lines := strings.Split(string(source), "\n")
-	for _, line := range lines {
+	for line := range strings.SplitSeq(string(source), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") || strings.HasPrefix(line, "*") || strings.HasPrefix(line, "*/") {
 			continue
@@ -627,22 +625,21 @@ func TranspileDataModuleFile(inputPath, outputPath, pkgName string) error {
 func FindNodeModuleImports(source []byte) []string {
 	var imports []string
 	seen := map[string]bool{}
-	lines := strings.Split(string(source), "\n")
-	for _, line := range lines {
+	for line := range strings.SplitSeq(string(source), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") || strings.HasPrefix(line, "*") || strings.HasPrefix(line, "*/") {
 			continue
 		}
-		idx := strings.Index(line, "from ")
-		if idx < 0 {
+		prefix, rest, ok := strings.Cut(line, "from ")
+		if !ok {
 			continue
 		}
 		// Verify this is an import statement, not the word "from" in a string
-		prefix := strings.TrimSpace(line[:idx])
-		if !strings.HasSuffix(prefix, "import") && !strings.Contains(prefix, " import ") && prefix != "import" && !strings.HasPrefix(line, "import ") {
+		prefix = strings.TrimSpace(prefix)
+		if !strings.HasSuffix(prefix, "import") && !strings.Contains(prefix, " import ") && prefix != "import" && !strings.HasPrefix(line, "import ") && !strings.Contains(prefix, "export") && !strings.HasPrefix(line, "export ") {
 			continue
 		}
-		rest := strings.TrimSpace(line[idx+5:])
+		rest = strings.TrimSpace(rest)
 		if len(rest) < 3 {
 			continue
 		}
@@ -1116,8 +1113,8 @@ func DetectModuleName(inputPath string) string {
 			scanner := bufio.NewScanner(f)
 			for scanner.Scan() {
 				line := scanner.Text()
-				if strings.HasPrefix(line, "module ") {
-					return strings.TrimSpace(strings.TrimPrefix(line, "module "))
+				if modulePath, ok := strings.CutPrefix(line, "module "); ok {
+					return strings.TrimSpace(modulePath)
 				}
 			}
 		}

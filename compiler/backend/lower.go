@@ -927,6 +927,19 @@ func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 			} else if mapped, ok := l.importNameMap[d.FromModule+"\x00*"]; ok {
 				rhs = callExpr(selectorExpr(goIdent(mapped), "Get"), stringLit(n.LocalName))
 				mappedFromModule = true
+			} else if isRelativeImport(d.FromModule) {
+				// Fallback: resolve re-export from transpiled module when
+				// importNameMap is empty (single-file compilation).
+				goImport, goPkg, _ := l.resolveModule(d.FromModule)
+				if goPkg != "" {
+					l.addImport(goImport)
+					if n.LocalName == "default" {
+						rhs = selectorExpr(goIdent(goPkg), "Default")
+					} else {
+						rhs = selectorExpr(goIdent(goPkg), symbol.Capitalize(symbol.Sanitize(n.LocalName)))
+					}
+					mappedFromModule = true
+				}
 			}
 		}
 		if lookedUp := l.symtab.Lookup(n.LocalName); lookedUp != nil {
