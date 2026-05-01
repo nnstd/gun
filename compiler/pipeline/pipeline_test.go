@@ -216,6 +216,53 @@ func TestCompileTreeSupportsAsyncArrowPhase1(t *testing.T) {
 	assertContains(t, string(out), "promise.Promise.Call")
 }
 
+func TestCompilePackageThreadsOptLevelToJSONModule(t *testing.T) {
+	var json strings.Builder
+	json.WriteString(`{"items":[`)
+	for i := 0; i < 32*1024; i++ {
+		if i > 0 {
+			json.WriteByte(',')
+		}
+		json.WriteString(`{"name":"stone","id":1}`)
+	}
+	json.WriteString(`]}`)
+
+	files := map[string][]byte{
+		"entry.ts":  []byte(`import data from "./data.json"; console.log(data.items.length);`),
+		"data.json": []byte(json.String()),
+	}
+	o1, err := New(context.O1).CompilePackage(files, "main", "", "entry.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source := string(packageOutput(t, o1, "data.json", "data")); !strings.Contains(source, "module.DataToJSValue(data)") || strings.Contains(source, "type jsonRoot struct") {
+		t.Fatalf("O1 JSON module should use untyped runtime parse:\n%s", source)
+	}
+
+	o2, err := New(context.O2).CompilePackage(files, "main", "", "entry.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source := string(packageOutput(t, o2, "data.json", "data")); !strings.Contains(source, "type jsonRoot struct") || strings.Contains(source, "module.DataToJSValue(data)") {
+		t.Fatalf("O2 JSON module should use typed schema conversion:\n%s", source)
+	}
+}
+
+func packageOutput(t *testing.T, outputs map[string][]byte, names ...string) []byte {
+	t.Helper()
+	for _, name := range names {
+		if out := outputs[name]; len(out) > 0 {
+			return out
+		}
+	}
+	keys := make([]string, 0, len(outputs))
+	for key := range outputs {
+		keys = append(keys, key)
+	}
+	t.Fatalf("missing package output %v; got keys %v", names, keys)
+	return nil
+}
+
 func TestCompileTreeSupportsAsyncFunctionExpressionPhase1(t *testing.T) {
 	tree := parseTS(t, `const load = async function() { await Promise.resolve(1); return 2; }`)
 	defer tree.Close()

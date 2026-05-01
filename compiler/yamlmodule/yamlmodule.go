@@ -1,11 +1,14 @@
 package yamlmodule
 
 import (
+	"bytes"
 	"fmt"
+	"go/ast"
+	"go/format"
+	"go/token"
 	"math"
 	"sort"
 	"strconv"
-	"strings"
 	"unicode"
 	"unicode/utf8"
 
@@ -42,49 +45,122 @@ func Compile(source []byte, pkgName, defaultName string, namedAliases map[string
 	if defaultName == "" {
 		defaultName = "Default"
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "package %s\n\n", pkgName)
-	if len(source) <= inlineValueExprMaxBytes {
-		b.WriteString("import jsvalue \"github.com/nnstd/gun/runtime/builtin\"\n\n")
-	} else {
-		b.WriteString("import (\n")
-		b.WriteString("\t\"github.com/goccy/go-yaml\"\n")
-		b.WriteString("\n")
-		b.WriteString("\tjsvalue \"github.com/nnstd/gun/runtime/builtin\"\n")
-		b.WriteString("\t\"github.com/nnstd/gun/runtime/module\"\n")
-		b.WriteString(")\n\n")
+	c := &compiler{
+		file: &ast.File{
+			Name:  ast.NewIdent(pkgName),
+			Decls: []ast.Decl{},
+		},
+		imports: map[string]string{},
 	}
-	fmt.Fprintf(&b, "var %s *jsvalue.JSValue\n", defaultName)
-	for _, exp := range mod.Exports {
-		name := namedAliases[exp.OriginalName]
-		if name == "" {
-			name = exp.GoName
+	c.addImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+	if len(source) <= inlineValueExprMaxBytes {
+		c.addJSValueVars(defaultName, mod.Exports, namedAliases)
+		c.addInit(c.smallInitStmts(defaultName, mod.Value, mod.Exports, namedAliases))
+	} else {
+		c.addImport("github.com/goccy/go-yaml", "")
+		c.addImport("github.com/nnstd/gun/runtime/module", "")
+		c.addJSValueVars(defaultName, mod.Exports, namedAliases)
+		c.addInit(c.largeInitStmts(defaultName, source, mod.Exports, namedAliases))
+	}
+	c.finalizeImports()
+	return c.format()
+}
+
+type compiler struct {
+	file    *ast.File
+	imports map[string]string
+}
+
+func (c *compiler) addImport(path, alias string) {
+	c.imports[path] = alias
+}
+
+func (c *compiler) finalizeImports() {
+	paths := make([]string, 0, len(c.imports))
+	for path := range c.imports {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	specs := make([]ast.Spec, 0, len(paths))
+	for _, path := range paths {
+		spec := &ast.ImportSpec{Path: stringLit(path)}
+		if alias := c.imports[path]; alias != "" {
+			spec.Name = ast.NewIdent(alias)
 		}
+		specs = append(specs, spec)
+	}
+	c.file.Decls = append([]ast.Decl{&ast.GenDecl{Tok: token.IMPORT, Specs: specs}}, c.file.Decls...)
+}
+
+func (c *compiler) format() ([]byte, error) {
+	var b bytes.Buffer
+	if err := format.Node(&b, token.NewFileSet(), c.file); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
+}
+
+func (c *compiler) addJSValueVars(defaultName string, exports []Export, namedAliases map[string]string) {
+	names := []string{defaultName}
+	for _, exp := range exports {
+		name := exportName(exp, namedAliases)
+		if name != defaultName {
+			names = append(names, name)
+		}
+	}
+	for _, name := range names {
+		c.file.Decls = append(c.file.Decls, &ast.GenDecl{
+			Tok: token.VAR,
+			Specs: []ast.Spec{&ast.ValueSpec{
+				Names: []*ast.Ident{ast.NewIdent(name)},
+				Type:  star(sel("jsvalue", "JSValue")),
+			}},
+		})
+	}
+}
+
+func (c *compiler) addInit(stmts []ast.Stmt) {
+	c.file.Decls = append(c.file.Decls, &ast.FuncDecl{
+		Name: ast.NewIdent("init"),
+		Type: &ast.FuncType{Params: &ast.FieldList{}},
+		Body: &ast.BlockStmt{List: stmts},
+	})
+}
+
+func (c *compiler) smallInitStmts(defaultName string, value any, exports []Export, namedAliases map[string]string) []ast.Stmt {
+	stmts := []ast.Stmt{assign(ident(defaultName), valueExpr(value))}
+	return append(stmts, exportStmts(defaultName, exports, namedAliases)...)
+}
+
+func (c *compiler) largeInitStmts(defaultName string, source []byte, exports []Export, namedAliases map[string]string) []ast.Stmt {
+	stmts := []ast.Stmt{
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
+			Names: []*ast.Ident{ast.NewIdent("data")},
+			Type:  ast.NewIdent("any"),
+		}}}},
+		assign(ident("_"), call(sel("yaml", "Unmarshal"), call(byteSliceType(), stringLit(string(source))), unary(token.AND, ident("data")))),
+		assign(ident(defaultName), call(sel("module", "DataToJSValue"), call(sel("module", "NormalizeYAMLValue"), ident("data")))),
+	}
+	return append(stmts, exportStmts(defaultName, exports, namedAliases)...)
+}
+
+func exportStmts(defaultName string, exports []Export, namedAliases map[string]string) []ast.Stmt {
+	stmts := make([]ast.Stmt, 0, len(exports))
+	for _, exp := range exports {
+		name := exportName(exp, namedAliases)
 		if name == defaultName {
 			continue
 		}
-		fmt.Fprintf(&b, "var %s *jsvalue.JSValue\n", name)
+		stmts = append(stmts, assign(ident(name), call(sel(defaultName, "Get"), stringLit(exp.OriginalName))))
 	}
-	b.WriteString("\nfunc init() {\n")
-	if len(source) <= inlineValueExprMaxBytes {
-		fmt.Fprintf(&b, "\t%s = %s\n", defaultName, valueExpr(mod.Value))
-	} else {
-		b.WriteString("\tvar data any\n")
-		fmt.Fprintf(&b, "\t_ = yaml.Unmarshal([]byte(%s), &data)\n", strconv.Quote(string(source)))
-		fmt.Fprintf(&b, "\t%s = module.DataToJSValue(module.NormalizeYAMLValue(data))\n", defaultName)
+	return stmts
+}
+
+func exportName(exp Export, namedAliases map[string]string) string {
+	if name := namedAliases[exp.OriginalName]; name != "" {
+		return name
 	}
-	for _, exp := range mod.Exports {
-		name := namedAliases[exp.OriginalName]
-		if name == "" {
-			name = exp.GoName
-		}
-		if name == defaultName {
-			continue
-		}
-		fmt.Fprintf(&b, "\t%s = %s.Get(%s)\n", name, defaultName, strconv.Quote(exp.OriginalName))
-	}
-	b.WriteString("}\n")
-	return []byte(b.String()), nil
+	return exp.GoName
 }
 
 func normalize(value any) any {
@@ -133,17 +209,17 @@ func topLevelExports(value any) []Export {
 	return exports
 }
 
-func valueExpr(value any) string {
+func valueExpr(value any) ast.Expr {
 	switch v := value.(type) {
 	case nil:
-		return "jsvalue.NewNull()"
+		return call(sel("jsvalue", "NewNull"))
 	case bool:
 		if v {
-			return "jsvalue.NewBool(true)"
+			return call(sel("jsvalue", "NewBool"), ident("true"))
 		}
-		return "jsvalue.NewBool(false)"
+		return call(sel("jsvalue", "NewBool"), ident("false"))
 	case string:
-		return "jsvalue.NewString(" + strconv.Quote(v) + ")"
+		return call(sel("jsvalue", "NewString"), stringLit(v))
 	case int:
 		return numberExpr(float64(v))
 	case int8:
@@ -169,38 +245,32 @@ func valueExpr(value any) string {
 	case float64:
 		return numberExpr(v)
 	case []any:
-		if len(v) == 0 {
-			return "jsvalue.NewArray()"
-		}
-		parts := make([]string, len(v))
+		args := make([]ast.Expr, len(v))
 		for i, elem := range v {
-			parts[i] = valueExpr(elem)
+			args[i] = valueExpr(elem)
 		}
-		return "jsvalue.NewArray(" + strings.Join(parts, ", ") + ")"
+		return call(sel("jsvalue", "NewArray"), args...)
 	case map[string]any:
-		if len(v) == 0 {
-			return "jsvalue.ObjectFrom()"
-		}
 		keys := make([]string, 0, len(v))
 		for key := range v {
 			keys = append(keys, key)
 		}
 		sort.Strings(keys)
-		parts := make([]string, 0, len(keys)*2)
+		args := make([]ast.Expr, 0, len(keys)*2)
 		for _, key := range keys {
-			parts = append(parts, strconv.Quote(key), valueExpr(v[key]))
+			args = append(args, stringLit(key), valueExpr(v[key]))
 		}
-		return "jsvalue.ObjectFrom(" + strings.Join(parts, ", ") + ")"
+		return call(sel("jsvalue", "ObjectFrom"), args...)
 	default:
-		return "jsvalue.NewNull()"
+		return call(sel("jsvalue", "NewNull"))
 	}
 }
 
-func numberExpr(v float64) string {
+func numberExpr(v float64) ast.Expr {
 	if math.IsInf(v, 0) || math.IsNaN(v) {
-		return "jsvalue.NewNull()"
+		return call(sel("jsvalue", "NewNull"))
 	}
-	return "jsvalue.NewNumber(" + strconv.FormatFloat(v, 'g', -1, 64) + ")"
+	return call(sel("jsvalue", "NewNumber"), rawLit(strconv.FormatFloat(v, 'g', -1, 64)))
 }
 
 func isExportableIdentifier(s string) bool {
@@ -223,18 +293,18 @@ func isExportableIdentifier(s string) bool {
 }
 
 func sanitize(s string) string {
-	var b strings.Builder
+	out := make([]rune, 0, len(s))
 	for _, r := range s {
 		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' {
-			b.WriteRune(r)
+			out = append(out, r)
 		} else {
-			b.WriteRune('_')
+			out = append(out, '_')
 		}
 	}
-	if b.Len() == 0 {
+	if len(out) == 0 {
 		return "Value"
 	}
-	return b.String()
+	return string(out)
 }
 
 func capitalize(s string) string {
@@ -258,4 +328,40 @@ func makeUnique(name string, used map[string]int) string {
 	}
 	used[name]++
 	return fmt.Sprintf("%s_%d", name, used[name])
+}
+
+func ident(name string) ast.Expr {
+	return ast.NewIdent(name)
+}
+
+func sel(pkg, name string) ast.Expr {
+	return &ast.SelectorExpr{X: ast.NewIdent(pkg), Sel: ast.NewIdent(name)}
+}
+
+func star(expr ast.Expr) ast.Expr {
+	return &ast.StarExpr{X: expr}
+}
+
+func call(fn ast.Expr, args ...ast.Expr) ast.Expr {
+	return &ast.CallExpr{Fun: fn, Args: args}
+}
+
+func unary(op token.Token, expr ast.Expr) ast.Expr {
+	return &ast.UnaryExpr{Op: op, X: expr}
+}
+
+func assign(lhs, rhs ast.Expr) ast.Stmt {
+	return &ast.AssignStmt{Lhs: []ast.Expr{lhs}, Tok: token.ASSIGN, Rhs: []ast.Expr{rhs}}
+}
+
+func stringLit(s string) *ast.BasicLit {
+	return &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(s)}
+}
+
+func rawLit(s string) *ast.BasicLit {
+	return &ast.BasicLit{Kind: token.FLOAT, Value: s}
+}
+
+func byteSliceType() ast.Expr {
+	return &ast.ArrayType{Elt: ast.NewIdent("byte")}
 }

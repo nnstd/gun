@@ -391,7 +391,7 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 				namedAliases[originalName] = alias
 			}
 		}
-		out, err := compileDataModule(name, source, pkgName, defaultName, namedAliases)
+		out, err := compileDataModuleWithOptLevel(name, source, pkgName, defaultName, namedAliases, p.OptLevel)
 		if err != nil {
 			return nil, fmt.Errorf("compile %s: %w", name, err)
 		}
@@ -485,10 +485,14 @@ func parseDataModule(name string, source []byte) ([]dataExport, error) {
 }
 
 func compileDataModule(name string, source []byte, pkgName, defaultName string, namedAliases map[string]string) ([]byte, error) {
+	return compileDataModuleWithOptLevel(name, source, pkgName, defaultName, namedAliases, context.O0)
+}
+
+func compileDataModuleWithOptLevel(name string, source []byte, pkgName, defaultName string, namedAliases map[string]string, optLevel context.OptLevel) ([]byte, error) {
 	if isYAMLModule(name) {
 		return yamlmodule.Compile(source, pkgName, defaultName, namedAliases)
 	}
-	return jsonmodule.Compile(source, pkgName, defaultName, namedAliases)
+	return jsonmodule.CompileWithOptLevel(source, pkgName, defaultName, namedAliases, optLevel)
 }
 
 // fileDefaultName generates a file-specific name for renamed default exports.

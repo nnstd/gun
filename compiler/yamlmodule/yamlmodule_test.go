@@ -1,6 +1,8 @@
 package yamlmodule
 
 import (
+	"go/parser"
+	"go/token"
 	"strings"
 	"testing"
 )
@@ -11,6 +13,7 @@ func TestCompileUsesInlineConstructorsForSmallYAML(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(out)
+	assertGeneratedGoParses(t, source)
 	if !strings.Contains(source, "jsvalue.ObjectFrom(") || !strings.Contains(source, "jsvalue.NewArray(") {
 		t.Fatalf("small YAML should compile to inline constructors:\n%s", source)
 	}
@@ -31,7 +34,15 @@ func TestCompileUsesRuntimeParseForLargeYAML(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(out)
+	assertGeneratedGoParses(t, source)
 	if !strings.Contains(source, "yaml.Unmarshal") || !strings.Contains(source, "module.DataToJSValue") {
 		t.Fatalf("large YAML should compile to runtime parsing")
+	}
+}
+
+func assertGeneratedGoParses(t *testing.T, source string) {
+	t.Helper()
+	if _, err := parser.ParseFile(token.NewFileSet(), "fixture.go", source, parser.SkipObjectResolution); err != nil {
+		t.Fatalf("generated source should parse: %v\n%s", err, source)
 	}
 }
