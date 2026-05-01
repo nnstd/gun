@@ -352,7 +352,7 @@ func makeRequestHandler(server *jsvalue.JSValue, addr string, port int) fasthttp
 			query := string(ctx.URI().QueryString())
 			spanCtx, span := otel.StartHTTPSpan(context.Background(), method, fullURL, scheme, path, query)
 			otel.SetActiveContext(spanCtx)
-			defer otel.SetActiveContext(nil)
+			defer otel.ClearActiveContext()
 			otel.RecordActiveRequest(method, scheme, addr, port, 1)
 			defer otel.RecordActiveRequest(method, scheme, addr, port, -1)
 			startTime := time.Now()

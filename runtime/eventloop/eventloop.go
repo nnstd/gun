@@ -79,11 +79,12 @@ func (el *EventLoop) RegisterServer() {
 
 // SetActiveContext stores a context.Context for OTel span propagation.
 func (el *EventLoop) SetActiveContext(ctx context.Context) {
-	if ctx == nil {
-		el.activeCtx.Store((*context.Context)(nil))
-	} else {
-		el.activeCtx.Store(&ctx)
-	}
+	el.activeCtx.Store(&ctx)
+}
+
+// ClearActiveContext removes the stored span context.
+func (el *EventLoop) ClearActiveContext() {
+	el.activeCtx.Store((*context.Context)(nil))
 }
 
 // ActiveContext retrieves the stored context, or context.Background() if none.

@@ -13,6 +13,10 @@ func SetActiveContext(ctx context.Context) {
 	eventloop.Default.SetActiveContext(ctx)
 }
 
+func ClearActiveContext() {
+	eventloop.Default.ClearActiveContext()
+}
+
 func ActiveContext() context.Context {
 	return eventloop.Default.ActiveContext()
 }

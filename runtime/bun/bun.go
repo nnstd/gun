@@ -195,7 +195,7 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 				spanCtx, sp := otel.StartHTTPSpan(context.Background(), method, fullURL, scheme, path, query)
 				span = sp
 				otel.SetActiveContext(spanCtx)
-				defer otel.SetActiveContext(nil)
+				defer otel.ClearActiveContext()
 				defer otel.EndHTTPSpan(span, ctx.Response.StatusCode())
 				otel.RecordActiveRequest(method, scheme, "127.0.0.1", actualPort, 1)
 				defer otel.RecordActiveRequest(method, scheme, "127.0.0.1", actualPort, -1)
