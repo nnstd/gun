@@ -1,8 +1,6 @@
 package perf_hooks
 
 import (
-	"time"
-
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
 )
 
@@ -12,12 +10,10 @@ var (
 	bootstrapTime float64
 	eluIdleNs     int64
 	eluActiveNs   int64
-	eluLastCheck  time.Time
 )
 
 func init() {
 	bootstrapTime = Now()
-	eluLastCheck = time.Now()
 }
 
 func MarkLoopStart() {

@@ -164,12 +164,6 @@ func MakeURL(input string, base *jsvalue.JSValue) *jsvalue.JSValue {
 	return obj
 }
 
-func makeSearchParams(pairs []searchParamPair) *jsvalue.JSValue {
-	obj := jsvalue.NewObjectWithPrototype(URLSearchParamsPrototype)
-	setSearchPairs(obj, append([]searchParamPair(nil), pairs...))
-	return obj
-}
-
 func newURLSearchParamsFromURL(owner *jsvalue.JSValue) *jsvalue.JSValue {
 	obj := jsvalue.NewObjectWithPrototype(URLSearchParamsPrototype)
 	setHidden(obj, "_urlOwner", owner)

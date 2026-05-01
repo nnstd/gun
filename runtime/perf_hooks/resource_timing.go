@@ -3,11 +3,11 @@ package perf_hooks
 import jsvalue "github.com/nnstd/gun/runtime/builtin"
 
 type perfEntry struct {
-	name       string
-	entryType  string
-	startTime  float64
-	duration   float64
-	detail     *jsvalue.JSValue
+	name      string
+	entryType string
+	startTime float64
+	duration  float64
+	detail    *jsvalue.JSValue
 }
 
 func safeFloat(v *jsvalue.JSValue, key string) float64 {
@@ -19,17 +19,6 @@ func safeFloat(v *jsvalue.JSValue, key string) float64 {
 		return 0
 	}
 	return p.Number()
-}
-
-func safeStr(v *jsvalue.JSValue, key string) string {
-	if v == nil {
-		return ""
-	}
-	p := v.Get(key)
-	if p == nil {
-		return ""
-	}
-	return p.String()
 }
 
 func MarkResourceTiming(timingInfo, requestedUrl, initiatorType, global, cacheMode, bodyInfo, responseStatus *jsvalue.JSValue, deliveryType ...*jsvalue.JSValue) *jsvalue.JSValue {

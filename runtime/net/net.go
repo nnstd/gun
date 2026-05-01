@@ -52,7 +52,6 @@ type serverState struct {
 	listener         *net.TCPListener
 	listening        bool
 	closed           bool
-	maxConn          int
 	handleRegistered bool
 }
 
@@ -62,8 +61,7 @@ func socketStateOf(v *jsvalue.JSValue) *socketState {
 	if st, ok := socketRegistry[v]; ok {
 		return st
 	}
-	st := &socketState{
-	}
+	st := &socketState{}
 	socketRegistry[v] = st
 	return st
 }
@@ -386,29 +384,29 @@ func setupSocketPrototype() {
 		conn := state.conn
 		state.ended = true
 		state.mu.Unlock()
-			var cb *jsvalue.JSValue
-			var writeData []byte
-			for _, arg := range args[1:] {
-				if arg == nil {
-					continue
-				}
-				if arg.TypeString() == "function" && cb == nil {
-					cb = arg
-				} else if arg.TypeString() == "string" || (arg.TypeString() == "object" && jsvalue.InstanceOf(arg, buffer.Buffer).Bool()) {
-					data, _ := coerceWriteData(arg)
-					if data != nil {
-						writeData = append(writeData, data...)
-					}
+		var cb *jsvalue.JSValue
+		var writeData []byte
+		for _, arg := range args[1:] {
+			if arg == nil {
+				continue
+			}
+			if arg.TypeString() == "function" && cb == nil {
+				cb = arg
+			} else if arg.TypeString() == "string" || (arg.TypeString() == "object" && jsvalue.InstanceOf(arg, buffer.Buffer).Bool()) {
+				data, _ := coerceWriteData(arg)
+				if data != nil {
+					writeData = append(writeData, data...)
 				}
 			}
-			go func() {
-				if conn != nil && len(writeData) > 0 {
-					_, _ = conn.Write(writeData)
-				}
-				if conn != nil {
-					_ = conn.CloseWrite()
-				}
-			}()
+		}
+		go func() {
+			if conn != nil && len(writeData) > 0 {
+				_, _ = conn.Write(writeData)
+			}
+			if conn != nil {
+				_ = conn.CloseWrite()
+			}
+		}()
 		this.Set("readyState", jsvalue.NewString("readOnly"))
 		this.MethodCall("emit", jsvalue.NewString("finish"))
 		if cb != nil {

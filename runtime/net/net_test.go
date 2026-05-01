@@ -290,8 +290,7 @@ func TestSocketProperties(t *testing.T) {
 		addr := server.MethodCall("address")
 		port := addr.Get("port").Number()
 
-		var client *jsvalue.JSValue
-		client = AsJSValue.Get("createConnection").Call(
+		client := AsJSValue.Get("createConnection").Call(
 			jsvalue.NewNumber(port),
 			jsvalue.NewString("127.0.0.1"),
 		)
@@ -359,8 +358,7 @@ func TestSocketEndAndClose(t *testing.T) {
 	server.MethodCall("on", jsvalue.NewString("listening"), jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		port := server.MethodCall("address").Get("port").Number()
 
-		var client *jsvalue.JSValue
-		client = AsJSValue.Get("createConnection").Call(jsvalue.NewNumber(port), jsvalue.NewString("127.0.0.1"))
+		client := AsJSValue.Get("createConnection").Call(jsvalue.NewNumber(port), jsvalue.NewString("127.0.0.1"))
 		client.MethodCall("on", jsvalue.NewString("connect"), jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 			client.MethodCall("end")
 			return nil
@@ -430,8 +428,7 @@ func TestSocketDestroy(t *testing.T) {
 	server.MethodCall("on", jsvalue.NewString("listening"), jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		port := server.MethodCall("address").Get("port").Number()
 
-		var client *jsvalue.JSValue
-		client = AsJSValue.Get("createConnection").Call(jsvalue.NewNumber(port), jsvalue.NewString("127.0.0.1"))
+		client := AsJSValue.Get("createConnection").Call(jsvalue.NewNumber(port), jsvalue.NewString("127.0.0.1"))
 		client.MethodCall("on", jsvalue.NewString("connect"), jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 			client.MethodCall("destroy")
 			mu.Lock()
@@ -556,8 +553,7 @@ func TestRegistryCleanup(t *testing.T) {
 	server.MethodCall("on", jsvalue.NewString("listening"), jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		port := server.MethodCall("address").Get("port").Number()
 
-		var client *jsvalue.JSValue
-		client = AsJSValue.Get("createConnection").Call(jsvalue.NewNumber(port), jsvalue.NewString("127.0.0.1"))
+		client := AsJSValue.Get("createConnection").Call(jsvalue.NewNumber(port), jsvalue.NewString("127.0.0.1"))
 		client.MethodCall("on", jsvalue.NewString("connect"), jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 			client.MethodCall("write", jsvalue.NewString("hi"))
 			return nil
@@ -688,8 +684,7 @@ func TestDestroyIdempotent(t *testing.T) {
 	}))
 	server.MethodCall("on", jsvalue.NewString("listening"), jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 		port := server.MethodCall("address").Get("port").Number()
-		var client *jsvalue.JSValue
-		client = AsJSValue.Get("createConnection").Call(jsvalue.NewNumber(port), jsvalue.NewString("127.0.0.1"))
+		client := AsJSValue.Get("createConnection").Call(jsvalue.NewNumber(port), jsvalue.NewString("127.0.0.1"))
 		client.MethodCall("on", jsvalue.NewString("close"), jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 			mu.Lock()
 			closeCount++

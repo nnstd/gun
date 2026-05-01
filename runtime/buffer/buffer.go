@@ -627,7 +627,7 @@ func init() {
 			return jsvalue.NewNumber(0)
 		}
 		data := args[0].Bytes()
-		if data == nil || len(data) < 2 {
+		if len(data) < 2 {
 			return jsvalue.NewNumber(0)
 		}
 		offset := int(args[1].Number())
@@ -643,7 +643,7 @@ func init() {
 			return jsvalue.NewNumber(0)
 		}
 		data := args[0].Bytes()
-		if data == nil || len(data) < 4 {
+		if len(data) < 4 {
 			return jsvalue.NewNumber(0)
 		}
 		offset := int(args[1].Number())

@@ -72,18 +72,15 @@ var _emptyString = &JSValue{typ: TypeString, strVal: "", frozen: true}
 
 // Interned HTTP singletons — lazily created on first access via EnsureHTTPStrings().
 var (
-	httpStringsOnce     sync.Once
-	strGET              *JSValue
-	strPOST             *JSValue
-	strPUT              *JSValue
-	strDELETE           *JSValue
-	strPATCH            *JSValue
-	strHEAD             *JSValue
-	strOPTIONS          *JSValue
-	strOK               *JSValue
-	strContentType      *JSValue
-	strTextPlain        *JSValue
-	strApplicationJSON  *JSValue
+	httpStringsOnce sync.Once
+	strGET          *JSValue
+	strPOST         *JSValue
+	strPUT          *JSValue
+	strDELETE       *JSValue
+	strPATCH        *JSValue
+	strHEAD         *JSValue
+	strOPTIONS      *JSValue
+	strOK           *JSValue
 )
 
 // EnsureHTTPStrings initializes HTTP string singletons on first call.
@@ -101,9 +98,6 @@ func EnsureHTTPStrings() {
 		strHEAD = mk("HEAD")
 		strOPTIONS = mk("OPTIONS")
 		strOK = mk("OK")
-		strContentType = mk("Content-Type")
-		strTextPlain = mk("text/plain")
-		strApplicationJSON = mk("application/json")
 	})
 }
 

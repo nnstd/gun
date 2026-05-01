@@ -5,8 +5,8 @@ import (
 	"slices"
 	"time"
 
-	jserror "github.com/nnstd/gun/runtime/builtin/error"
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
+	jserror "github.com/nnstd/gun/runtime/builtin/error"
 )
 
 type observer struct {
@@ -16,11 +16,10 @@ type observer struct {
 }
 
 var (
-	processStart             time.Time
-	timeOriginMs             float64
-	entries                  []perfEntry
-	observers                []observer
-	resourceTimingBufferSize = 250
+	processStart time.Time
+	timeOriginMs float64
+	entries      []perfEntry
+	observers    []observer
 )
 
 func init() {
@@ -257,9 +256,6 @@ func GetEntriesByType(entryType *jsvalue.JSValue) *jsvalue.JSValue {
 }
 
 func SetResourceTimingBufferSize(maxSize *jsvalue.JSValue) {
-	if maxSize != nil && maxSize.Type() == jsvalue.TypeNumber {
-		resourceTimingBufferSize = int(maxSize.Int())
-	}
 }
 
 func ToJSON() *jsvalue.JSValue {
