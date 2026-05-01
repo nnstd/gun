@@ -694,6 +694,10 @@ func (b *Builder) buildArrowFunc(node *sitter.Node) *ArrowFunc {
 
 	b.symtab.PushScope()
 	b.symtab.CurrentScope().IsFuncScope = true
+
+		// Save and reset hoisted vars from enclosing scope
+		savedHoisted := b.hoistedSymbols
+		b.hoistedSymbols = nil
 	defer b.symtab.PopScope()
 
 	var params []*Param
@@ -718,7 +722,7 @@ func (b *Builder) buildArrowFunc(node *sitter.Node) *ArrowFunc {
 		if bodyNode.Kind() == "statement_block" {
 			af.Body = b.buildBlock(bodyNode)
 			af.Body = b.prependHoistedVars(af.Body)
-			b.hoistedSymbols = nil
+			b.hoistedSymbols = savedHoisted
 		} else {
 			// Concise body: () => expr
 			af.ExprBody = b.buildExpr(bodyNode)
@@ -748,6 +752,10 @@ func (b *Builder) buildFuncExpr(node *sitter.Node) *FuncExpr {
 
 	b.symtab.PushScope()
 	b.symtab.CurrentScope().IsFuncScope = true
+
+		// Save and reset hoisted vars from enclosing scope
+		savedHoisted := b.hoistedSymbols
+		b.hoistedSymbols = nil
 	defer b.symtab.PopScope()
 
 	// Register named function expression self-reference symbol
@@ -766,7 +774,7 @@ func (b *Builder) buildFuncExpr(node *sitter.Node) *FuncExpr {
 
 	// Prepend hoisted var declarations at function body top
 	body = b.prependHoistedVars(body)
-	b.hoistedSymbols = nil
+		b.hoistedSymbols = savedHoisted
 
 	return &FuncExpr{
 		Name:    name,

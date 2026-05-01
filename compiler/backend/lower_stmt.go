@@ -197,6 +197,10 @@ func (l *Lowerer) lowerLocalVarStmts(d *hir.VarDecl) []ast.Stmt {
 		if decl.Symbol == nil {
 			continue
 		}
+		if decl.Hoisted && decl.Init == nil {
+			// Hoisted var with no init: bare declaration already at function scope. Skip.
+			continue
+		}
 		name := l.emitName(decl.Symbol)
 		if decl.Init != nil {
 			value := l.lowerExpr(decl.Init)

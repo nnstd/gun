@@ -185,6 +185,10 @@ func (b *Builder) buildFuncDecl(node *sitter.Node, exported bool) *FuncDecl {
 	b.symtab.PushScope()
 	b.symtab.CurrentScope().IsFuncScope = true
 
+	// Save and reset hoisted vars from enclosing scope
+	savedHoisted := b.hoistedSymbols
+	b.hoistedSymbols = nil
+
 	paramsNode := node.ChildByFieldName("parameters")
 	params := b.buildParams(paramsNode)
 
@@ -205,7 +209,7 @@ func (b *Builder) buildFuncDecl(node *sitter.Node, exported bool) *FuncDecl {
 
 	// Prepend hoisted var declarations at function body top
 	body = b.prependHoistedVars(body)
-	b.hoistedSymbols = nil
+	b.hoistedSymbols = savedHoisted
 
 	b.symtab.PopScope()
 
@@ -235,6 +239,10 @@ func (b *Builder) prependHoistedVars(body *BlockStmt) *BlockStmt {
 			continue
 		}
 		seen[sym.ID] = true
+			// Skip parameters — var shadowing a param doesn't need a bare declaration
+			if sym.Kind == symbol.KindParameter {
+				continue
+			}
 		hoisted = append(hoisted, &VarDecl{
 			Declarators: []*Declarator{{Symbol: sym}},
 			Kind:        VarVar,
@@ -412,6 +420,9 @@ func (b *Builder) buildClassBody(parts *classParts, node *sitter.Node) {
 
 			b.symtab.PushScope()
 			b.symtab.CurrentScope().IsFuncScope = true
+				// Save and reset hoisted vars from enclosing scope
+				savedHoisted := b.hoistedSymbols
+				b.hoistedSymbols = nil
 			paramsNode := child.ChildByFieldName("parameters")
 			params := b.buildParams(paramsNode)
 
@@ -421,7 +432,7 @@ func (b *Builder) buildClassBody(parts *classParts, node *sitter.Node) {
 				body = b.buildBlock(bodyNode)
 			}
 			body = b.prependHoistedVars(body)
-			b.hoistedSymbols = nil
+				b.hoistedSymbols = savedHoisted
 			b.symtab.PopScope()
 
 			isStatic := false
