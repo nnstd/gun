@@ -314,9 +314,11 @@ sections:
 Content with code blocks...
 ```
 
-Build to verify: `cd landing && npx vite build`
+Build to verify: `cd landing && bunx vite build`
 
 ## Tooling
+
+Always use `bun` instead of `npm` and `bunx` instead of `npx` for all JavaScript/TypeScript package operations in this project. Examples: `bun install`, `bun add <pkg>`, `bunx vite build`, `bun run dev`.
 
 Never call "cat -A". There no this flag in macOS
 
