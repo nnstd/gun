@@ -57,7 +57,7 @@ func TranspileProject(input, outDir, pkg string, verbose bool, optLevel int, opt
 }
 
 // GoBuild runs `go mod tidy` then `go build` in dir and writes the binary to binPath.
-func GoBuild(dir, binPath string, verbose bool) error {
+func GoBuild(dir, binPath string, verbose bool, buildTags ...string) error {
 	// Run go mod tidy to ensure dependencies are consistent
 	tidy := exec.Command("go", "mod", "tidy")
 	tidy.Dir = dir
@@ -66,7 +66,13 @@ func GoBuild(dir, binPath string, verbose bool) error {
 		return fmt.Errorf("go mod tidy failed: %w", err)
 	}
 
-	build := exec.Command("go", "build", "-o", binPath, ".")
+	args := []string{"build", "-o", binPath}
+	if len(buildTags) > 0 {
+		args = append(args, "-tags", strings.Join(buildTags, ","))
+	}
+	args = append(args, ".")
+
+	build := exec.Command("go", args...)
 	build.Dir = dir
 	var stderr strings.Builder
 	build.Stderr = &stderr

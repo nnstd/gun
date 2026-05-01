@@ -60,11 +60,14 @@ func CompileWithOptLevelAndPathOptions(source []byte, pkgName, moduleName, sourc
 	defer tree.Close()
 
 	p := newDefaultPipeline(optLevel)
-	var cpuProfile *backend.CPUProfileConfig
+	var lowerCfg *backend.LowerConfig
 	if opts != nil {
-		cpuProfile = opts.CPUProfile
+		lowerCfg = &backend.LowerConfig{
+			CPUProfile: opts.CPUProfile,
+			Otel:       opts.Otel,
+		}
 	}
-	return p.CompileTreeWithPathOptions(tree.RootNode(), source, pkgName, moduleName, sourcePath, samePackageImports, cpuProfile)
+	return p.CompileTreeWithPathOptions(tree.RootNode(), source, pkgName, moduleName, sourcePath, samePackageImports, lowerCfg)
 }
 
 // CompileWithExports transpiles TypeScript source with knowledge of cross-file exports.
@@ -102,11 +105,14 @@ func CompilePackageWithOptLevel(files map[string][]byte, pkgName, moduleName, en
 
 func CompilePackageWithOptLevelOptions(files map[string][]byte, pkgName, moduleName, entryFile string, optLevel int, opts *CompileOptions) (map[string][]byte, error) {
 	p := newDefaultPipeline(optLevel)
-	var cpuProfile *backend.CPUProfileConfig
+	var lowerCfg *backend.LowerConfig
 	if opts != nil {
-		cpuProfile = opts.CPUProfile
+		lowerCfg = &backend.LowerConfig{
+			CPUProfile: opts.CPUProfile,
+			Otel:       opts.Otel,
+		}
 	}
-	return p.CompilePackageWithOptions(files, pkgName, moduleName, entryFile, cpuProfile)
+	return p.CompilePackageWithOptions(files, pkgName, moduleName, entryFile, lowerCfg)
 }
 
 func newDefaultPipeline(optLevel int) *pipeline.Pipeline {

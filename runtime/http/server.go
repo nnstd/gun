@@ -1,6 +1,7 @@
 package nodehttp
 
 import (
+	"context"
 	stdErrors "errors"
 	"fmt"
 	"log"
@@ -19,6 +20,7 @@ import (
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
 	jserror "github.com/nnstd/gun/runtime/builtin/error"
 	"github.com/nnstd/gun/runtime/eventloop"
+	"github.com/nnstd/gun/runtime/otel"
 )
 
 // serverInternal is the Go-side state attached to each Server JSValue.
@@ -210,7 +212,7 @@ func init() {
 		this.Set("listening", jsvalue.NewBool(true))
 
 		si.server = &fasthttp.Server{
-			Handler: makeRequestHandler(this),
+			Handler: makeRequestHandler(this, host, port),
 		}
 
 		eventloop.Default.RegisterHandle()
@@ -327,7 +329,7 @@ func buildListenError(err error, addr, syscallName string) *jsvalue.JSValue {
 }
 
 // makeRequestHandler returns a fasthttp Handler bound to the given Server JSValue.
-func makeRequestHandler(server *jsvalue.JSValue) fasthttp.RequestHandler {
+func makeRequestHandler(server *jsvalue.JSValue, addr string, port int) fasthttp.RequestHandler {
 	return func(ctx *fasthttp.RequestCtx) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -337,6 +339,28 @@ func makeRequestHandler(server *jsvalue.JSValue) fasthttp.RequestHandler {
 				ctx.SetBodyString(fmt.Sprintf("Internal Server Error: %v", r))
 			}
 		}()
+
+		// OpenTelemetry instrumentation
+		if otel.Enabled {
+			method := string(ctx.Method())
+			scheme := "http"
+			if ctx.IsTLS() {
+				scheme = "https"
+			}
+			fullURL := string(ctx.URI().FullURI())
+			path := string(ctx.Path())
+			query := string(ctx.URI().QueryString())
+			spanCtx, span := otel.StartHTTPSpan(context.Background(), method, fullURL, scheme, path, query)
+			otel.SetActiveContext(spanCtx)
+			defer otel.SetActiveContext(nil)
+			otel.RecordActiveRequest(method, scheme, addr, port, 1)
+			defer otel.RecordActiveRequest(method, scheme, addr, port, -1)
+			startTime := time.Now()
+			defer func() {
+				otel.EndHTTPSpan(span, ctx.Response.StatusCode())
+				otel.RecordServerRequest(method, scheme, "", addr, port, ctx.Response.StatusCode(), "", time.Since(startTime), int64(len(ctx.PostBody())), int64(len(ctx.Response.Body())))
+			}()
+		}
 
 		body := ctx.PostBody()
 		bodyCopy := make([]byte, len(body))

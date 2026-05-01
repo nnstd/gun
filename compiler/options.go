@@ -9,4 +9,5 @@ type CPUProfileConfig = backend.CPUProfileConfig
 // CompileOptions carries optional codegen-only compile toggles.
 type CompileOptions struct {
 	CPUProfile *CPUProfileConfig
+	Otel       bool
 }

@@ -1479,6 +1479,27 @@ func (l *Lowerer) ensureMainRecover(fd *ast.FuncDecl) {
 		&ast.DeferStmt{Call: callExpr(selectorExpr(goIdent("error"), "RecoverMain"))},
 	}, fd.Body.List...)
 }
+// insertAfterRecoverMain returns the insertion index after the error.RecoverMain
+// defer if it exists as the first statement in main().
+func (l *Lowerer) insertAfterRecoverMain(mainFn *ast.FuncDecl) int {
+	if len(mainFn.Body.List) == 0 {
+		return 0
+	}
+	ds, ok := mainFn.Body.List[0].(*ast.DeferStmt)
+	if !ok || ds.Call == nil {
+		return 0
+	}
+	sel, ok := ds.Call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return 0
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	if ok && pkg.Name == "error" && sel.Sel.Name == "RecoverMain" {
+		return 1
+	}
+	return 0
+}
+
 func (l *Lowerer) injectCPUProfileMain() {
 	if l.cpuProfile == nil || l.pkgName != "main" {
 		return
@@ -1490,28 +1511,15 @@ func (l *Lowerer) injectCPUProfileMain() {
 
 	profileAlias := l.ensureProfileRuntimeAlias()
 	stopIdent := goIdent("_gunCPUProfileStop")
-	startCall := callExpr(
-		selectorExpr(goIdent(profileAlias), "StartCPUProfileOrExit"),
-		stringLit(l.cpuProfile.Dir),
-		stringLit(l.cpuProfile.Name),
-	)
-	startStmt := assignDefine([]ast.Expr{stopIdent}, []ast.Expr{startCall})
+	startStmt := assignDefine([]ast.Expr{stopIdent}, []ast.Expr{
+		callExpr(selectorExpr(goIdent(profileAlias), "StartCPUProfileOrExit"),
+			stringLit(l.cpuProfile.Dir), stringLit(l.cpuProfile.Name)),
+	})
 	deferStmt := &ast.DeferStmt{Call: callExpr(stopIdent)}
 
-	insertAt := 0
-	if len(mainFn.Body.List) > 0 {
-		if deferStmtExisting, ok := mainFn.Body.List[0].(*ast.DeferStmt); ok && deferStmtExisting.Call != nil {
-			if sel, ok := deferStmtExisting.Call.Fun.(*ast.SelectorExpr); ok {
-				if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "error" && sel.Sel.Name == "RecoverMain" {
-					insertAt = 1
-				}
-			}
-		}
-	}
-
-	stmts := []ast.Stmt{startStmt, deferStmt}
+	insertAt := l.insertAfterRecoverMain(mainFn)
 	body := append([]ast.Stmt{}, mainFn.Body.List[:insertAt]...)
-	body = append(body, stmts...)
+	body = append(body, startStmt, deferStmt)
 	mainFn.Body.List = append(body, mainFn.Body.List[insertAt:]...)
 }
 
@@ -1524,26 +1532,13 @@ func (l *Lowerer) injectOtelMain() {
 		return
 	}
 
-	alias := "otel"
-	l.addAliasedImport("github.com/nnstd/gun/runtime/otel", alias)
+	l.addAliasedImport("github.com/nnstd/gun/runtime/otel", "otel")
+	initCall := exprStmt(callExpr(selectorExpr(goIdent("otel"), "Init")))
+	deferCall := &ast.DeferStmt{Call: callExpr(selectorExpr(goIdent("otel"), "Shutdown"))}
 
-	initCall := exprStmt(callExpr(selectorExpr(goIdent(alias), "Init")))
-	deferCall := &ast.DeferStmt{Call: callExpr(selectorExpr(goIdent(alias), "Shutdown"))}
-
-	insertAt := 0
-	if len(mainFn.Body.List) > 0 {
-		if deferStmtExisting, ok := mainFn.Body.List[0].(*ast.DeferStmt); ok && deferStmtExisting.Call != nil {
-			if sel, ok := deferStmtExisting.Call.Fun.(*ast.SelectorExpr); ok {
-				if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "error" && sel.Sel.Name == "RecoverMain" {
-					insertAt = 1
-				}
-			}
-		}
-	}
-
-	stmts := []ast.Stmt{initCall, deferCall}
+	insertAt := l.insertAfterRecoverMain(mainFn)
 	body := append([]ast.Stmt{}, mainFn.Body.List[:insertAt]...)
-	body = append(body, stmts...)
+	body = append(body, initCall, deferCall)
 	mainFn.Body.List = append(body, mainFn.Body.List[insertAt:]...)
 }
 func (l *Lowerer) uniqueInternalImportAlias(base string) string {

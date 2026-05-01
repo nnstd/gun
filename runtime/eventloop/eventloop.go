@@ -1,6 +1,7 @@
 package eventloop
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 
@@ -30,6 +31,7 @@ type EventLoop struct {
 	wakeupChan  chan struct{} // wake from select when counts change
 	nextJobID   atomic.Int64
 	jobs        sync.Map // jobID -> *activeJob
+	activeCtx   atomic.Value // stores context.Context for OTel span propagation
 }
 
 // Default is the package-level singleton event loop.
@@ -73,6 +75,25 @@ func (el *EventLoop) UnregisterHandle() {
 // RegisterServer is a backward-compatible alias for RegisterHandle.
 func (el *EventLoop) RegisterServer() {
 	el.RegisterHandle()
+}
+
+// SetActiveContext stores a context.Context for OTel span propagation.
+func (el *EventLoop) SetActiveContext(ctx context.Context) {
+	if ctx == nil {
+		el.activeCtx.Store((*context.Context)(nil))
+	} else {
+		el.activeCtx.Store(&ctx)
+	}
+}
+
+// ActiveContext retrieves the stored context, or context.Background() if none.
+func (el *EventLoop) ActiveContext() context.Context {
+	if v := el.activeCtx.Load(); v != nil {
+		if p, ok := v.(*context.Context); ok && p != nil {
+			return *p
+		}
+	}
+	return context.Background()
 }
 
 // UnregisterServer is a backward-compatible alias for UnregisterHandle.

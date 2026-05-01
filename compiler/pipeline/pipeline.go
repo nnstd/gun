@@ -46,6 +46,7 @@ type compileOptions struct {
 	namespaceAlias   string
 	namespaceEntries map[string]string
 	cpuProfile       *backend.CPUProfileConfig
+	otel             bool
 }
 
 // New creates a pipeline with the given optimization level and default passes.
@@ -87,14 +88,17 @@ func (p *Pipeline) CompileTreeWithPath(root *sitter.Node, source []byte, pkgName
 	return p.CompileTreeWithPathOptions(root, source, pkgName, moduleName, sourcePath, samePackageImports, nil)
 }
 
-func (p *Pipeline) CompileTreeWithPathOptions(root *sitter.Node, source []byte, pkgName, moduleName, sourcePath string, samePackageImports bool, cpuProfile *backend.CPUProfileConfig) ([]byte, error) {
+func (p *Pipeline) CompileTreeWithPathOptions(root *sitter.Node, source []byte, pkgName, moduleName, sourcePath string, samePackageImports bool, lowerCfg *backend.LowerConfig) ([]byte, error) {
 	// Stage 1: Build HIR
 	hirMod := hir.BuildModuleWithPath(root, source, pkgName, sourcePath)
 	if p.OnHIR != nil {
 		p.OnHIR(hirMod)
 	}
 	opts := compileOptions{}
-	opts.cpuProfile = cpuProfile
+	if lowerCfg != nil {
+		opts.cpuProfile = lowerCfg.CPUProfile
+		opts.otel = lowerCfg.Otel
+	}
 	return p.compileHIRModule(hirMod, moduleName, samePackageImports, opts)
 }
 
@@ -146,9 +150,24 @@ func (p *Pipeline) compileHIRModule(hirMod *hir.Module, moduleName string, sameP
 
 	var goFile *ast.File
 	if len(opts.crossFileExports) == 0 && len(opts.reservedNames) == 0 && len(opts.importNameMap) == 0 && len(opts.exportAliasMap) == 0 && len(opts.localAliasMap) == 0 && opts.namespaceAlias == "" && len(opts.namespaceEntries) == 0 {
-		goFile = backend.LowerWithCPUProfile(hirMod, p.Ctx, moduleName, samePackageImports, opts.cpuProfile, p.OptLevel)
+		goFile = backend.LowerWithConfig(hirMod, p.Ctx, moduleName, samePackageImports, &backend.LowerConfig{
+			CPUProfile:  opts.cpuProfile,
+			Otel:        opts.otel,
+			IsEntryFile: true,
+		}, p.OptLevel)
 	} else {
-		goFile = backend.LowerWithExportsAndCPUProfile(hirMod, p.Ctx, moduleName, samePackageImports, opts.crossFileExports, opts.reservedNames, opts.importNameMap, opts.exportAliasMap, opts.localAliasMap, opts.namespaceAlias, opts.namespaceEntries, opts.cpuProfile, p.OptLevel, true)
+		goFile = backend.LowerWithConfig(hirMod, p.Ctx, moduleName, samePackageImports, &backend.LowerConfig{
+			CrossFileExports: opts.crossFileExports,
+			ReservedNames:    opts.reservedNames,
+			ImportNameMap:    opts.importNameMap,
+			ExportAliasMap:   opts.exportAliasMap,
+			LocalAliasMap:    opts.localAliasMap,
+			NamespaceAlias:   opts.namespaceAlias,
+			NamespaceEntries: opts.namespaceEntries,
+			CPUProfile:       opts.cpuProfile,
+			Otel:             opts.otel,
+			IsEntryFile:      true,
+		}, p.OptLevel)
 	}
 	return backend.GenerateWithSource(goFile, hirMod.SourcePath, hirMod.SourceSize)
 }
@@ -159,7 +178,7 @@ func (p *Pipeline) CompilePackage(files map[string][]byte, pkgName, moduleName, 
 	return p.CompilePackageWithOptions(files, pkgName, moduleName, entryFile, nil)
 }
 
-func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, moduleName, entryFile string, cpuProfile *backend.CPUProfileConfig) (map[string][]byte, error) {
+func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, moduleName, entryFile string, lowerCfg *backend.LowerConfig) (map[string][]byte, error) {
 	// Phase 1: Parse all files into HIR and scan exports
 	hirModules := make(map[string]*hir.Module)
 	allExports := make(map[string][]backend.CrossFileExport)
@@ -385,7 +404,28 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 			}
 		}
 
-		goFiles[name] = backend.LowerWithExportsAndCPUProfile(hirMod, p.Ctx, moduleName, true, crossExports, reservedNames, importNameMap, exportAliases[name], localAliases[name], namespaceAliases[name], exportAliases[name], cpuProfile, p.OptLevel, name == entryFile)
+		goFiles[name] = backend.LowerWithConfig(hirMod, p.Ctx, moduleName, true, &backend.LowerConfig{
+				CrossFileExports: crossExports,
+				ReservedNames:    reservedNames,
+				ImportNameMap:    importNameMap,
+				ExportAliasMap:   exportAliases[name],
+				LocalAliasMap:    localAliases[name],
+				NamespaceAlias:   namespaceAliases[name],
+				NamespaceEntries: exportAliases[name],
+				CPUProfile: func() *backend.CPUProfileConfig {
+					if lowerCfg != nil {
+						return lowerCfg.CPUProfile
+					}
+					return nil
+				}(),
+				Otel: func() bool {
+					if lowerCfg != nil {
+						return lowerCfg.Otel
+					}
+					return false
+				}(),
+				IsEntryFile:      name == entryFile,
+			}, p.OptLevel)
 	}
 	for name, source := range files {
 		if !isDataModule(name) {

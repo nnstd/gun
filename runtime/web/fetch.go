@@ -9,6 +9,7 @@ import (
 	jserror "github.com/nnstd/gun/runtime/builtin/error"
 	"github.com/nnstd/gun/runtime/eventloop"
 	nodehttp "github.com/nnstd/gun/runtime/http"
+	"github.com/nnstd/gun/runtime/otel"
 	"github.com/nnstd/gun/runtime/promise"
 )
 
@@ -86,18 +87,29 @@ var Fetch = jsvalue.NewFunction(func(args ...*jsvalue.JSValue) *jsvalue.JSValue 
 			}
 		}
 
+		var fetchSpan interface{}
+		if otel.Enabled {
+			_, fetchSpan = otel.StartFetchSpan(otel.ActiveContext(), spec.Method, spec.URL)
+		}
+
 		nodehttp.DoTransportAsync(spec, func(resp *nodehttp.TransportResponse, err error) {
 			if isSettled() {
 				return
 			}
 			eventloop.Default.ScheduleCallback(func() {
 				if err != nil {
+					if otel.Enabled {
+						otel.EndHTTPSpan(fetchSpan, 0)
+					}
 					if err == nodehttp.ErrTransportCanceled {
 						settle(func() { reject.Call(fetchAbortReason(signal)) })
 						return
 					}
 					settle(func() { reject.Call(jserror.TypeError.Call(jsvalue.NewString(err.Error()))) })
 					return
+				}
+				if otel.Enabled {
+					otel.EndHTTPSpan(fetchSpan, resp.StatusCode)
 				}
 				settle(func() { resolve.Call(responseFromTransport(resp)) })
 			})

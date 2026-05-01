@@ -5,6 +5,7 @@ import (
 	"os"
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
+	"github.com/nnstd/gun/runtime/otel"
 )
 
 func toAny(args []*jsvalue.JSValue) []any {
@@ -16,21 +17,35 @@ func toAny(args []*jsvalue.JSValue) []any {
 }
 
 func Log(args ...*jsvalue.JSValue) {
-	fmt.Println(toAny(args)...)
+	fmt.Println(prefixSpan(toAny(args))...)
 }
 
 func Error(args ...*jsvalue.JSValue) {
-	fmt.Fprintln(os.Stderr, toAny(args)...)
+	fmt.Fprintln(os.Stderr, prefixSpan(toAny(args))...)
 }
 
 func Warn(args ...*jsvalue.JSValue) {
-	fmt.Fprintln(os.Stderr, toAny(args)...)
+	fmt.Fprintln(os.Stderr, prefixSpan(toAny(args))...)
 }
 
 func Dir(args ...*jsvalue.JSValue) {
 	for _, a := range args {
 		fmt.Printf("%+v\n", a)
 	}
+}
+
+func prefixSpan(args []any) []any {
+	if !otel.Enabled {
+		return args
+	}
+	traceID, spanID := otel.SpanContext()
+	if traceID == "" {
+		return args
+	}
+	prefixed := make([]any, 0, len(args)+1)
+	prefixed = append(prefixed, fmt.Sprintf("[%s/%s]", traceID, spanID))
+	prefixed = append(prefixed, args...)
+	return prefixed
 }
 
 // AsJSValue returns console as a callable JSValue object.

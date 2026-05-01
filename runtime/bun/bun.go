@@ -1,6 +1,7 @@
 package bun
 
 import (
+	"context"
 	stdErrors "errors"
 	"fmt"
 	"log"
@@ -10,12 +11,14 @@ import (
 	"runtime/debug"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/valyala/fasthttp"
 
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
 	error "github.com/nnstd/gun/runtime/builtin/error"
 	"github.com/nnstd/gun/runtime/eventloop"
+	"github.com/nnstd/gun/runtime/otel"
 	"github.com/nnstd/gun/runtime/promise"
 	"github.com/nnstd/gun/runtime/web"
 )
@@ -182,12 +185,33 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 				}
 			}()
 
+			var span interface{}
+			if otel.Enabled {
+				method := string(ctx.Method())
+				fullURL := string(ctx.URI().FullURI())
+				scheme := "http"
+				path := string(ctx.Path())
+				query := string(ctx.URI().QueryString())
+				spanCtx, sp := otel.StartHTTPSpan(context.Background(), method, fullURL, scheme, path, query)
+				span = sp
+				otel.SetActiveContext(spanCtx)
+				defer otel.SetActiveContext(nil)
+				defer otel.EndHTTPSpan(span, ctx.Response.StatusCode())
+				otel.RecordActiveRequest(method, scheme, "127.0.0.1", actualPort, 1)
+				defer otel.RecordActiveRequest(method, scheme, "127.0.0.1", actualPort, -1)
+			}
+
+			start := time.Now()
 			req := web.RequestFromFastHTTP(ctx)
 			res := fetch.Call(req, serverObj)
 
 			if !promise.IsPromise(res) {
 				web.WriteResponseFastHTTP(ctx, res)
 				web.ReleaseFastHTTPRequest(req)
+				if otel.Enabled {
+					statusCode := ctx.Response.StatusCode()
+					otel.RecordServerRequest(string(ctx.Method()), "http", "1.1", "127.0.0.1", actualPort, statusCode, "", time.Since(start), int64(len(ctx.PostBody())), int64(len(ctx.Response.Body())))
+				}
 				return
 			}
 
@@ -220,10 +244,17 @@ func Serve(options *jsvalue.JSValue) *jsvalue.JSValue {
 				ctx.SetStatusCode(500)
 				ctx.SetBodyString(errResult.String())
 				web.ReleaseFastHTTPRequest(req)
+				if otel.Enabled {
+					otel.RecordServerRequest(string(ctx.Method()), "http", "1.1", "127.0.0.1", actualPort, 500, "Internal Server Error", time.Since(start), int64(len(ctx.PostBody())), int64(len(ctx.Response.Body())))
+				}
 				return
 			}
 			web.WriteResponseFastHTTP(ctx, result)
 			web.ReleaseFastHTTPRequest(req)
+			if otel.Enabled {
+				statusCode := ctx.Response.StatusCode()
+				otel.RecordServerRequest(string(ctx.Method()), "http", "1.1", "127.0.0.1", actualPort, statusCode, "", time.Since(start), int64(len(ctx.PostBody())), int64(len(ctx.Response.Body())))
+			}
 		},
 	}
 

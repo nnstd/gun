@@ -32,6 +32,7 @@ type TranspileCmd struct {
 	Verbose  bool   `short:"v" help:"Verbose output."`
 	AST      bool   `help:"Print the tree-sitter AST instead of transpiling."`
 	OptLevel int    `short:"O" default:"0" help:"Optimization level for pipeline transpilation (0, 1, 2)."`
+	Otel     bool   `help:"Enable OpenTelemetry instrumentation."`
 }
 
 type BuildCmd struct {
@@ -40,6 +41,7 @@ type BuildCmd struct {
 	Pkg      string `short:"p" default:"main" help:"Go package name."`
 	Verbose  bool   `short:"v" help:"Verbose output."`
 	OptLevel int    `short:"O" default:"0" help:"Optimization level for pipeline transpilation (0, 1, 2)."`
+	Otel     bool   `help:"Enable OpenTelemetry instrumentation."`
 }
 
 type RunCmd struct {
@@ -51,6 +53,7 @@ type RunCmd struct {
 	CPUProfDir      string   `help:"Directory for CPU profile output."`
 	CPUProfName     string   `help:"File name for CPU profile output."`
 	CPUProfInterval int      `default:"1000" help:"CPU profile sampling interval in microseconds (v1 only supports 1000)."`
+	Otel            bool     `help:"Enable OpenTelemetry instrumentation."`
 	Args            []string `arg:"" optional:"" passthrough:"" help:"Arguments to pass to the compiled program."`
 }
 
@@ -78,10 +81,10 @@ func (cmd *TranspileCmd) Run() error {
 
 	// No -o: just print to stdout
 	if cmd.Output == "" {
-		return runner.TranspileFile(cmd.Input, "", cmd.Pkg, "", cmd.Verbose, false, cmd.OptLevel, nil)
+		return runner.TranspileFile(cmd.Input, "", cmd.Pkg, "", cmd.Verbose, false, cmd.OptLevel, &compiler.CompileOptions{Otel: cmd.Otel})
 	}
 
-	return runner.TranspileProject(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose, cmd.OptLevel, nil)
+	return runner.TranspileProject(cmd.Input, cmd.Output, cmd.Pkg, cmd.Verbose, cmd.OptLevel, &compiler.CompileOptions{Otel: cmd.Otel})
 }
 
 func (cmd *BuildCmd) Run() error {
@@ -99,7 +102,7 @@ func (cmd *BuildCmd) Run() error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	if err := runner.TranspileProject(cmd.Input, tmpDir, cmd.Pkg, cmd.Verbose, cmd.OptLevel, nil); err != nil {
+	if err := runner.TranspileProject(cmd.Input, tmpDir, cmd.Pkg, cmd.Verbose, cmd.OptLevel, &compiler.CompileOptions{Otel: cmd.Otel}); err != nil {
 		return err
 	}
 
@@ -109,7 +112,11 @@ func (cmd *BuildCmd) Run() error {
 	}
 	binPath, _ = filepath.Abs(binPath)
 
-	return runner.GoBuild(tmpDir, binPath, cmd.Verbose)
+	var buildTags []string
+	if cmd.Otel {
+		buildTags = append(buildTags, "otel")
+	}
+	return runner.GoBuild(tmpDir, binPath, cmd.Verbose, buildTags...)
 }
 
 func (cmd *RunCmd) Run() error {
@@ -136,7 +143,11 @@ func (cmd *RunCmd) Run() error {
 
 	binName := strings.TrimSuffix(filepath.Base(cmd.Input), ".ts")
 	binPath := filepath.Join(tmpDir, binName)
-	if err := runner.GoBuild(tmpDir, binPath, cmd.Verbose); err != nil {
+	var runBuildTags []string
+	if cmd.Otel {
+		runBuildTags = append(runBuildTags, "otel")
+	}
+	if err := runner.GoBuild(tmpDir, binPath, cmd.Verbose, runBuildTags...); err != nil {
 		return err
 	}
 
@@ -161,14 +172,20 @@ func (cmd *RunCmd) Run() error {
 }
 
 func (cmd *RunCmd) compileOptions() *compiler.CompileOptions {
-	if !cmd.CPUProf {
+	if !cmd.CPUProf && !cmd.Otel {
 		return nil
 	}
 	return &compiler.CompileOptions{
-		CPUProfile: &compiler.CPUProfileConfig{
-			Dir:  cmd.CPUProfDir,
-			Name: cmd.CPUProfName,
-		},
+		CPUProfile: func() *compiler.CPUProfileConfig {
+			if !cmd.CPUProf {
+				return nil
+			}
+			return &compiler.CPUProfileConfig{
+				Dir:  cmd.CPUProfDir,
+				Name: cmd.CPUProfName,
+			}
+		}(),
+		Otel: cmd.Otel,
 	}
 }
 
