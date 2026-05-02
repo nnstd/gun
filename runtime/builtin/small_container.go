@@ -284,6 +284,28 @@ func (l *SmallValueList) Truncate() {
 	}
 }
 
+// TruncateTo removes elements so that the list has at most n elements.
+func (l *SmallValueList) TruncateTo(n int) {
+	if n < 0 {
+		n = 0
+	}
+	if l.overflow != nil {
+		if n < len(l.overflow) {
+			for i := n; i < len(l.overflow); i++ {
+				l.overflow[i] = nil
+			}
+			l.overflow = l.overflow[:n]
+		}
+		return
+	}
+	if n < l.count {
+		for i := n; i < l.count; i++ {
+			l.inline[i] = nil
+		}
+		l.count = n
+	}
+}
+
 // RemoveFirst removes the first element and shifts remaining elements left.
 // No-op if empty.
 func (l *SmallValueList) RemoveFirst() {

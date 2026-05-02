@@ -239,6 +239,37 @@ func initArrayPrototype() {
 	// when the transpiler generates ArrayPrototype.Get("prototype").Get("slice").
 	ArrayPrototype.Set("prototype", ArrayPrototype)
 
+	// Array.prototype.length — returns the number of elements in the array.
+	ArrayPrototype.DefineProperty("length", &PropertyDescriptor{
+		Get: func(this *JSValue) *JSValue {
+			if this != nil && this.isArr {
+				return NewNumber(float64(this.arrayListOrZero().Len()))
+			}
+			return NewNumber(0)
+		},
+		Set: func(this *JSValue, val *JSValue) {
+			if this == nil || !this.isArr {
+				return
+			}
+			newLen := val.Number()
+			if newLen < 0 || newLen != float64(int(newLen)) {
+				panic(newRangeErrorJSValue("Invalid array length"))
+			}
+			n := int(newLen)
+			list := this.arrayListOrZero()
+			cur := list.Len()
+			if n < cur {
+				list.TruncateTo(n)
+			} else if n > cur {
+				for i := cur; i < n; i++ {
+					list.Push(NewUndefined())
+				}
+			}
+			this.genAdd(1)
+		},
+		Enumerable: false, Configurable: true,
+	})
+
 	ArrayPrototype.DefineProperty("slice", &PropertyDescriptor{
 		Value: NewFunction(func(args ...*JSValue) *JSValue {
 			if len(args) < 1 {
