@@ -13,5 +13,5 @@ export const Route = createFileRoute('/docs/$slug')({
 function DocsSlugPage() {
   const { slug } = Route.useParams()
   const title = SLUG_TO_TITLE[slug] ?? 'Introduction'
-  return <DocsPage active={title} />
+  return <DocsPage key={slug} active={title} />
 }
