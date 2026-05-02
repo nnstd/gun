@@ -207,9 +207,9 @@ func registerGlobalFunctions(ctx *tcontext.TranspilerContext) {
 		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			if len(args) > 0 {
-				imp.AddImport("fmt")
+				imp.AddAliasedImport("fmt", "_gunFmt")
 				return callExpr(selectorExpr(ident("jsvalue"), "NewSymbol"),
-					callExpr(selectorExpr(ident("fmt"), "Sprint"), args[0]))
+					callExpr(selectorExpr(ident("_gunFmt"), "Sprint"), args[0]))
 			}
 			return callExpr(selectorExpr(ident("jsvalue"), "NewSymbol"), stringLit(""))
 		},
@@ -408,8 +408,8 @@ func registerConstructors(ctx *tcontext.TranspilerContext) {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			pattern := ast.Expr(stringLit(""))
 			if len(args) > 0 {
-				imp.AddImport("fmt")
-				pattern = callExpr(selectorExpr(ident("fmt"), "Sprint"), args[0])
+				imp.AddAliasedImport("fmt", "_gunFmt")
+				pattern = callExpr(selectorExpr(ident("_gunFmt"), "Sprint"), args[0])
 			}
 			compiled := callExpr(selectorExpr(ident("jsvalue"), "CompileRegex"), pattern)
 			if len(args) > 1 {
@@ -459,11 +459,11 @@ func registerConstructors(ctx *tcontext.TranspilerContext) {
 		ctx.RegisterConstructor(&tcontext.Constructor{
 			Name: name,
 			Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
-				imp.AddImport("github.com/nnstd/gun/runtime/url")
+				imp.AddAliasedImport("github.com/nnstd/gun/runtime/url", "_gunUrl")
 				for i, arg := range args {
 					args[i] = jsvalueWrapLit(arg)
 				}
-				return callExpr(selectorExpr(selectorExpr(ident("url"), name+"Constructor"), "Call"), args...)
+				return callExpr(selectorExpr(selectorExpr(ident("_gunUrl"), name+"Constructor"), "Call"), args...)
 			},
 		})
 	}
@@ -664,8 +664,8 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 			Name: name,
 			Transform: func(imp tcontext.Imports) ast.Expr {
-				imp.AddImport("github.com/nnstd/gun/runtime/url")
-				return selectorExpr(ident("url"), name+"Constructor")
+				imp.AddAliasedImport("github.com/nnstd/gun/runtime/url", "_gunUrl")
+				return selectorExpr(ident("_gunUrl"), name+"Constructor")
 			},
 		})
 	}
@@ -1068,7 +1068,7 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 	})
 	ctx.RegisterModule("url", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/url",
-		GoPkgName:    "url",
+		GoPkgName:    "_gunUrl",
 		UseAsJSValue: true,
 	})
 	ctx.RegisterModule("util", &tcontext.ModuleMapping{

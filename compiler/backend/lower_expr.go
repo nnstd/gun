@@ -107,7 +107,11 @@ func (l *Lowerer) lowerExpr(e hir.Expr) ast.Expr {
 		out = goIdent("this")
 
 	case *hir.SuperExpr:
-		out = goIdent("super")
+		if l.currentParentClass != "" {
+			out = goIdent(l.currentParentClass)
+		} else {
+			out = goIdent("super")
+		}
 
 	case *hir.PrivateIdentifierExpr:
 		out = l.privateKeyExpr(e.Name)
@@ -282,7 +286,7 @@ func (l *Lowerer) lowerLiteral(e *hir.Literal) ast.Expr {
 	}
 }
 func (l *Lowerer) lowerTemplateLiteral(e *hir.TemplateLiteral) ast.Expr {
-	l.addImport("fmt")
+	l.addAliasedImport("fmt", "_gunFmt")
 	l.jsvalueImport()
 
 	var format strings.Builder
@@ -318,7 +322,7 @@ func (l *Lowerer) lowerTemplateLiteral(e *hir.TemplateLiteral) ast.Expr {
 		return callExpr(selectorExpr(goIdent("jsvalue"), "NewString"), fmtLit)
 	}
 	sprintfArgs := append([]ast.Expr{fmtLit}, args...)
-	formatted := callExpr(selectorExpr(goIdent("fmt"), "Sprintf"), sprintfArgs...)
+	formatted := callExpr(selectorExpr(goIdent("_gunFmt"), "Sprintf"), sprintfArgs...)
 	return callExpr(selectorExpr(goIdent("jsvalue"), "NewString"), formatted)
 }
 func (l *Lowerer) lowerTaggedTemplate(e *hir.TaggedTemplateLiteral) ast.Expr {
@@ -493,7 +497,7 @@ func (l *Lowerer) lowerObjectWithAccessors(e *hir.ObjectLiteral) ast.Expr {
 // like {[expr]: value}. Uses IIFE: func() *JSValue { obj := NewObject(); obj.Set(Sprint(expr), val); return obj }()
 func (l *Lowerer) lowerObjectWithComputed(e *hir.ObjectLiteral) ast.Expr {
 	l.jsvalueImport()
-	l.addImport("fmt")
+	l.addAliasedImport("fmt", "_gunFmt")
 	var stmts []ast.Stmt
 	stmts = append(stmts, assignDefine(
 		[]ast.Expr{goIdent("_obj")},
@@ -503,7 +507,7 @@ func (l *Lowerer) lowerObjectWithComputed(e *hir.ObjectLiteral) ast.Expr {
 		value := l.lowerObjectPropertyValue(prop)
 		var keyExpr ast.Expr
 		if prop.Computed {
-			keyExpr = callExpr(selectorExpr(goIdent("fmt"), "Sprint"), l.lowerExpr(prop.Key))
+			keyExpr = callExpr(selectorExpr(goIdent("_gunFmt"), "Sprint"), l.lowerExpr(prop.Key))
 		} else {
 			keyExpr = stringLit(prop.KeyName)
 		}
@@ -631,10 +635,10 @@ func (l *Lowerer) lowerBinaryExpr(e *hir.BinaryExpr) ast.Expr {
 				})
 		}
 		// key in obj → jsvalue.NewBool(obj.HasOwnProperty(fmt.Sprint(key)))
-		l.addImport("fmt")
+		l.addAliasedImport("fmt", "_gunFmt")
 		return callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"),
 			callExpr(selectorExpr(right, "HasOwnProperty"),
-				callExpr(selectorExpr(goIdent("fmt"), "Sprint"), left)))
+				callExpr(selectorExpr(goIdent("_gunFmt"), "Sprint"), left)))
 	case hir.OpInstanceof:
 		if id, ok := e.Right.(*hir.Identifier); ok {
 			name := id.Name
@@ -1495,8 +1499,8 @@ func (l *Lowerer) lowerComputedPropertyKeyExpr(e hir.Expr) ast.Expr {
 		l.jsvalueImport()
 		return callExpr(selectorExpr(goIdent("jsvalue"), "PropertyKey"), l.lowerExpr(e))
 	}
-	l.addImport("fmt")
-	return callExpr(selectorExpr(goIdent("fmt"), "Sprint"), l.lowerExpr(e))
+	l.addAliasedImport("fmt", "_gunFmt")
+	return callExpr(selectorExpr(goIdent("_gunFmt"), "Sprint"), l.lowerExpr(e))
 }
 func describeHIRExpr(e hir.Expr) string {
 	switch e := e.(type) {

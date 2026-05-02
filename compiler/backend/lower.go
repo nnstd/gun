@@ -59,6 +59,7 @@ type Lowerer struct {
 	initStmts           []ast.Stmt      // statements for init() function
 	pkgName             string          // Go package name
 	currentClassName    string          // set during class constructor/method lowering
+	currentParentClass  string          // parent class name for super.method() calls
 	insideFunc          int             // >0 when inside a function body
 	insideMethod        int             // >0 when inside a method body (_args[0] is this)
 	privateKeys         map[string]string
@@ -538,13 +539,21 @@ func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 	l.decls = append(l.decls, l.lowerPrivateKeyDecls(name, privateKeys)...)
 
 	prevClassName := l.currentClassName
+	prevParentClass := l.currentParentClass
 	prevClassBrand := l.currentClassBrand
 	prevPrivateKeys := l.privateKeys
 	l.currentClassName = name
+	l.currentParentClass = ""
+	if d.Parent != nil {
+		if id, ok := d.Parent.(*hir.Identifier); ok {
+			l.currentParentClass = id.Name
+		}
+	}
 	l.currentClassBrand = brandKey
 	l.privateKeys = privateKeys
 	defer func() {
 		l.currentClassName = prevClassName
+		l.currentParentClass = prevParentClass
 		l.currentClassBrand = prevClassBrand
 		l.privateKeys = prevPrivateKeys
 	}()
@@ -804,8 +813,8 @@ func (l *Lowerer) lowerClassMemberKey(name string, isPrivate bool, computed hir.
 		return l.privateKeyExpr(name)
 	}
 	if computed != nil {
-		l.addImport("fmt")
-		return callExpr(selectorExpr(goIdent("fmt"), "Sprint"), l.lowerExpr(computed))
+		l.addAliasedImport("fmt", "_gunFmt")
+		return callExpr(selectorExpr(goIdent("_gunFmt"), "Sprint"), l.lowerExpr(computed))
 	}
 	return stringLit(name)
 }
@@ -981,6 +990,18 @@ func (l *Lowerer) lowerExportDecl(d *hir.ExportDecl) {
 			} else if isRelativeImport(d.FromModule) {
 				// Fallback: resolve re-export from transpiled module when
 				// importNameMap is empty (single-file compilation).
+				goImport, goPkg, _ := l.resolveModule(d.FromModule)
+				if goPkg != "" {
+					l.addImport(goImport)
+					if n.LocalName == "default" {
+						rhs = selectorExpr(goIdent(goPkg), "Default")
+					} else {
+						rhs = selectorExpr(goIdent(goPkg), symbol.Capitalize(symbol.Sanitize(n.LocalName)))
+					}
+					mappedFromModule = true
+				}
+			} else {
+				// External package re-export: export { X } from 'external-pkg'
 				goImport, goPkg, _ := l.resolveModule(d.FromModule)
 				if goPkg != "" {
 					l.addImport(goImport)

@@ -554,7 +554,7 @@ func (b *asyncFuncBuilder) compileStmt(stmt hir.Stmt, next int, loop asyncLoopLa
 		postLabel := b.newLabel()
 		prepLabel := b.newLabel()
 		bodyEntry := b.compileSeq(s.Body.Stmts, postLabel, asyncLoopLabels{breakLabel: next, continueLabel: postLabel, valid: true}, protected, finalizer)
-		itemExpr := callExpr(selectorExpr(goIdent(itemsName), "Get"), callExpr(selectorExpr(goIdent("fmt"), "Sprint"), goIdent(indexName)))
+		itemExpr := callExpr(selectorExpr(goIdent(itemsName), "Get"), callExpr(selectorExpr(goIdent("_gunFmt"), "Sprint"), goIdent(indexName)))
 		prepBody := []ast.Stmt{}
 		if s.Key != nil {
 			prepBody = append(prepBody, assignStmt([]ast.Expr{goIdent(b.l.emitName(s.Key))}, []ast.Expr{itemExpr}))
@@ -577,7 +577,7 @@ func (b *asyncFuncBuilder) compileStmt(stmt hir.Stmt, next int, loop asyncLoopLa
 		})
 		initLabel := b.newLabel()
 		b.l.jsvalueImport()
-		b.l.addImport("fmt")
+		b.l.addAliasedImport("fmt", "_gunFmt")
 		b.addCase(initLabel, []ast.Stmt{
 			assignStmt([]ast.Expr{goIdent(itemsName)}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "Keys"), b.l.wrapAsJSValue(b.l.lowerExpr(s.Value)))}),
 			assignStmt([]ast.Expr{goIdent(indexName)}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), intLit("0"))}),
@@ -596,7 +596,7 @@ func (b *asyncFuncBuilder) compileStmt(stmt hir.Stmt, next int, loop asyncLoopLa
 		postLabel := b.newLabel()
 		prepLabel := b.newLabel()
 		bodyEntry := b.compileSeq(s.Body.Stmts, postLabel, asyncLoopLabels{breakLabel: next, continueLabel: postLabel, valid: true}, protected, finalizer)
-		itemExpr := callExpr(selectorExpr(goIdent(itemsName), "Get"), callExpr(selectorExpr(goIdent("fmt"), "Sprint"), goIdent(indexName)))
+		itemExpr := callExpr(selectorExpr(goIdent(itemsName), "Get"), callExpr(selectorExpr(goIdent("_gunFmt"), "Sprint"), goIdent(indexName)))
 		prepBody := []ast.Stmt{}
 		if s.Pattern != nil {
 			prepBody = append(prepBody, b.l.lowerDestructuring(s.Pattern, itemExpr, false)...)
@@ -621,7 +621,7 @@ func (b *asyncFuncBuilder) compileStmt(stmt hir.Stmt, next int, loop asyncLoopLa
 		})
 		initLabel := b.newLabel()
 		b.l.jsvalueImport()
-		b.l.addImport("fmt")
+		b.l.addAliasedImport("fmt", "_gunFmt")
 		b.addCase(initLabel, []ast.Stmt{
 			assignStmt([]ast.Expr{goIdent(itemsName)}, []ast.Expr{b.l.wrapAsJSValue(callExpr(selectorExpr(b.l.lowerExpr(s.Value), "Array")))}),
 			assignStmt([]ast.Expr{goIdent(indexName)}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), intLit("0"))}),
@@ -770,7 +770,7 @@ func (b *asyncFuncBuilder) compileStmt(stmt hir.Stmt, next int, loop asyncLoopLa
 			bodyLoop.namedBreak[s.Label] = next
 			bodyLoop.namedContinue[s.Label] = postLabel
 			bodyEntry := b.compileSeq(inner.Body.Stmts, postLabel, bodyLoop, protected, finalizer)
-			itemExpr := callExpr(selectorExpr(goIdent(itemsName), "Get"), callExpr(selectorExpr(goIdent("fmt"), "Sprint"), goIdent(indexName)))
+			itemExpr := callExpr(selectorExpr(goIdent(itemsName), "Get"), callExpr(selectorExpr(goIdent("_gunFmt"), "Sprint"), goIdent(indexName)))
 			prepBody := []ast.Stmt{}
 			if inner.Key != nil {
 				prepBody = append(prepBody, assignStmt([]ast.Expr{goIdent(b.l.emitName(inner.Key))}, []ast.Expr{itemExpr}))
@@ -789,7 +789,7 @@ func (b *asyncFuncBuilder) compileStmt(stmt hir.Stmt, next int, loop asyncLoopLa
 			})
 			initLabel := b.newLabel()
 			b.l.jsvalueImport()
-			b.l.addImport("fmt")
+			b.l.addAliasedImport("fmt", "_gunFmt")
 			b.addCase(initLabel, []ast.Stmt{
 				assignStmt([]ast.Expr{goIdent(itemsName)}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "Keys"), b.l.wrapAsJSValue(b.l.lowerExpr(inner.Value)))}),
 				assignStmt([]ast.Expr{goIdent(indexName)}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), intLit("0"))}),
@@ -823,7 +823,7 @@ func (b *asyncFuncBuilder) compileStmt(stmt hir.Stmt, next int, loop asyncLoopLa
 			bodyLoop.namedBreak[s.Label] = next
 			bodyLoop.namedContinue[s.Label] = postLabel
 			bodyEntry := b.compileSeq(inner.Body.Stmts, postLabel, bodyLoop, protected, finalizer)
-			itemExpr := callExpr(selectorExpr(goIdent(itemsName), "Get"), callExpr(selectorExpr(goIdent("fmt"), "Sprint"), goIdent(indexName)))
+			itemExpr := callExpr(selectorExpr(goIdent(itemsName), "Get"), callExpr(selectorExpr(goIdent("_gunFmt"), "Sprint"), goIdent(indexName)))
 			prepBody := []ast.Stmt{}
 			if inner.Pattern != nil {
 				prepBody = append(prepBody, b.l.lowerDestructuring(inner.Pattern, itemExpr, false)...)
@@ -844,7 +844,7 @@ func (b *asyncFuncBuilder) compileStmt(stmt hir.Stmt, next int, loop asyncLoopLa
 			})
 			initLabel := b.newLabel()
 			b.l.jsvalueImport()
-			b.l.addImport("fmt")
+			b.l.addAliasedImport("fmt", "_gunFmt")
 			b.addCase(initLabel, []ast.Stmt{
 				assignStmt([]ast.Expr{goIdent(itemsName)}, []ast.Expr{b.l.wrapAsJSValue(callExpr(selectorExpr(b.l.lowerExpr(inner.Value), "Array")))}),
 				assignStmt([]ast.Expr{goIdent(indexName)}, []ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "NewNumber"), intLit("0"))}),

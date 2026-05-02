@@ -811,7 +811,7 @@ func TestObjectLiteralComputedKey(t *testing.T) {
 		const KEY = "myKey";
 		const obj = { [KEY]: true };
 	`)
-	assertContains(t, out, "fmt.Sprint")
+	assertContains(t, out, "_gunFmt.Sprint")
 	assertContains(t, out, "NewObject")
 	assertNotContains(t, out, `"[KEY]"`)
 }
@@ -1274,11 +1274,11 @@ console.log(u.href, p.get('x'))
 		ctx.RegisterConstructor(&context.Constructor{
 			Name: name,
 			Transform: func(args []ast.Expr, imp context.Imports) ast.Expr {
-				imp.AddImport("github.com/nnstd/gun/runtime/url")
+				imp.AddAliasedImport("github.com/nnstd/gun/runtime/url", "_gunUrl")
 				for i, arg := range args {
 					args[i] = jsvalueWrapLit(arg)
 				}
-				return callExpr(selectorExpr(selectorExpr(goIdent("url"), name+"Constructor"), "Call"), args...)
+				return callExpr(selectorExpr(selectorExpr(goIdent("_gunUrl"), name+"Constructor"), "Call"), args...)
 			},
 		})
 	}
@@ -1288,9 +1288,9 @@ console.log(u.href, p.get('x'))
 		t.Fatalf("generate failed: %v", err)
 	}
 	out := string(outBytes)
-	assertContains(t, out, `"github.com/nnstd/gun/runtime/url"`)
-	assertContains(t, out, `url.URLConstructor.Call`)
-	assertContains(t, out, `url.URLSearchParamsConstructor.Call`)
+	assertContains(t, out, `_gunUrl "github.com/nnstd/gun/runtime/url"`)
+	assertContains(t, out, `_gunUrl.URLConstructor.Call`)
+	assertContains(t, out, `_gunUrl.URLSearchParamsConstructor.Call`)
 }
 
 func TestFormDataConstructorUsesWebRuntime(t *testing.T) {

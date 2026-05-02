@@ -16,22 +16,26 @@ func toAny(args []*jsvalue.JSValue) []any {
 	return out
 }
 
-func Log(args ...*jsvalue.JSValue) {
+func Log(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 	fmt.Println(prefixSpan(toAny(args))...)
+	return jsvalue.NewUndefined()
 }
 
-func Error(args ...*jsvalue.JSValue) {
+func Error(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 	fmt.Fprintln(os.Stderr, prefixSpan(toAny(args))...)
+	return jsvalue.NewUndefined()
 }
 
-func Warn(args ...*jsvalue.JSValue) {
+func Warn(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 	fmt.Fprintln(os.Stderr, prefixSpan(toAny(args))...)
+	return jsvalue.NewUndefined()
 }
 
-func Dir(args ...*jsvalue.JSValue) {
+func Dir(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 	for _, a := range args {
 		fmt.Printf("%+v\n", a)
 	}
+	return jsvalue.NewUndefined()
 }
 
 func prefixSpan(args []any) []any {
