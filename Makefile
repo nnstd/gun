@@ -2,7 +2,7 @@ BINARY  := gun
 PKG     := ./...
 GOBIN   ?= $(shell go env GOPATH)/bin
 GOCACHE ?= /tmp/gun-gocache
-LDFLAGS := -X main.gunModuleRoot=$(CURDIR)
+LDFLAGS := -X github.com/nnstd/gun/compiler/runner.GunModuleRoot=$(CURDIR)
 
 .PHONY: build install clean test test262 check
 
