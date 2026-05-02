@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"go/ast"
 	"strings"
 	"testing"
 
@@ -32,12 +33,37 @@ func compile(t *testing.T, source string, level context.OptLevel) string {
 	t.Helper()
 	tree := parseTS(t, source)
 	defer tree.Close()
-	p := New(level)
+	ctx := context.New()
+	registerPipelineTestDefaults(ctx)
+	p := NewWithContext(level, ctx)
 	out, err := p.CompileTree(tree.RootNode(), []byte(source), "main", "", false)
 	if err != nil {
 		t.Fatalf("compile failed: %v", err)
 	}
 	return string(out)
+}
+
+func registerPipelineTestDefaults(ctx *context.TranspilerContext) {
+	for _, name := range []string{"globalThis", "global"} {
+		ctx.RegisterIdentifier(&context.IdentifierMapping{
+			Name: name,
+			Transform: func(imp context.Imports) ast.Expr {
+				imp.AddAliasedImport("github.com/nnstd/gun/runtime/jscontext", "jscontext")
+				imp.SetNeedsGlobalSync()
+				return &ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X: &ast.CallExpr{
+							Fun: &ast.SelectorExpr{
+								X:   &ast.Ident{Name: "jscontext"},
+								Sel: &ast.Ident{Name: "Default"},
+							},
+						},
+						Sel: &ast.Ident{Name: "Global"},
+					},
+				}
+			},
+		})
+	}
 }
 
 func assertContains(t *testing.T, got, want string) {
@@ -304,4 +330,16 @@ func TestCompileVariousSnippets(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- JSContext pipeline tests ---
+
+func TestPipelineGlobalThisAndGlobalSameObject(t *testing.T) {
+	out := compile(t, "var x = globalThis === global;", context.O0)
+	assertContains(t, out, "jscontext")
+}
+
+func TestPipelineVarOnGlobalThis(t *testing.T) {
+	out := compile(t, "var x = 1; var g = globalThis.x;", context.O0)
+	assertContains(t, out, `.Set("x",`)
 }

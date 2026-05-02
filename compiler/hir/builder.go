@@ -297,9 +297,7 @@ func (b *Builder) buildDeclarator(node *sitter.Node, exported bool, kind VarKind
 		name := b.nodeText(nameNode)
 		var sym *symbol.Symbol
 		hoisted := false
-		if b.symtab.IsGlobalScope() {
 			sym = b.symtab.LookupLocal(name)
-		}
 		if sym == nil {
 			if kind == VarVar {
 				sym = b.symtab.DefineVar(name, symbol.KindVariable)

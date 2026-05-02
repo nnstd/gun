@@ -429,5 +429,4 @@ func init() {
 	RegisterGlobal("undefined", NewUndefined())
 	RegisterGlobal("NaN", NewNumber(gomath.NaN()))
 	RegisterGlobal("Infinity", NewNumber(gomath.Inf(1)))
-	RegisterGlobal("globalThis", NewObject())
 }

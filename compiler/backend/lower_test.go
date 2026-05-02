@@ -39,6 +39,7 @@ func lowerTSOpt(t *testing.T, source string, opt context.OptLevel) string {
 
 	mod := hir.BuildModule(tree.RootNode(), []byte(source), "main")
 	ctx := context.New()
+	registerTestDefaults(ctx)
 	file := Lower(mod, ctx, "", false, opt)
 	out, err := Generate(file)
 	if err != nil {
@@ -60,6 +61,31 @@ func lowerTSWithPath(t *testing.T, source, sourcePath string) string {
 		t.Fatalf("generate failed: %v", err)
 	}
 	return string(out)
+}
+
+func registerTestDefaults(ctx *context.TranspilerContext) {
+	for _, name := range []string{"globalThis", "global"} {
+		ctx.RegisterIdentifier(&context.IdentifierMapping{
+			Name: name,
+			Transform: func(imp context.Imports) ast.Expr {
+				imp.AddAliasedImport("github.com/nnstd/gun/runtime/jscontext", "jscontext")
+				imp.SetNeedsGlobalSync()
+				return callExpr(selectorExpr(
+					callExpr(selectorExpr(goIdent("jscontext"), "Default")),
+					"Global",
+				))
+			},
+		})
+	}
+	for _, name := range []string{"window", "self"} {
+		ctx.RegisterIdentifier(&context.IdentifierMapping{
+			Name: name,
+			Transform: func(imp context.Imports) ast.Expr {
+				imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+				return callExpr(selectorExpr(goIdent("jsvalue"), "NewUndefined"))
+			},
+		})
+	}
 }
 
 func assertContains(t *testing.T, got, want string) {
@@ -1685,4 +1711,63 @@ func TestNamedFuncExprArrowNotAffected(t *testing.T) {
 	`)
 	assertContains(t, out, "jsvalue.NewFunction")
 	assertNotContains(t, out, "var f *jsvalue.JSValue\n")
+}
+
+// --- JSContext tests ---
+
+func TestGlobalThisUsesJSContext(t *testing.T) {
+	out := lowerTS(t, "var x = globalThis;")
+	assertContains(t, out, "jscontext")
+	assertContains(t, out, "jscontext.Default().Global()")
+}
+
+func TestGlobalUsesJSContext(t *testing.T) {
+	out := lowerTS(t, "var x = global;")
+	assertContains(t, out, "jscontext")
+	assertContains(t, out, "jscontext.Default().Global()")
+}
+
+func TestWindowUndefined(t *testing.T) {
+	out := lowerTS(t, "var x = typeof window;")
+	assertContains(t, out, "jsvalue.NewUndefined()")
+}
+
+func TestSelfUndefined(t *testing.T) {
+	out := lowerTS(t, "var x = typeof self;")
+	assertContains(t, out, "jsvalue.NewUndefined()")
+}
+
+func TestConditionalImportNoJSContext(t *testing.T) {
+	out := lowerTS(t, "var x = 42;")
+	assertNotContains(t, out, "jscontext")
+}
+
+func TestVarOnGlobalObject(t *testing.T) {
+	out := lowerTS(t, "var x = 1; var g = globalThis;")
+	assertContains(t, out, `.Set("x",`)
+}
+
+func TestLetNotOnGlobalObject(t *testing.T) {
+	out := lowerTS(t, "let x = 1; var g = globalThis;")
+	assertNotContains(t, out, `.Set("x"`)
+	assertContains(t, out, "jscontext")
+}
+
+func TestConstNotOnGlobalObject(t *testing.T) {
+	out := lowerTS(t, "const x = 1; var g = globalThis;")
+	assertNotContains(t, out, `.Set("x"`)
+}
+
+func TestClassInsideFunctionOutput(t *testing.T) {
+	out := lowerTS(t, `
+		function loader() {
+			class Msg {
+				bark() { return "woof"; }
+			}
+			return Msg;
+		}
+	`)
+	assertContains(t, out, "var _class *jsvalue.JSValue")
+	assertContains(t, out, "_class = jsvalue.NewClass(")
+	assertContains(t, out, "Msg = _class")
 }

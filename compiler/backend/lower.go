@@ -66,6 +66,8 @@ type Lowerer struct {
 	currentClassBrand   string
 	syntheticCounter    int
 	needsBunWait        bool
+	needsGlobalSync     bool
+	globalVarNames      []string // top-level var names for jscontext .Set() emission
 	sourcePath          string
 	asyncTempSymbols    []*symbol.Symbol
 	hasTopLevelAwait    bool
@@ -263,6 +265,34 @@ func LowerWithConfig(mod *hir.Module, ctx *context.TranspilerContext, moduleName
 	}
 	l.injectCPUProfileMain()
 	l.injectOtelMain()
+	// Emit deferred jscontext .Set() for top-level var declarations
+	if l.needsGlobalSync && len(l.globalVarNames) > 0 {
+		l.addAliasedImport("github.com/nnstd/gun/runtime/jscontext", "jscontext")
+		for _, name := range l.globalVarNames {
+			l.initStmts = append(l.initStmts, &ast.ExprStmt{
+				X: &ast.CallExpr{
+					Fun: &ast.SelectorExpr{
+						X: &ast.CallExpr{
+							Fun: &ast.SelectorExpr{
+								X: &ast.CallExpr{
+									Fun: &ast.SelectorExpr{
+										X:   ast.NewIdent("jscontext"),
+										Sel: ast.NewIdent("Default"),
+									},
+								},
+								Sel: ast.NewIdent("Global"),
+							},
+						},
+						Sel: ast.NewIdent("Set"),
+					},
+					Args: []ast.Expr{
+						&ast.BasicLit{Kind: token.STRING, Value: `"` + name + `"`},
+						ast.NewIdent(symbol.Sanitize(name)),
+					},
+				},
+			})
+		}
+	}
 	if len(l.initStmts) > 0 {
 		l.decls = append(l.decls, funcDecl("init", fieldList(), nil, &ast.BlockStmt{List: l.initStmts}))
 	}
@@ -299,8 +329,10 @@ func LowerWithConfig(mod *hir.Module, ctx *context.TranspilerContext, moduleName
 		}
 	}
 
+
 	return file
 }
+
 func (l *Lowerer) findMainFunc() *ast.FuncDecl {
 	for _, d := range l.decls {
 		if fd, ok := d.(*ast.FuncDecl); ok && fd.Name != nil && fd.Name.Name == "main" {
@@ -487,8 +519,12 @@ func (l *Lowerer) lowerVarDecl(d *hir.VarDecl) {
 		} else {
 			l.decls = append(l.decls, varDecl(name, nil, value))
 		}
+			// Collect top-level var names for deferred jscontext .Set() emission
+			if d.Kind == hir.VarVar && decl.Symbol != nil && decl.Pattern == nil && l.insideFunc == 0 {
+			l.globalVarNames = append(l.globalVarNames, decl.Symbol.OriginalName)
+			}
+		}
 	}
-}
 
 func collectPatternSymbols(pat hir.Pattern) []*symbol.Symbol {
 	var out []*symbol.Symbol

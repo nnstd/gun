@@ -723,8 +723,12 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "globalThis",
 		Transform: func(imp tcontext.Imports) ast.Expr {
-			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			return callExpr(selectorExpr(ident("jsvalue"), "NewObject"))
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/jscontext", "jscontext")
+			imp.SetNeedsGlobalSync()
+			return callExpr(selectorExpr(
+				callExpr(selectorExpr(ident("jscontext"), "Default")),
+				"Global",
+			))
 		},
 	})
 
@@ -1264,7 +1268,34 @@ func registerKnownGlobals(ctx *tcontext.TranspilerContext) {
 	ctx.MarkKnownGlobal("encodeURIComponent")
 
 	// Browser/Node environment globals
-	for _, name := range []string{"global", "self", "window", "exports", "define"} {
+	// global → same as globalThis (jscontext.Default().Global())
+	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+		Name: "global",
+		Transform: func(imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/jscontext", "jscontext")
+			imp.SetNeedsGlobalSync()
+			return callExpr(selectorExpr(
+				callExpr(selectorExpr(ident("jscontext"), "Default")),
+				"Global",
+			))
+		},
+	})
+	ctx.MarkKnownGlobal("global")
+
+	// window, self → undefined (Node.js behavior)
+	for _, name := range []string{"window", "self"} {
+		ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
+			Name: name,
+			Transform: func(imp tcontext.Imports) ast.Expr {
+				imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+				return callExpr(selectorExpr(ident("jsvalue"), "NewUndefined"))
+			},
+		})
+		ctx.MarkKnownGlobal(name)
+	}
+
+	// exports, define → NewObject (module system identifiers)
+	for _, name := range []string{"exports", "define"} {
 		ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 			Name: name,
 			Transform: func(imp tcontext.Imports) ast.Expr {

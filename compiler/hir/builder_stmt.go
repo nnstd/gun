@@ -17,6 +17,8 @@ func (b *Builder) buildBlock(node *sitter.Node) *BlockStmt {
 	b.symtab.PushScope()
 	defer b.symtab.PopScope()
 
+	b.preScanBlockDeclarations(node)
+
 	for i := uint(0); i < node.NamedChildCount(); i++ {
 		child := node.NamedChild(i)
 		if s := b.buildStmt(child); s != nil {
@@ -541,4 +543,58 @@ func (b *Builder) extractVarName(node *sitter.Node) string {
 		}
 	}
 	return ""
+}
+
+// preScanBlockDeclarations scans a block's children for variable/function/class
+// declarations and registers them in the current scope before any statements
+// are processed. This ensures forward references resolve to local bindings,
+// not globals.
+func (b *Builder) preScanBlockDeclarations(node *sitter.Node) {
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		switch child.Kind() {
+		case "lexical_declaration":
+			b.preScanVarNames(child, false)
+		case "variable_declaration":
+			b.preScanVarNames(child, true)
+		case "function_declaration":
+			nameNode := child.ChildByFieldName("name")
+			if nameNode != nil {
+				name := b.nodeText(nameNode)
+				if b.symtab.LookupLocal(name) == nil {
+					b.symtab.Define(name, symbol.KindFunction)
+				}
+			}
+		case "class_declaration", "abstract_class_declaration":
+			nameNode := child.ChildByFieldName("name")
+			if nameNode != nil {
+				name := b.nodeText(nameNode)
+				if b.symtab.LookupLocal(name) == nil {
+					b.symtab.Define(name, symbol.KindVariable)
+				}
+			}
+		}
+	}
+}
+
+func (b *Builder) preScanVarNames(node *sitter.Node, isVar bool) {
+	for i := uint(0); i < node.NamedChildCount(); i++ {
+		child := node.NamedChild(i)
+		if child.Kind() != "variable_declarator" {
+			continue
+		}
+		nameNode := child.ChildByFieldName("name")
+		if nameNode == nil || nameNode.Kind() != "identifier" {
+			continue
+		}
+		name := b.nodeText(nameNode)
+		if b.symtab.LookupLocal(name) != nil {
+			continue
+		}
+		if isVar {
+			b.symtab.DefineVar(name, symbol.KindVariable)
+		} else {
+			b.symtab.Define(name, symbol.KindVariable)
+		}
+	}
 }

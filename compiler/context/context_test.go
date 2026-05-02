@@ -156,6 +156,8 @@ func (m *mockImports) AddAliasedImport(path, alias string) {
 	m.aliasImports = append(m.aliasImports, path+"="+alias)
 }
 
+func (m *mockImports) SetNeedsGlobalSync() {}
+
 func TestTransformBuiltinCall(t *testing.T) {
 	ctx := New()
 	called := false

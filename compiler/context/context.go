@@ -22,6 +22,7 @@ const (
 type Imports interface {
 	AddImport(path string)
 	AddAliasedImport(path, alias string)
+	SetNeedsGlobalSync()
 }
 
 // GlobalObjectTransform transforms a method call on a global object.

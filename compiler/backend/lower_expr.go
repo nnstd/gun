@@ -1276,26 +1276,26 @@ func (l *Lowerer) lowerClassExpr(e *hir.ClassExpr) ast.Expr {
 		stmts = append(stmts, assignDefine([]ast.Expr{goIdent(goName)}, []ast.Expr{value}))
 	}
 
-	classVar := goIdent("_class")
-	stmts = append(stmts, &ast.DeclStmt{Decl: varDecl(classVar.Name, jsValuePtrType(), nil)})
+	classVarName := "_class"
+	stmts = append(stmts, &ast.DeclStmt{Decl: varDecl(classVarName, jsValuePtrType(), nil)})
 	if e.Name != "" {
 		stmts = append(stmts, &ast.DeclStmt{Decl: varDecl(symbol.Sanitize(e.Name), jsValuePtrType(), nil)})
 	}
-	l.currentClassName = classVar.Name
+	l.currentClassName = classVarName
 	l.currentClassBrand = brandKey
-	ctorLit := l.lowerClassConstructor(classVar.Name, e.Parent != nil, e.Constructor, e.Properties, e.Methods)
+	ctorLit := l.lowerClassConstructor(classVarName, e.Parent != nil, e.Constructor, e.Properties, e.Methods)
 	stmts = append(stmts,
-		assignStmt([]ast.Expr{classVar}, []ast.Expr{
+		assignStmt([]ast.Expr{goIdent(classVarName)}, []ast.Expr{
 			callExpr(selectorExpr(goIdent("jsvalue"), "NewClass"), ctorLit, parentExpr),
 		}),
 	)
-	returnVar := classVar
+	returnVar := goIdent(classVarName)
 	if e.Name != "" {
 		namedVar := goIdent(symbol.Sanitize(e.Name))
-		stmts = append(stmts, assignStmt([]ast.Expr{namedVar}, []ast.Expr{classVar}))
+		stmts = append(stmts, assignStmt([]ast.Expr{namedVar}, []ast.Expr{goIdent(classVarName)}))
 		returnVar = namedVar
 	}
-	stmts = append(stmts, l.lowerClassSetups(classVar, goIdent(brandKey), e.Properties, e.Methods, e.StaticInits)...)
+	stmts = append(stmts, l.lowerClassSetups(goIdent(classVarName), goIdent(brandKey), e.Properties, e.Methods, e.StaticInits)...)
 	stmts = append(stmts, returnStmt(returnVar))
 
 	return &ast.CallExpr{
@@ -1843,6 +1843,9 @@ func (l *Lowerer) AddImport(pkg string) {
 }
 func (l *Lowerer) AddAliasedImport(pkg, alias string) {
 	l.addAliasedImport(pkg, alias)
+}
+func (l *Lowerer) SetNeedsGlobalSync() {
+	l.needsGlobalSync = true
 }
 
 // isValidGoIdent checks if a string is a valid Go identifier.
