@@ -264,10 +264,11 @@ func (l *Lowerer) lowerLiteral(e *hir.Literal) ast.Expr {
 	case hir.LitString:
 		return callExpr(selectorExpr(goIdent("jsvalue"), "NewString"), stringLit(e.Value))
 	case hir.LitNumber:
-		if strings.Contains(e.Value, ".") {
-			return l.arenaWrapNumber(floatLit(e.Value))
+		v, _ := strings.CutSuffix(e.Value, "n")
+		if strings.Contains(v, ".") {
+			return l.arenaWrapNumber(floatLit(v))
 		}
-		return l.arenaWrapNumber(callExpr(goIdent("float64"), intLit(e.Value)))
+		return l.arenaWrapNumber(callExpr(goIdent("float64"), intLit(v)))
 	case hir.LitBool:
 		return callExpr(selectorExpr(goIdent("jsvalue"), "NewBool"), goIdent(e.Value))
 	case hir.LitNull:

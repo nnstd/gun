@@ -42,7 +42,7 @@ func registerGlobalObjects(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterGlobal(&tcontext.GlobalObject{
 		Name: "JSON",
 		TransformCall: func(method string, args []ast.Expr, _ bool, imp tcontext.Imports) ast.Expr {
-			return transformJSONCall(method, args, imp.AddImport)
+			return transformJSONCall(method, args, imp)
 		},
 	})
 
@@ -305,6 +305,17 @@ func registerGlobalFunctions(ctx *tcontext.TranspilerContext) {
 	}
 
 	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
+		Name: "eval",
+		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/dynfunc", "_gunDyn")
+			if len(args) > 0 {
+				return callExpr(selectorExpr(ident("_gunDyn"), "EvalHIR"), args[0])
+			}
+			return callExpr(selectorExpr(ident("jsvalue"), "NewUndefined"))
+		},
+	})
+
+	ctx.RegisterGlobalFunc(&tcontext.GlobalFunction{
 		Name: "unescape",
 		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
 			imp.AddImport("github.com/nnstd/gun/runtime/web")
@@ -531,8 +542,8 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "JSON",
 		Transform: func(imp tcontext.Imports) ast.Expr {
-			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin/json", "json")
-			return selectorExpr(ident("json"), "AsJSValue")
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin/json", "_gunJSON")
+			return selectorExpr(ident("_gunJSON"), "AsJSValue")
 		},
 	})
 

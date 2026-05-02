@@ -178,8 +178,10 @@ func isAlreadyJSValue(expr ast.Expr) bool {
 			return true
 		}
 		if sel, ok := e.Fun.(*ast.SelectorExpr); ok {
-			if id, ok := sel.X.(*ast.Ident); ok && id.Name == "jsvalue" {
-				return true
+			if id, ok := sel.X.(*ast.Ident); ok {
+				if id.Name == "jsvalue" || strings.HasPrefix(id.Name, "_gun") {
+					return true
+				}
 			}
 			switch sel.Sel.Name {
 			case "Get", "Index", "Call", "MethodCall", "MarkAsAsync", "MarkAsMethod", "New":
