@@ -14,6 +14,13 @@ func goIdent(name string) *ast.Ident {
 	return &ast.Ident{Name: name}
 }
 
+func cloneIdent(expr ast.Expr) ast.Expr {
+	if id, ok := expr.(*ast.Ident); ok {
+		return &ast.Ident{Name: id.Name}
+	}
+	return expr
+}
+
 func basicLit(kind token.Token, value string) *ast.BasicLit {
 	return &ast.BasicLit{Kind: kind, Value: value}
 }

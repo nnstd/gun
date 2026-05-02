@@ -988,10 +988,12 @@ func (l *Lowerer) lowerAssignStmt(assign *hir.AssignExpr) ast.Stmt {
 		return assignStmt([]ast.Expr{left}, []ast.Expr{jsvalueWrapLit(right)})
 	}
 	// Augmented assignment: x += val → x = jsvalue.Add(x, val)
+	// Clone left for the RHS so the write/read analysis sees distinct pointers.
+	leftForRead := cloneIdent(left)
 	l.jsvalueImport()
 	helperName := mapAssignOpToJSValue(assign.Op)
 	computed := callExpr(selectorExpr(goIdent("jsvalue"), helperName),
-		jsvalueWrapLit(left), jsvalueWrapLit(right))
+		jsvalueWrapLit(leftForRead), jsvalueWrapLit(right))
 	return assignStmt([]ast.Expr{left}, []ast.Expr{computed})
 }
 
