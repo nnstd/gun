@@ -59,7 +59,7 @@ type Lowerer struct {
 	initStmts           []ast.Stmt      // statements for init() function
 	pkgName             string          // Go package name
 	currentClassName    string          // set during class constructor/method lowering
-	currentParentClass  string          // parent class name for super.method() calls
+	currentParentClass  ast.Expr        // lowered parent class expr for super.method() calls
 	insideFunc          int             // >0 when inside a function body
 	insideMethod        int             // >0 when inside a method body (_args[0] is this)
 	privateKeys         map[string]string
@@ -68,6 +68,7 @@ type Lowerer struct {
 	needsBunWait        bool
 	needsGlobalSync     bool
 	globalVarNames      []string // top-level var names for jscontext .Set() emission
+	preDeclaredVars     map[string]bool // variables pre-declared at block start for closure access
 	sourcePath          string
 	asyncTempSymbols    []*symbol.Symbol
 	hasTopLevelAwait    bool
@@ -579,11 +580,9 @@ func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 	prevClassBrand := l.currentClassBrand
 	prevPrivateKeys := l.privateKeys
 	l.currentClassName = name
-	l.currentParentClass = ""
+	l.currentParentClass = nil
 	if d.Parent != nil {
-		if id, ok := d.Parent.(*hir.Identifier); ok {
-			l.currentParentClass = id.Name
-		}
+		l.currentParentClass = l.lowerExpr(d.Parent)
 	}
 	l.currentClassBrand = brandKey
 	l.privateKeys = privateKeys
@@ -1342,6 +1341,21 @@ func (l *Lowerer) lowerImportDecl(d *hir.ImportDecl) {
 			if ov, ok := overrides[n.OriginalName]; ok {
 				goSym = ov.GoSymbol
 			}
+		}
+		// Cross-package transpiled import: resolve through Default namespace
+		if !isKnown && goImportPath != "" && l.moduleName != "" {
+			res := importResolution{
+				goImportPath: goImportPath,
+				goPkgName:    goPkgName,
+				isTranspiled: true,
+				useAsJSValue: true,
+				moduleValue:  "Default",
+				jsExportName: n.OriginalName,
+				modulePath:   d.ModulePath,
+			}
+			l.importedSyms[n.Symbol] = res
+			l.importedNames[n.LocalName] = res
+			continue
 		}
 		res := importResolution{
 			goImportPath: goImportPath,

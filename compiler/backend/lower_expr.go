@@ -107,8 +107,8 @@ func (l *Lowerer) lowerExpr(e hir.Expr) ast.Expr {
 		out = goIdent("this")
 
 	case *hir.SuperExpr:
-		if l.currentParentClass != "" {
-			out = goIdent(l.currentParentClass)
+		if l.currentParentClass != nil {
+			out = l.currentParentClass
 		} else {
 			out = goIdent("super")
 		}
@@ -1266,11 +1266,13 @@ func (l *Lowerer) lowerClassExpr(e *hir.ClassExpr) ast.Expr {
 	privateKeys := l.collectPrivateKeys(symbolicName, e.Properties, e.Methods)
 
 	prevClassName := l.currentClassName
+	prevParentClass := l.currentParentClass
 	prevClassBrand := l.currentClassBrand
 	prevPrivateKeys := l.privateKeys
 	l.privateKeys = privateKeys
 	defer func() {
 		l.currentClassName = prevClassName
+		l.currentParentClass = prevParentClass
 		l.currentClassBrand = prevClassBrand
 		l.privateKeys = prevPrivateKeys
 	}()
@@ -1297,6 +1299,10 @@ func (l *Lowerer) lowerClassExpr(e *hir.ClassExpr) ast.Expr {
 		stmts = append(stmts, &ast.DeclStmt{Decl: varDecl(symbol.Sanitize(e.Name), jsValuePtrType(), nil)})
 	}
 	l.currentClassName = classVarName
+	l.currentParentClass = nil
+	if e.Parent != nil {
+		l.currentParentClass = l.lowerExpr(e.Parent)
+	}
 	l.currentClassBrand = brandKey
 	ctorLit := l.lowerClassConstructor(classVarName, e.Parent != nil, e.Constructor, e.Properties, e.Methods)
 	stmts = append(stmts,

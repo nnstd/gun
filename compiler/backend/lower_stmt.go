@@ -21,7 +21,36 @@ func (l *Lowerer) lowerBlock(b *hir.BlockStmt) *ast.BlockStmt {
 	// their scope regardless of where they appear in the source.
 	hoisted := hoistFunctions(b.Stmts)
 
+	// Pre-declare all block-scoped variables (let/const) at the top of the block.
+	// Go requires declarations before use in closures, but JS closures can
+	// reference variables declared later in the block (as long as they're
+	// initialized before the closure is called).
+	var preDecls []ast.Stmt
+	for _, s := range hoisted {
+		vd, ok := s.(*hir.VarDecl)
+		if !ok || vd.Kind == hir.VarVar {
+			continue
+		}
+		for _, decl := range vd.Declarators {
+			if decl.Symbol == nil {
+				continue
+			}
+			name := l.emitName(decl.Symbol)
+			if l.preDeclaredVars == nil {
+				l.preDeclaredVars = make(map[string]bool)
+			}
+			l.preDeclaredVars[name] = true
+			l.jsvalueImport()
+			preDecls = append(preDecls, &ast.DeclStmt{
+				Decl: varDecl(name, jsValuePtrType(), nil),
+			})
+		}
+	}
+
 	var stmts []ast.Stmt
+	for _, pd := range preDecls {
+		stmts = append(stmts, pd)
+	}
 	for _, s := range hoisted {
 		gs := l.lowerStmt(s)
 		if gs == nil {
@@ -196,7 +225,8 @@ func (l *Lowerer) lowerLocalVarStmts(d *hir.VarDecl) []ast.Stmt {
 	for _, decl := range d.Declarators {
 		// Destructuring pattern
 		if decl.Pattern != nil && decl.Init != nil {
-			stmts = append(stmts, l.lowerDestructuring(decl.Pattern, l.lowerExpr(decl.Init), true)...)
+			define := !l.preDeclaredVars[l.emitName(decl.Symbol)]
+			stmts = append(stmts, l.lowerDestructuring(decl.Pattern, l.lowerExpr(decl.Init), define)...)
 			continue
 		}
 		if decl.Symbol == nil {
@@ -217,6 +247,12 @@ func (l *Lowerer) lowerLocalVarStmts(d *hir.VarDecl) []ast.Stmt {
 					[]ast.Expr{goIdent(name)},
 					[]ast.Expr{value},
 				))
+			} else if l.preDeclaredVars[name] {
+				// Pre-declared at block start for closure access.
+				stmts = append(stmts, assignStmt(
+					[]ast.Expr{goIdent(name)},
+					[]ast.Expr{value},
+				))
 			} else if hirExprReferencesName(decl.Init, decl.Symbol.OriginalName) {
 				l.jsvalueImport()
 				stmts = append(stmts, &ast.DeclStmt{
@@ -232,7 +268,7 @@ func (l *Lowerer) lowerLocalVarStmts(d *hir.VarDecl) []ast.Stmt {
 					[]ast.Expr{value},
 				))
 			}
-		} else {
+		} else if !l.preDeclaredVars[name] {
 			// Uninitialized local: var name *jsvalue.JSValue
 			l.jsvalueImport()
 			stmts = append(stmts, &ast.DeclStmt{
