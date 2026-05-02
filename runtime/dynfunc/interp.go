@@ -31,6 +31,7 @@ import (
 	"github.com/nnstd/gun/compiler/hir"
 	"github.com/nnstd/gun/compiler/symbol"
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
+	"github.com/nnstd/gun/runtime/jscontext"
 	_ "github.com/nnstd/gun/runtime/builtin/console"
 	_ "github.com/nnstd/gun/runtime/builtin/error"
 	_ "github.com/nnstd/gun/runtime/builtin/json"
@@ -55,13 +56,18 @@ type signalContinue struct{}
 type Interpreter struct {
 	scopes   []map[symbol.ID]*jsvalue.JSValue
 	globals  map[string]*jsvalue.JSValue
+	ctx      *jscontext.Context
 	thisVal  *jsvalue.JSValue
 	superVal *jsvalue.JSValue // parent class for super calls
 }
 
-func newInterpreter() *Interpreter {
+func newInterpreter(ctx *jscontext.Context) *Interpreter {
+	if ctx == nil {
+		ctx = jscontext.Default()
+	}
 	interp := &Interpreter{
 		globals: make(map[string]*jsvalue.JSValue),
+		ctx:     ctx,
 	}
 	interp.populateGlobals()
 	return interp
@@ -101,6 +107,7 @@ func (interp *Interpreter) set(sym *symbol.Symbol, val *jsvalue.JSValue) {
 		interp.scopes[len(interp.scopes)-1][sym.ID] = val
 	} else {
 		interp.globals[sym.OriginalName] = val
+		interp.ctx.Global().Set(sym.OriginalName, val)
 	}
 }
 
@@ -116,11 +123,17 @@ func (interp *Interpreter) lookup(sym *symbol.Symbol) *jsvalue.JSValue {
 	if v, ok := interp.globals[sym.OriginalName]; ok {
 		return v
 	}
+	if v := interp.ctx.Global().Get(sym.OriginalName); v.TypeString() != "undefined" {
+		return v
+	}
 	return jsvalue.NewUndefined()
 }
 
 func (interp *Interpreter) lookupName(name string) *jsvalue.JSValue {
 	if v, ok := interp.globals[name]; ok {
+		return v
+	}
+	if v := interp.ctx.Global().Get(name); v.TypeString() != "undefined" {
 		return v
 	}
 	return jsvalue.NewUndefined()
@@ -737,8 +750,9 @@ func (interp *Interpreter) evalFuncDecl(params []*hir.Param, body *hir.BlockStmt
 		// Safe for concurrent calls (no mutex) and nested calls (no deadlock).
 		child := &Interpreter{
 			globals:  capturedGlobals,
-			thisVal:  thisVal,
-			superVal: superVal,
+				ctx:      interp.ctx,
+				thisVal:  thisVal,
+				superVal: superVal,
 		}
 		child.scopes = make([]map[symbol.ID]*jsvalue.JSValue, len(capturedScopes))
 		for i, s := range capturedScopes {
@@ -1163,7 +1177,7 @@ func CompileFunctionHIR(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 	// Parse JS → HIR
 	params := strings.Join(paramNames, ", ")
 	jsSource := fmt.Sprintf("function DynFunc(%s) { %s }", params, body)
-	hirFn, err := parseToHIR(jsSource)
+	hirFn, err := parseToHIR(jsSource, nil)
 	if err != nil {
 		return jsvalue.NewFunction(func(_args ...*jsvalue.JSValue) *jsvalue.JSValue {
 			panic(jsvalue.NewString(fmt.Sprintf("CompileFunctionHIR error: %v", err)))
@@ -1180,10 +1194,10 @@ func CompileFunctionHIR(args ...*jsvalue.JSValue) *jsvalue.JSValue {
 // Context isolation: evaluates in global scope only (equivalent to indirect eval).
 // Direct eval (which sees caller's local scope) is not supported — the HIR
 // interpreter does not have access to the transpiled program's local variables.
-func EvalHIR(code *jsvalue.JSValue) *jsvalue.JSValue {
+func EvalHIR(ctx *jscontext.Context, code *jsvalue.JSValue) *jsvalue.JSValue {
 	jsSource := fmt.Sprintf("function DynEval() { return (%s) }", code.String())
 
-	fn, err := parseToHIR(jsSource)
+	fn, err := parseToHIR(jsSource, ctx)
 	if err != nil {
 		return jsvalue.NewString(fmt.Sprintf("EvalHIR error: %v", err))
 	}
@@ -1191,7 +1205,7 @@ func EvalHIR(code *jsvalue.JSValue) *jsvalue.JSValue {
 }
 
 // parseToHIR parses a JS function declaration and returns the function as a JSValue.
-func parseToHIR(jsSource string) (*jsvalue.JSValue, error) {
+func parseToHIR(jsSource string, ctx *jscontext.Context) (*jsvalue.JSValue, error) {
 	parser := sitter.NewParser()
 	defer parser.Close()
 	lang := sitter.NewLanguage(typescript.LanguageTypescript())
@@ -1211,12 +1225,12 @@ func parseToHIR(jsSource string) (*jsvalue.JSValue, error) {
 	// Find the function declaration
 	for _, d := range hirMod.Declarations {
 		if fd, ok := d.(*hir.FuncDecl); ok {
-			interp := newInterpreter()
+			interp := newInterpreter(ctx)
 			return interp.evalFuncDecl(fd.Params, fd.Body, nil), nil
 		}
 		if ed, ok := d.(*hir.ExportDecl); ok {
 			if fd, ok := ed.Decl.(*hir.FuncDecl); ok {
-				interp := newInterpreter()
+				interp := newInterpreter(ctx)
 				return interp.evalFuncDecl(fd.Params, fd.Body, nil), nil
 			}
 		}

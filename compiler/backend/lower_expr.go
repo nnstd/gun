@@ -256,7 +256,21 @@ func (l *Lowerer) lowerIdentifier(e *hir.Identifier) ast.Expr {
 			return expr
 		}
 	}
-	return goIdent(symbol.Sanitize(e.Name))
+	// Unresolved identifier — resolve from global object (sloppy-mode JS behavior)
+	l.jsvalueImport()
+	l.addAliasedImport("github.com/nnstd/gun/runtime/jscontext", "jscontext")
+	return callExpr(
+		selectorExpr(
+			callExpr(
+				selectorExpr(
+					callExpr(selectorExpr(goIdent("jscontext"), "Default")),
+					"Global",
+				),
+			),
+			"Get",
+		),
+		stringLit(e.Name),
+	)
 }
 func (l *Lowerer) lowerLiteral(e *hir.Literal) ast.Expr {
 	l.jsvalueImport()

@@ -308,8 +308,9 @@ func registerGlobalFunctions(ctx *tcontext.TranspilerContext) {
 		Name: "eval",
 		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/dynfunc", "_gunDyn")
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/jscontext", "_gunCtx")
 			if len(args) > 0 {
-				return callExpr(selectorExpr(ident("_gunDyn"), "EvalHIR"), args[0])
+				return callExpr(selectorExpr(ident("_gunDyn"), "EvalHIR"), callExpr(selectorExpr(ident("_gunCtx"), "Default")), args[0])
 			}
 			return callExpr(selectorExpr(ident("jsvalue"), "NewUndefined"))
 		},

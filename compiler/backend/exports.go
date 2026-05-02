@@ -228,6 +228,31 @@ func ScanHIRTopLevelNames(mod *hir.Module) []string {
 		names = append(names, name)
 	}
 
+	var scanPattern func(hir.Pattern, bool)
+	scanPattern = func(p hir.Pattern, exported bool) {
+		switch p := p.(type) {
+		case *hir.ArrayPattern:
+			for _, elem := range p.Elements {
+				if elem == nil {
+					continue
+				}
+				add(elem.Symbol, exported)
+				if elem.Pattern != nil {
+					scanPattern(elem.Pattern, exported)
+				}
+			}
+			add(p.Rest, exported)
+		case *hir.ObjectPattern:
+			for _, prop := range p.Properties {
+				add(prop.Value, exported)
+				if prop.Pattern != nil {
+					scanPattern(prop.Pattern, exported)
+				}
+			}
+			add(p.Rest, exported)
+		}
+	}
+
 	var scanDecl func(hir.Decl, bool)
 	scanDecl = func(d hir.Decl, forceExported bool) {
 		switch d := d.(type) {
@@ -237,6 +262,9 @@ func ScanHIRTopLevelNames(mod *hir.Module) []string {
 			exported := forceExported || d.Exported
 			for _, decl := range d.Declarators {
 				add(decl.Symbol, exported)
+				if decl.Pattern != nil {
+					scanPattern(decl.Pattern, exported)
+				}
 			}
 		case *hir.ClassDecl:
 			add(d.Symbol, forceExported || d.Exported)

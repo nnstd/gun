@@ -512,7 +512,7 @@ func TestCompileFunctionHIR(t *testing.T) {
 	})
 
 	t.Run("EvalHIR", func(t *testing.T) {
-		result := dynfunc.EvalHIR(jsvalue.NewString("2 + 2 * 10"))
+		result := dynfunc.EvalHIR(nil, jsvalue.NewString("2 + 2 * 10"))
 		t.Logf("EvalHIR: %s", result.String())
 		if result.String() != "22" {
 			t.Fatalf("expected 22, got %s", result.String())

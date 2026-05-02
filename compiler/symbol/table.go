@@ -1,6 +1,13 @@
 package symbol
 
-import "fmt"
+import (
+	"fmt"
+	"sync/atomic"
+)
+
+// globalNextID ensures symbol IDs are unique across all Table instances
+// within a single process, preventing cross-file suffix collisions.
+var globalNextID atomic.Int64
 
 // Scope represents a lexical scope containing symbol definitions.
 type Scope struct {
@@ -26,8 +33,9 @@ type Table struct {
 // NewTable creates a new symbol table with a global scope.
 func NewTable() *Table {
 	global := &Scope{symbols: make(map[string]*Symbol)}
+	startID := ID(globalNextID.Add(1000)) // reserve a block of IDs
 	return &Table{
-		nextID:       1,
+		nextID:       startID,
 		scopeStack:   []*Scope{global},
 		current:      global,
 		allSymbols:   make(map[ID]*Symbol),
