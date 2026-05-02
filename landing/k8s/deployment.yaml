@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: gun-landing
-          image: ghcr.io/nnstd/gun-landing:v1.6.2
+          image: ghcr.io/nnstd/gun-landing:v1.7.0
           imagePullPolicy: Always
           ports:
             - name: http
