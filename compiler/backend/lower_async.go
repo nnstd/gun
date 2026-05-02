@@ -50,7 +50,7 @@ func (l *Lowerer) lowerAsyncFuncBody(params []*hir.Param, body *hir.BlockStmt, a
 	l.disableArenaCount++
 	defer func() { l.disableArenaCount-- }()
 	l.jsvalueImport()
-	l.addImport("github.com/nnstd/gun/runtime/promise")
+	l.addAliasedImport("github.com/nnstd/gun/runtime/promise", "_gunPromise")
 	l.insideFunc++
 	if bindThis {
 		l.insideMethod++
@@ -149,7 +149,7 @@ func (l *Lowerer) lowerAsyncFuncBody(params []*hir.Param, body *hir.BlockStmt, a
 	}
 
 	stmts = append(stmts, returnStmt(callExpr(
-		selectorExpr(selectorExpr(goIdent("promise"), "Promise"), "Call"),
+		selectorExpr(selectorExpr(goIdent("_gunPromise"), "Promise"), "Call"),
 		callExpr(selectorExpr(goIdent("jsvalue"), "NewFunction"), builder.callbackFuncLit(executorBody)),
 	)))
 
@@ -1068,7 +1068,7 @@ func (b *asyncFuncBuilder) awaitCase(value hir.Expr, next int, onFulfilled []ast
 	}, onRejected...)))
 	resolvePromise := callExpr(
 		selectorExpr(
-			callExpr(selectorExpr(selectorExpr(goIdent("promise"), "Promise"), "Get"), stringLit("resolve")),
+			callExpr(selectorExpr(selectorExpr(goIdent("_gunPromise"), "Promise"), "Get"), stringLit("resolve")),
 			"Call",
 		),
 		b.l.wrapAsJSValue(b.l.lowerExpr(value)),

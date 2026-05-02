@@ -190,7 +190,7 @@ func TestCompileTreeSupportsAsyncFunctionDeclarationPhase1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected async compile success, got %v", err)
 	}
-	assertContains(t, string(out), "promise.Promise.Call")
+	assertContains(t, string(out), "_gunPromise.Promise.Call")
 }
 
 func TestCompileHIRSupportsAsyncFunctionDeclarationPhase1(t *testing.T) {
@@ -203,7 +203,7 @@ func TestCompileHIRSupportsAsyncFunctionDeclarationPhase1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected async compile success, got %v", err)
 	}
-	assertContains(t, string(out), "promise.Promise.Call")
+	assertContains(t, string(out), "_gunPromise.Promise.Call")
 }
 
 func TestCompilePackageSupportsAsyncFunctionDeclarationPhase1(t *testing.T) {
@@ -215,7 +215,7 @@ func TestCompilePackageSupportsAsyncFunctionDeclarationPhase1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected async package compile success, got %v", err)
 	}
-	assertContains(t, string(out["util.ts"]), "promise.Promise.Call")
+	assertContains(t, string(out["util.ts"]), "_gunPromise.Promise.Call")
 }
 
 func TestCompileTreeRejectsAwaitInParameterDefaultPhase0(t *testing.T) {
@@ -239,7 +239,7 @@ func TestCompileTreeSupportsAsyncArrowPhase1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected async arrow compile success, got %v", err)
 	}
-	assertContains(t, string(out), "promise.Promise.Call")
+	assertContains(t, string(out), "_gunPromise.Promise.Call")
 }
 
 func TestCompilePackageThreadsOptLevelToJSONModule(t *testing.T) {
@@ -298,7 +298,7 @@ func TestCompileTreeSupportsAsyncFunctionExpressionPhase1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected async function expression compile success, got %v", err)
 	}
-	assertContains(t, string(out), "promise.Promise.Call")
+	assertContains(t, string(out), "_gunPromise.Promise.Call")
 }
 
 // --- Various TypeScript snippets ---

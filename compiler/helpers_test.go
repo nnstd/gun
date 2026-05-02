@@ -109,10 +109,10 @@ func TestCompileWithExportsSupportsAsyncFunctionDeclarationLikePipeline(t *testi
 		t.Fatalf("CompileWithOptLevelAndPath failed: %v", err)
 	}
 	assertContains(t, string(got), `var Load = jsvalue.NewFunction(`)
-	assertContains(t, string(got), `promise.Promise.Call`)
+	assertContains(t, string(got), `_gunPromise.Promise.Call`)
 	assertContains(t, string(got), `var Default = Load`)
 	assertContains(t, string(got), `defer error.RecoverMain()`)
-	assertContains(t, string(want), `promise.Promise.Call`)
+	assertContains(t, string(want), `_gunPromise.Promise.Call`)
 }
 
 func TestCompileMatchesPipelineO0(t *testing.T) {
@@ -294,7 +294,7 @@ func TestCompilePackageWithOptLevelSupportsAsyncFunctionDeclarationPhase1(t *tes
 	if err != nil {
 		t.Fatalf("expected async package compile success, got %v", err)
 	}
-	if got := string(out["util.ts"]); !strings.Contains(got, "promise.Promise.Call") {
+	if got := string(out["util.ts"]); !strings.Contains(got, "_gunPromise.Promise.Call") {
 		t.Fatalf("expected async package output to contain promise lowering, got:\n%s", got)
 	}
 }

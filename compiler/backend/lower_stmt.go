@@ -1193,6 +1193,10 @@ func (l *Lowerer) ensureBool(expr ast.Expr) ast.Expr {
 	if paren, ok := unwrapped.(*ast.ParenExpr); ok {
 		unwrapped = paren.X
 	}
+	// Guard against nil literal (from unresolved async conditions)
+	if id, ok := unwrapped.(*ast.Ident); ok && id.Name == "nil" {
+		return goIdent("true")
+	}
 	if call, ok := unwrapped.(*ast.CallExpr); ok {
 		if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Len" {
 			return &ast.BinaryExpr{X: expr, Op: token.GTR, Y: intLit("0")}

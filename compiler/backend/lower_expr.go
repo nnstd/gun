@@ -1294,9 +1294,13 @@ func (l *Lowerer) lowerClassExpr(e *hir.ClassExpr) ast.Expr {
 	}
 
 	classVarName := "_class"
-	stmts = append(stmts, &ast.DeclStmt{Decl: varDecl(classVarName, jsValuePtrType(), nil)})
+	namedVarName := ""
 	if e.Name != "" {
-		stmts = append(stmts, &ast.DeclStmt{Decl: varDecl(symbol.Sanitize(e.Name), jsValuePtrType(), nil)})
+		namedVarName = symbol.Sanitize(e.Name)
+	}
+	stmts = append(stmts, &ast.DeclStmt{Decl: varDecl(classVarName, jsValuePtrType(), nil)})
+	if namedVarName != "" {
+		stmts = append(stmts, &ast.DeclStmt{Decl: varDecl(namedVarName, jsValuePtrType(), nil)})
 	}
 	l.currentClassName = classVarName
 	l.currentParentClass = nil
@@ -1310,14 +1314,15 @@ func (l *Lowerer) lowerClassExpr(e *hir.ClassExpr) ast.Expr {
 			callExpr(selectorExpr(goIdent("jsvalue"), "NewClass"), ctorLit, parentExpr),
 		}),
 	)
-	returnVar := goIdent(classVarName)
-	if e.Name != "" {
-		namedVar := goIdent(symbol.Sanitize(e.Name))
-		stmts = append(stmts, assignStmt([]ast.Expr{namedVar}, []ast.Expr{goIdent(classVarName)}))
-		returnVar = namedVar
+	if namedVarName != "" {
+		stmts = append(stmts, assignStmt([]ast.Expr{goIdent(namedVarName)}, []ast.Expr{goIdent(classVarName)}))
 	}
 	stmts = append(stmts, l.lowerClassSetups(goIdent(classVarName), goIdent(brandKey), e.Properties, e.Methods, e.StaticInits)...)
-	stmts = append(stmts, returnStmt(returnVar))
+	if namedVarName != "" {
+		stmts = append(stmts, returnStmt(goIdent(namedVarName)))
+	} else {
+		stmts = append(stmts, returnStmt(goIdent(classVarName)))
+	}
 
 	return &ast.CallExpr{
 		Fun: &ast.FuncLit{

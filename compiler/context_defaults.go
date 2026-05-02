@@ -115,14 +115,14 @@ func registerGlobalObjects(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterGlobal(&tcontext.GlobalObject{
 		Name: "Promise",
 		TransformCall: func(method string, args []ast.Expr, _ bool, imp tcontext.Imports) ast.Expr {
-			imp.AddImport("github.com/nnstd/gun/runtime/promise")
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/promise", "_gunPromise")
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			for i, arg := range args {
 				args[i] = jsvalueWrapLit(arg)
 			}
 			return callExpr(
 				selectorExpr(
-					callExpr(selectorExpr(selectorExpr(ident("promise"), "Promise"), "Get"), stringLit(method)),
+					callExpr(selectorExpr(selectorExpr(ident("_gunPromise"), "Promise"), "Get"), stringLit(method)),
 					"Call",
 				),
 				args...,
@@ -449,12 +449,12 @@ func registerConstructors(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterConstructor(&tcontext.Constructor{
 		Name: "Promise",
 		Transform: func(args []ast.Expr, imp tcontext.Imports) ast.Expr {
-			imp.AddImport("github.com/nnstd/gun/runtime/promise")
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/promise", "_gunPromise")
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			for i, arg := range args {
 				args[i] = jsvalueWrapLit(arg)
 			}
-			return callExpr(selectorExpr(selectorExpr(ident("promise"), "Promise"), "Call"), args...)
+			return callExpr(selectorExpr(selectorExpr(ident("_gunPromise"), "Promise"), "Call"), args...)
 		},
 	})
 
@@ -602,8 +602,8 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterIdentifier(&tcontext.IdentifierMapping{
 		Name: "Promise",
 		Transform: func(imp tcontext.Imports) ast.Expr {
-			imp.AddImport("github.com/nnstd/gun/runtime/promise")
-			return selectorExpr(ident("promise"), "Promise")
+			imp.AddAliasedImport("github.com/nnstd/gun/runtime/promise", "_gunPromise")
+			return selectorExpr(ident("_gunPromise"), "Promise")
 		},
 	})
 
