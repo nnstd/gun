@@ -6,6 +6,7 @@
 package pipeline
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
 	"path/filepath"
@@ -436,6 +437,14 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 				IsEntryFile:      name == entryFile,
 			}, p.OptLevel)
 	}
+	// Compute package root for JSON module registration paths.
+	pkgRoot := ""
+	if entryFile != "" {
+		pkgRoot = filepath.Dir(entryFile)
+	}
+
+	var jsonRegistrations []string // "module.RegisterModuleLoader(path, func)" — var-time
+	embedIdx := 0
 	for name, source := range files {
 		if !isDataModule(name) {
 			continue
@@ -450,11 +459,64 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 				namedAliases[originalName] = alias
 			}
 		}
-		out, err := compileDataModuleWithOptLevel(name, source, pkgName, defaultName, namedAliases, p.OptLevel)
-		if err != nil {
-			return nil, fmt.Errorf("compile %s: %w", name, err)
+		var out []byte
+		var err error
+		// Compute registerPath early for self-registration in large JSON
+		registerPath := ""
+		if pkgRoot != "" {
+			if rel, err2 := filepath.Rel(pkgRoot, name); err2 == nil {
+				registerPath = "./" + filepath.ToSlash(rel)
+			}
 		}
-		results[name] = out
+		if len(source) > 32*1024 && (isJSONModule(name) || isYAMLModule(name)) {
+			// Large data: use go:embed to avoid huge string literals that
+			// crash the arm64 linker. Copy data file to output dir.
+			ext := ".json"
+			if isYAMLModule(name) {
+				ext = filepath.Ext(name)
+				if ext == "" {
+					ext = ".yaml"
+				}
+			}
+			embedFile := fmt.Sprintf("_embed_%d%s", embedIdx, ext)
+			embedIdx++
+			if isJSONModule(name) {
+				out, err = jsonmodule.CompileEmbed(source, pkgName, defaultName, embedFile, registerPath, namedAliases)
+			} else {
+				out, err = yamlmodule.CompileEmbed(source, pkgName, defaultName, embedFile, registerPath, namedAliases)
+			}
+			if err != nil {
+				return nil, fmt.Errorf("compile %s: %w", name, err)
+			}
+			results[name] = out
+			results[embedFile] = source
+		} else {
+			out, err = compileDataModuleWithOptLevel(name, source, pkgName, defaultName, namedAliases, p.OptLevel)
+			if err != nil {
+				return nil, fmt.Errorf("compile %s: %w", name, err)
+			}
+			results[name] = out
+		}
+		// Build registration entry so runtime require() can find this data module.
+		// Large data modules self-register via var _ =, so skip them here.
+		if registerPath != "" && !(len(source) > 32*1024 && (isJSONModule(name) || isYAMLModule(name))) {
+			jsonRegistrations = append(jsonRegistrations, fmt.Sprintf(
+				"module.RegisterModuleLoader(%q, func() *jsvalue.JSValue { return %s })",
+				registerPath, defaultName))
+		}
+	}
+
+	// Emit a single registration file for all JSON modules.
+	// All registrations happen at var-time. For large JSON, the loader
+	// closure calls an ensure function that parses embedded data on
+	// first access, so the data is available even at var-time.
+	if len(jsonRegistrations) > 0 {
+		var reg bytes.Buffer
+		reg.WriteString("package " + pkgName + "\n\nimport (\n\tjsvalue \"github.com/nnstd/gun/runtime/builtin\"\n\t\"github.com/nnstd/gun/runtime/module\"\n)\n\n")
+		for _, r := range jsonRegistrations {
+			reg.WriteString("var _ = " + r + "\n")
+		}
+		results["_json_registry.go"] = reg.Bytes()
 	}
 
 	backend.BreakPackageInitCycles(goFiles)
@@ -493,6 +555,10 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 	}
 	for name, out := range results {
 		if !isDataModule(name) {
+			continue
+		}
+		// Keep embed data files as-is (need .json extension for go:embed)
+		if strings.HasPrefix(filepath.Base(name), "_embed_") {
 			continue
 		}
 		delete(results, name)

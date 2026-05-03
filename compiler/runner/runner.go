@@ -1087,6 +1087,17 @@ func TranspileNodeModuleAsPackage(entryPath, outDir, moduleName, pkgName string,
 		if err != nil {
 			rel = filepath.Base(absPath)
 		}
+		// Embed data files keep their original extension (e.g. _embed_0.json, _embed_0.yaml)
+		if strings.HasPrefix(filepath.Base(rel), "_embed_") && (filepath.Ext(rel) == ".json" || filepath.Ext(rel) == ".yaml" || filepath.Ext(rel) == ".yml") {
+			outFile := filepath.Join(outDir, filepath.Base(rel))
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  writing %s\n", outFile)
+			}
+			if err := os.WriteFile(outFile, output, 0644); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		// Flatten relative path: build/lib/index.js → build-lib-index.go
 		// Strip leading ".." components (Go ignores files starting with ".")
 		goName := strings.TrimSuffix(rel, filepath.Ext(rel))

@@ -57,6 +57,7 @@ type Lowerer struct {
 	emittedExportNames  map[string]bool
 	crossFileExports    map[string]bool // Go names from other files (prevents .Get() dispatch)
 	initStmts           []ast.Stmt      // statements for init() function
+	hasDefaultExport    bool            // true when module has an explicit default export (module.exports = X)
 	pkgName             string          // Go package name
 	currentClassName    string          // set during class constructor/method lowering
 	currentParentClass  ast.Expr        // lowered parent class expr for super.method() calls
@@ -195,6 +196,9 @@ func LowerWithConfig(mod *hir.Module, ctx *context.TranspilerContext, moduleName
 	// If no explicit default exists, point to the namespace object.
 	// Only synthesize for the entry file to avoid duplicate declarations.
 	_, hasDefaultEntry := l.namespaceEntries["default"]
+	// When Default is a distinct JSValue (not the namespace), set hasDefaultExport
+	// so module.exports.X = Y also sets on Default.
+	l.hasDefaultExport = mod.SynthesizeDefault != "" || hasDefaultEntry
 	if mod.SynthesizeDefault == "" && l.isEntryFile && l.namespaceAlias != "" && !hasDefaultEntry {
 		l.decls = append(l.decls, varDecl("Default", jsValuePtrType(), nil))
 		l.initStmts = append(l.initStmts, assignStmt(
@@ -226,6 +230,25 @@ func LowerWithConfig(mod *hir.Module, ctx *context.TranspilerContext, moduleName
 				stringLit(exportName),
 				goIdent(alias),
 			)))
+		}
+		// In CommonJS, module.exports = fn; module.exports.X = Y creates a
+		// function with properties. When Default is a distinct JSValue (not
+		// the namespace), copy named exports onto it so cross-package access
+		// via pkg.Default.Get("X") works.
+		if hasDefaultEntry || mod.SynthesizeDefault != "" {
+			for exportName, alias := range l.namespaceEntries {
+				if exportName == "default" {
+					continue
+				}
+				if res, ok := l.importedNames[exportName]; ok && res.goSymbol != "" {
+					alias = res.goSymbol
+				}
+				l.initStmts = append(l.initStmts, exprStmt(callExpr(
+					selectorExpr(goIdent("Default"), "Set"),
+					stringLit(exportName),
+					goIdent(alias),
+				)))
+			}
 		}
 	}
 
@@ -517,6 +540,16 @@ func (l *Lowerer) lowerVarDecl(d *hir.VarDecl) {
 			// Uninitialized var needs a type: var x *jsvalue.JSValue
 			l.jsvalueImport()
 			l.decls = append(l.decls, varDecl(name, jsValuePtrType(), nil))
+		} else if astContainsCreateRequire(value) {
+			// Defer require-based inits to init-time so RegisterModuleLoader
+			// calls (also var-time) in other files have completed first.
+			l.jsvalueImport()
+			l.decls = append(l.decls, varDecl(name, jsValuePtrType(), nil))
+			l.initStmts = append(l.initStmts, &ast.AssignStmt{
+				Lhs: []ast.Expr{ast.NewIdent(name)},
+				Tok: token.ASSIGN,
+				Rhs: []ast.Expr{value},
+			})
 		} else {
 			l.decls = append(l.decls, varDecl(name, nil, value))
 		}
@@ -567,6 +600,26 @@ func collectPatternSymbols(pat hir.Pattern) []*symbol.Symbol {
 	walk(pat)
 	return out
 }
+// astContainsCreateRequire reports whether the Go AST expression contains
+// a call to module.CreateRequire, which indicates the var init depends on
+// the module registry being populated. These inits must run at init-time
+// (after RegisterModuleLoader vars) rather than var-time.
+func astContainsCreateRequire(expr ast.Expr) bool {
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		sel, ok := n.(*ast.SelectorExpr)
+		if ok && sel.Sel != nil && sel.Sel.Name == "CreateRequire" {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
 func (l *Lowerer) lowerClassDecl(d *hir.ClassDecl) {
 	l.jsvalueImport()
 	name := l.emitName(d.Symbol)
@@ -1115,6 +1168,7 @@ func (l *Lowerer) deferVarToInit(goName string, rhs ast.Expr) {
 
 // lowerExportDefault handles `export default ...` declarations.
 func (l *Lowerer) lowerExportDefault(d *hir.ExportDecl) {
+	l.hasDefaultExport = true
 	if d.Decl == nil {
 		return
 	}

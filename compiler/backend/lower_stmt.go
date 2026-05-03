@@ -986,6 +986,47 @@ func (l *Lowerer) lowerAssignStmt(assign *hir.AssignExpr) ast.Stmt {
 
 	right := l.lowerExpr(assign.Right)
 
+	// exports.X = val or module.exports.X = val → namespace.Set("X", val)
+	// Also set on Default when it exists, so cross-package pkg.Default.Get("X") works.
+	if mem, ok := assign.Left.(*hir.MemberExpr); ok && l.namespaceAlias != "" && l.isExportsAccess(mem.Object) {
+		l.jsvalueImport()
+		val := l.wrapAsJSValue(right)
+		if assign.Op != hir.OpAssign {
+			helperName := mapAssignOpToJSValue(assign.Op)
+			current := callExpr(selectorExpr(goIdent(l.namespaceAlias), "Get"), l.lowerClassMemberKey(mem.Property, mem.Private, nil))
+			val = callExpr(selectorExpr(goIdent("jsvalue"), helperName), current, val)
+		}
+		keyExpr := l.lowerClassMemberKey(mem.Property, mem.Private, nil)
+		nsSet := exprStmt(callExpr(selectorExpr(goIdent(l.namespaceAlias), "Set"), keyExpr, val))
+		if l.hasDefaultExport {
+			return &ast.BlockStmt{List: []ast.Stmt{
+				nsSet,
+				exprStmt(callExpr(selectorExpr(goIdent("Default"), "Set"), keyExpr, val)),
+			}}
+		}
+		return nsSet
+	}
+
+	// exports[key] = val or module.exports[key] = val → namespace.Set(key, val)
+	if comp, ok := assign.Left.(*hir.ComputedMemberExpr); ok && l.namespaceAlias != "" && l.isExportsAccess(comp.Object) {
+		l.jsvalueImport()
+		key := l.lowerComputedPropertyKeyExpr(comp.Property)
+		val := l.wrapAsJSValue(right)
+		if assign.Op != hir.OpAssign {
+			helperName := mapAssignOpToJSValue(assign.Op)
+			current := callExpr(selectorExpr(goIdent(l.namespaceAlias), "Get"), key)
+			val = callExpr(selectorExpr(goIdent("jsvalue"), helperName), current, val)
+		}
+		nsSet := exprStmt(callExpr(selectorExpr(goIdent(l.namespaceAlias), "Set"), key, val))
+		if l.hasDefaultExport {
+			return &ast.BlockStmt{List: []ast.Stmt{
+				nsSet,
+				exprStmt(callExpr(selectorExpr(goIdent("Default"), "Set"), key, val)),
+			}}
+		}
+		return nsSet
+	}
+
 	// Member assignment: obj.prop = val → obj.Set("prop", wrappedVal)
 	if mem, ok := assign.Left.(*hir.MemberExpr); ok {
 		if l.exprIsJSValue(mem.Object) {
@@ -1031,6 +1072,29 @@ func (l *Lowerer) lowerAssignStmt(assign *hir.AssignExpr) ast.Stmt {
 	computed := callExpr(selectorExpr(goIdent("jsvalue"), helperName),
 		jsvalueWrapLit(leftForRead), jsvalueWrapLit(right))
 	return assignStmt([]ast.Expr{left}, []ast.Expr{computed})
+}
+
+// isExportsAccess checks if an expression is `exports` or `module.exports`.
+func (l *Lowerer) isExportsAccess(e hir.Expr) bool {
+	if id, ok := e.(*hir.Identifier); ok {
+		name := id.Name
+		if id.Sym != nil {
+			name = id.Sym.OriginalName
+		}
+		return name == "exports"
+	}
+	if mem, ok := e.(*hir.MemberExpr); ok {
+		if mem.Property == "exports" {
+			if id, ok := mem.Object.(*hir.Identifier); ok {
+				name := id.Name
+				if id.Sym != nil {
+					name = id.Sym.OriginalName
+				}
+				return name == "module"
+			}
+		}
+	}
+	return false
 }
 
 // lowerUpdateStmt handles update expressions (x++, x--) as statements.

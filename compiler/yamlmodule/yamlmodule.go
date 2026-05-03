@@ -66,6 +66,98 @@ func Compile(source []byte, pkgName, defaultName string, namedAliases map[string
 	return c.format()
 }
 
+// CompileEmbed generates a Go file that uses //go:embed to load the YAML data
+// from a separate file. embedFile is the filename the YAML data will be saved as.
+// registerPath is the module path used for RegisterModuleLoader (e.g. "./data/config.yaml").
+func CompileEmbed(source []byte, pkgName, defaultName, embedFile, registerPath string, namedAliases map[string]string) ([]byte, error) {
+	mod, err := Parse(source)
+	if err != nil {
+		return nil, err
+	}
+	if defaultName == "" {
+		defaultName = "Default"
+	}
+	c := &compiler{
+		file:    &ast.File{Name: ast.NewIdent(pkgName), Decls: []ast.Decl{}},
+		imports: map[string]string{},
+	}
+	c.addImport("github.com/goccy/go-yaml", "")
+	c.addImport("github.com/nnstd/gun/runtime/module", "")
+	c.addImport(jsvaluePkg, "jsvalue")
+	c.addImport("embed", "_")
+	c.addJSValueVars(defaultName, mod.Exports, namedAliases)
+
+	srcVar := "_" + sanitize(defaultName) + "Src"
+	ensureFn := "ensure_" + sanitize(defaultName)
+
+	c.file.Decls = append(c.file.Decls, &ast.GenDecl{
+		Tok: token.VAR,
+		Doc: &ast.CommentGroup{
+			List: []*ast.Comment{
+				{Text: "//go:embed " + embedFile},
+			},
+		},
+		Specs: []ast.Spec{&ast.ValueSpec{
+			Names: []*ast.Ident{ast.NewIdent(srcVar)},
+			Type:  ast.NewIdent("string"),
+		}},
+	})
+
+	ensureStmts := []ast.Stmt{
+		&ast.IfStmt{
+			Cond: &ast.BinaryExpr{X: ident(defaultName), Op: token.NEQ, Y: ident("nil")},
+			Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{}}},
+		},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
+			Names: []*ast.Ident{ast.NewIdent("data")},
+			Type:  ast.NewIdent("any"),
+		}}}},
+		assign(ident("_"), call(sel("yaml", "Unmarshal"), call(byteSliceType(), ident(srcVar)), unary(token.AND, ident("data")))),
+		assign(ident(defaultName), call(sel("module", "DataToJSValue"), call(sel("module", "NormalizeYAMLValue"), ident("data")))),
+	}
+	ensureStmts = append(ensureStmts, exportStmts(defaultName, mod.Exports, namedAliases)...)
+	c.file.Decls = append(c.file.Decls, &ast.FuncDecl{
+		Name: ast.NewIdent(ensureFn),
+		Type: &ast.FuncType{Params: &ast.FieldList{}},
+		Body: &ast.BlockStmt{List: ensureStmts},
+	})
+
+	// Register loader at var-time so same-package require() calls find it.
+	if registerPath != "" {
+		c.file.Decls = append(c.file.Decls, &ast.GenDecl{
+			Tok: token.VAR,
+			Specs: []ast.Spec{&ast.ValueSpec{
+				Names:  []*ast.Ident{ast.NewIdent("_")},
+				Values: []ast.Expr{call(
+					sel("module", "RegisterModuleLoader"),
+					stringLit(registerPath),
+					&ast.FuncLit{
+						Type: &ast.FuncType{
+							Params:  &ast.FieldList{},
+							Results: &ast.FieldList{List: []*ast.Field{{Type: star(sel("jsvalue", "JSValue"))}}},
+						},
+						Body: &ast.BlockStmt{List: []ast.Stmt{
+							&ast.ExprStmt{X: call(ident(ensureFn))},
+							&ast.ReturnStmt{Results: []ast.Expr{ident(defaultName)}},
+						}},
+					},
+				)},
+			}},
+		})
+	}
+	c.addInit([]ast.Stmt{&ast.ExprStmt{X: call(ident(ensureFn))}})
+
+	c.finalizeImports()
+	return c.format()
+}
+
+// EnsureFuncName returns the ensure-function name for a default var.
+func EnsureFuncName(defaultName string) string {
+	return "ensure_" + sanitize(defaultName)
+}
+
+const jsvaluePkg = "github.com/nnstd/gun/runtime/builtin"
+
 type compiler struct {
 	file    *ast.File
 	imports map[string]string

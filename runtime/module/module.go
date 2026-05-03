@@ -37,6 +37,7 @@ func IsBuiltin(name string) bool {
 // their own init() via RegisterModule.
 var (
 	ModuleRegistry = map[string]*jsvalue.JSValue{}
+	moduleLoaders  = map[string]func() *jsvalue.JSValue{} // lazy loaders for init-time modules
 	registryMu     sync.Mutex
 )
 
@@ -48,12 +49,32 @@ func RegisterModule(name string, exports *jsvalue.JSValue) {
 	ModuleRegistry[name] = exports
 }
 
+// RegisterModuleLoader adds a lazy loader for a module. The loader is called
+// on first access via lookupRegistry, allowing init-time modules to be
+// found by var-time require() calls. The loader closure captures the *JSValue
+// variable — by the time it's called from init(), the variable is populated.
+func RegisterModuleLoader(name string, loader func() *jsvalue.JSValue) int {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	moduleLoaders[name] = loader
+	return 0
+}
+
 // lookupRegistry reads the registry under the mutex.
+// Falls back to lazy loaders if the module isn't directly registered.
 func lookupRegistry(name string) (*jsvalue.JSValue, bool) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
-	v, ok := ModuleRegistry[name]
-	return v, ok
+	if v, ok := ModuleRegistry[name]; ok {
+		return v, true
+	}
+	if loader, ok := moduleLoaders[name]; ok {
+		v := loader()
+		ModuleRegistry[name] = v // cache for future lookups
+		delete(moduleLoaders, name)
+		return v, true
+	}
+	return nil, false
 }
 
 // Meta holds import.meta properties.
@@ -193,6 +214,16 @@ func CreateRequire(filename *jsvalue.JSValue) *jsvalue.JSValue {
 	requireFn.Set("main", jsvalue.NewUndefined())
 
 	return requireFn
+}
+
+// ParseJSON parses JSON data and returns the result as a *JSValue.
+// Used by the transpiler for var-time JSON module initialization.
+func ParseJSON(data []byte) *jsvalue.JSValue {
+	var v any
+	if err := json.Unmarshal(data, &v); err != nil {
+		return jsvalue.NewUndefined()
+	}
+	return DataToJSValue(v)
 }
 
 func DataToJSValue(v any) *jsvalue.JSValue {

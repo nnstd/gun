@@ -269,8 +269,10 @@ func TestCompilePackageThreadsOptLevelToJSONModule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source := string(packageOutput(t, o2, "data.json", "data")); !strings.Contains(source, "type jsonRoot struct") || strings.Contains(source, "module.DataToJSValue(data)") {
-		t.Fatalf("O2 JSON module should use typed schema conversion:\n%s", source)
+	// Large JSON always uses go:embed with ensure function pattern
+	// (typed schema is no longer used for large JSON to avoid arm64 linker crashes)
+	if source := string(packageOutput(t, o2, "data.json", "data")); !strings.Contains(source, "//go:embed") || !strings.Contains(source, "ensure_DataDefault") {
+		t.Fatalf("O2 JSON module should use go:embed pattern:\n%s", source)
 	}
 }
 

@@ -47,6 +47,102 @@ func Compile(source []byte, pkgName, defaultName string, namedAliases map[string
 	return CompileWithOptLevel(source, pkgName, defaultName, namedAliases, context.O0)
 }
 
+// CompileEmbed generates a Go file that uses //go:embed to load the JSON data
+// from a separate file. This avoids huge string literals that crash the arm64 linker.
+// embedFile is the filename the JSON data will be saved as (must be in same directory).
+// registerPath is the module path used for RegisterModuleLoader (e.g. "./data/foo.json").
+// The generated file includes a lazy-load function and self-registers in init().
+func CompileEmbed(source []byte, pkgName, defaultName, embedFile, registerPath string, namedAliases map[string]string) ([]byte, error) {
+	mod, err := Parse(source)
+	if err != nil {
+		return nil, err
+	}
+	if defaultName == "" {
+		defaultName = "Default"
+	}
+	c := &compiler{
+		file:    &ast.File{Name: ast.NewIdent(pkgName), Decls: []ast.Decl{}},
+		imports: map[string]string{},
+	}
+	c.addImport("github.com/nnstd/gun/runtime/jsonx", "")
+	c.addImport("github.com/nnstd/gun/runtime/module", "")
+	c.addImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+	c.addImport("embed", "_")
+	c.addJSValueVars(defaultName, mod.Exports, namedAliases)
+
+	srcVar := "_" + sanitize(defaultName) + "Src"
+	ensureFn := "ensure_" + sanitize(defaultName)
+
+	c.file.Decls = append(c.file.Decls, &ast.GenDecl{
+		Tok: token.VAR,
+		Doc: &ast.CommentGroup{
+			List: []*ast.Comment{
+				{Text: "//go:embed " + embedFile},
+			},
+		},
+		Specs: []ast.Spec{&ast.ValueSpec{
+			Names: []*ast.Ident{ast.NewIdent(srcVar)},
+			Type:  ast.NewIdent("string"),
+		}},
+	})
+
+	// Generate an ensure function that populates Default on first call.
+	// Can be called from RegisterModuleLoader at var-time since _srcVar
+	// (embedded data) is available at var-time.
+	ensureStmts := []ast.Stmt{
+		&ast.IfStmt{
+			Cond: &ast.BinaryExpr{X: ident(defaultName), Op: token.NEQ, Y: ident("nil")},
+			Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{}}},
+		},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
+			Names: []*ast.Ident{ast.NewIdent("data")},
+			Type:  ast.NewIdent("any"),
+		}}}},
+		assign(ident("_"), call(sel("jsonx", "Unmarshal"), call(byteSliceType(), ident(srcVar)), unary(token.AND, ident("data")))),
+		assign(ident(defaultName), call(sel("module", "DataToJSValue"), ident("data"))),
+	}
+	ensureStmts = append(ensureStmts, exportStmts(defaultName, mod.Exports, namedAliases)...)
+	c.file.Decls = append(c.file.Decls, &ast.FuncDecl{
+		Name: ast.NewIdent(ensureFn),
+		Type: &ast.FuncType{Params: &ast.FieldList{}},
+		Body: &ast.BlockStmt{List: ensureStmts},
+	})
+	// Register loader at var-time (not init-time) so same-package
+	// var-time require() calls can find it. var _ = executes during
+	// package-level var initialization, before any init() functions.
+	if registerPath != "" {
+		c.file.Decls = append(c.file.Decls, &ast.GenDecl{
+			Tok: token.VAR,
+			Specs: []ast.Spec{&ast.ValueSpec{
+				Names:  []*ast.Ident{ast.NewIdent("_")},
+				Values: []ast.Expr{call(
+					sel("module", "RegisterModuleLoader"),
+					stringLit(registerPath),
+					&ast.FuncLit{
+						Type: &ast.FuncType{
+							Params: &ast.FieldList{},
+							Results: &ast.FieldList{List: []*ast.Field{{Type: star(sel("jsvalue", "JSValue"))}}},
+						},
+						Body: &ast.BlockStmt{List: []ast.Stmt{
+							&ast.ExprStmt{X: call(ident(ensureFn))},
+							&ast.ReturnStmt{Results: []ast.Expr{ident(defaultName)}},
+						}},
+					},
+				)},
+			}},
+		})
+	}
+	c.addInit([]ast.Stmt{&ast.ExprStmt{X: call(ident(ensureFn))}})
+
+	c.finalizeImports()
+	return c.format()
+}
+
+// EnsureFuncName returns the ensure-function name for a default var.
+func EnsureFuncName(defaultName string) string {
+	return "ensure_" + sanitize(defaultName)
+}
+
 func CompileWithOptLevel(source []byte, pkgName, defaultName string, namedAliases map[string]string, optLevel context.OptLevel) ([]byte, error) {
 	mod, err := Parse(source)
 	if err != nil {
@@ -62,23 +158,36 @@ func CompileWithOptLevel(source []byte, pkgName, defaultName string, namedAliase
 		},
 		imports: map[string]string{},
 	}
-	c.addImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-	c.addJSValueVars(defaultName, mod.Exports, namedAliases)
+	needsJSValue := false
+
 	if len(source) <= inlineValueExprMaxBytes {
-		c.addInit(c.smallInitStmts(defaultName, mod.Value, mod.Exports, namedAliases))
+		// Small JSON: inline value at var-time so same-package requires work
+		c.addImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+		c.addJSValueVarInline(defaultName, mod.Value)
+		c.addNamedExportVars(defaultName, mod.Exports, namedAliases)
+		c.addInit(exportStmts(defaultName, mod.Exports, namedAliases))
 	} else if optLevel >= context.O2 {
 		c.addImport("github.com/nnstd/gun/runtime/jsonx", "")
+		c.addImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+		c.addJSValueVars(defaultName, mod.Exports, namedAliases)
 		if !c.addTypedJSON(mod.Value) {
 			c.addImport("github.com/nnstd/gun/runtime/module", "")
 			c.addInit(c.largeAnyInitStmts(defaultName, source, mod.Exports, namedAliases))
 		} else {
+			// module import is added by addTypedJSON if schema contains any
+			needsJSValue = true
 			c.addInit(c.largeTypedInitStmts(defaultName, source, mod.Exports, namedAliases))
 		}
 	} else {
 		c.addImport("github.com/nnstd/gun/runtime/jsonx", "")
 		c.addImport("github.com/nnstd/gun/runtime/module", "")
+		c.addImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
+		c.addJSValueVars(defaultName, mod.Exports, namedAliases)
 		c.addInit(c.largeAnyInitStmts(defaultName, source, mod.Exports, namedAliases))
 	}
+
+	_ = needsJSValue
+
 	c.finalizeImports()
 	return c.format()
 }
@@ -140,6 +249,15 @@ func (c *compiler) format() ([]byte, error) {
 	return b.Bytes(), nil
 }
 
+
+func (c *compiler) addInit(stmts []ast.Stmt) {
+	c.file.Decls = append(c.file.Decls, &ast.FuncDecl{
+		Name: ast.NewIdent("init"),
+		Type: &ast.FuncType{Params: &ast.FieldList{}},
+		Body: &ast.BlockStmt{List: stmts},
+	})
+}
+
 func (c *compiler) addJSValueVars(defaultName string, exports []Export, namedAliases map[string]string) {
 	names := []string{defaultName}
 	for _, exp := range exports {
@@ -153,30 +271,46 @@ func (c *compiler) addJSValueVars(defaultName string, exports []Export, namedAli
 			Tok: token.VAR,
 			Specs: []ast.Spec{&ast.ValueSpec{
 				Names: []*ast.Ident{ast.NewIdent(name)},
+				Type: star(sel("jsvalue", "JSValue")),
+			}},
+		})
+	}
+}
+
+// addJSValueVarInline declares Default with an inline value at var-time.
+func (c *compiler) addJSValueVarInline(defaultName string, value any) {
+	c.file.Decls = append(c.file.Decls, &ast.GenDecl{
+		Tok: token.VAR,
+		Specs: []ast.Spec{&ast.ValueSpec{
+			Names:  []*ast.Ident{ast.NewIdent(defaultName)},
+			Type:   star(sel("jsvalue", "JSValue")),
+			Values: []ast.Expr{valueExpr(value)},
+		}},
+	})
+}
+
+// addNamedExportVars declares named export vars (nil, populated in init()).
+func (c *compiler) addNamedExportVars(defaultName string, exports []Export, namedAliases map[string]string) {
+	for _, exp := range exports {
+		name := exportName(exp, namedAliases)
+		if name == defaultName {
+			continue
+		}
+		c.file.Decls = append(c.file.Decls, &ast.GenDecl{
+			Tok: token.VAR,
+			Specs: []ast.Spec{&ast.ValueSpec{
+				Names: []*ast.Ident{ast.NewIdent(name)},
 				Type:  star(sel("jsvalue", "JSValue")),
 			}},
 		})
 	}
 }
 
-func (c *compiler) addInit(stmts []ast.Stmt) {
-	c.file.Decls = append(c.file.Decls, &ast.FuncDecl{
-		Name: ast.NewIdent("init"),
-		Type: &ast.FuncType{Params: &ast.FieldList{}},
-		Body: &ast.BlockStmt{List: stmts},
-	})
-}
-
-func (c *compiler) smallInitStmts(defaultName string, value any, exports []Export, namedAliases map[string]string) []ast.Stmt {
-	stmts := []ast.Stmt{assign(ident(defaultName), valueExpr(value))}
-	return append(stmts, exportStmts(defaultName, exports, namedAliases)...)
-}
-
 func (c *compiler) largeAnyInitStmts(defaultName string, source []byte, exports []Export, namedAliases map[string]string) []ast.Stmt {
 	stmts := []ast.Stmt{
 		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
 			Names: []*ast.Ident{ast.NewIdent("data")},
-			Type:  ast.NewIdent("any"),
+			Type: ast.NewIdent("any"),
 		}}}},
 		assign(ident("_"), call(sel("jsonx", "Unmarshal"), call(byteSliceType(), stringLit(string(source))), unary(token.AND, ident("data")))),
 		assign(ident(defaultName), call(sel("module", "DataToJSValue"), ident("data"))),
@@ -188,13 +322,16 @@ func (c *compiler) largeTypedInitStmts(defaultName string, source []byte, export
 	stmts := []ast.Stmt{
 		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
 			Names: []*ast.Ident{ast.NewIdent("data")},
-			Type:  typeExpr(c.root),
+			Type: typeExpr(c.root),
 		}}}},
 		assign(ident("_"), call(sel("jsonx", "Unmarshal"), call(byteSliceType(), stringLit(string(source))), unary(token.AND, ident("data")))),
 		assign(ident(defaultName), converterExpr(c.root, ident("data"))),
 	}
 	return append(stmts, exportStmts(defaultName, exports, namedAliases)...)
 }
+
+
+
 
 func (c *compiler) addTypedJSON(value any) bool {
 	s := newSchemaBuilder()
