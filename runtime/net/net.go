@@ -263,7 +263,7 @@ func setupSocketPrototype() {
 		go func(host string, port int) {
 			addr := net.JoinHostPort(host, strconv.Itoa(port))
 			conn, dialErr := net.Dial("tcp", addr)
-			eventloop.Default.ScheduleCallback(func() {
+				eventloop.Default.ScheduleCallback(func() {
 				state.mu.Lock()
 				state.connecting = false
 				if state.destroyed {

@@ -521,17 +521,6 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 
 	backend.BreakPackageInitCycles(goFiles)
 
-	// Detect barrel files (files that are predominantly re-exports from other
-	// same-package files). Their init() functions depend on source files' init()
-	// having run first. Go runs init() in alphabetical file order, so we prefix
-	// barrel file output names with "zz_" to ensure they sort last.
-	barrelFiles := make(map[string]bool)
-	for name, hirMod := range hirModules {
-		if hir.IsBarrelFile(hirMod, files) {
-			barrelFiles[name] = true
-		}
-	}
-
 	for name, goFile := range goFiles {
 		hirMod := hirModules[name]
 		out, err := backend.GenerateWithSource(goFile, hirMod.SourcePath, hirMod.SourceSize)
@@ -544,14 +533,7 @@ func (p *Pipeline) CompilePackageWithOptions(files map[string][]byte, pkgName, m
 			out = renameDefaultExport(out, name)
 		}
 
-		// Rename barrel files so their init() runs after content files
-		outName := name
-		if barrelFiles[name] {
-			dir := filepath.Dir(name)
-			base := filepath.Base(name)
-			outName = filepath.Join(dir, "zz_"+base)
-		}
-		results[outName] = out
+		results[name] = out
 	}
 	for name, out := range results {
 		if !isDataModule(name) {

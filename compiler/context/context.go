@@ -23,6 +23,7 @@ type Imports interface {
 	AddImport(path string)
 	AddAliasedImport(path, alias string)
 	SetNeedsGlobalSync()
+	SourcePath() string
 }
 
 // GlobalObjectTransform transforms a method call on a global object.

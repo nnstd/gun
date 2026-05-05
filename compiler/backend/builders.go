@@ -80,6 +80,10 @@ func assignStmt(lhs, rhs []ast.Expr) *ast.AssignStmt {
 	return &ast.AssignStmt{Lhs: lhs, Rhs: rhs, Tok: token.ASSIGN}
 }
 
+func defineStmt(lhs, rhs []ast.Expr) *ast.AssignStmt {
+	return &ast.AssignStmt{Lhs: lhs, Rhs: rhs, Tok: token.DEFINE}
+}
+
 func returnStmt(results ...ast.Expr) *ast.ReturnStmt {
 	return &ast.ReturnStmt{Results: results}
 }

@@ -3,6 +3,7 @@ package backend
 import (
 	"go/ast"
 	"go/token"
+	"strings"
 )
 
 // BreakPackageInitCycles detects package-level var initializer cycles across
@@ -120,7 +121,7 @@ func BreakPackageInitCycles(files map[string]*ast.File) {
 				newDecls = append(newDecls, &ast.GenDecl{Tok: token.VAR, Specs: keptSpecs})
 			}
 		}
-		if len(initStmts) > 0 {
+		if len(initStmts) > 0 && !fileHasModuleStateInit(file) {
 			newDecls = append(newDecls, funcDecl("init", fieldList(), nil, &ast.BlockStmt{List: initStmts}))
 		}
 		file.Decls = newDecls
@@ -128,6 +129,31 @@ func BreakPackageInitCycles(files map[string]*ast.File) {
 			ensureAliasedImport(file, "github.com/nnstd/gun/runtime/builtin", "jsvalue")
 		}
 	}
+}
+
+// fileHasModuleStateInit reports whether the file already contains a
+// ModuleState-guarded init (var _fileInit module.ModuleState), meaning
+// BreakPackageInitCycles should not generate a competing func init().
+func fileHasModuleStateInit(file *ast.File) bool {
+	for _, d := range file.Decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || gd.Tok != token.VAR {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok || len(vs.Names) == 0 {
+				continue
+			}
+			name := vs.Names[0].Name
+			if strings.HasPrefix(name, "_fileInit") && vs.Type != nil {
+				if sel, ok := vs.Type.(*ast.SelectorExpr); ok && sel.Sel != nil && sel.Sel.Name == "ModuleState" {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func ensureAliasedImport(file *ast.File, pkg, alias string) {

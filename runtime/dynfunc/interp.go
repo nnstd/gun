@@ -1204,6 +1204,79 @@ func EvalHIR(ctx *jscontext.Context, code *jsvalue.JSValue) *jsvalue.JSValue {
 	return fn.Call()
 }
 
+// EvalStatementsHIR evaluates JS code using the HIR interpreter.
+// Tries expression wrapping first (return value), falls back to statement wrapping.
+// After execution, syncs any new/updated globals back to the context.
+func EvalStatementsHIR(ctx *jscontext.Context, code *jsvalue.JSValue) *jsvalue.JSValue {
+	source := code.String()
+
+	// Try expression evaluation first (preserves return value)
+	result, ok := evalWithSync(ctx, fmt.Sprintf("function DynEval() { return (%s) }", source))
+	if ok {
+		return result
+	}
+
+	// Fall back to statement evaluation
+	result, ok = evalWithSync(ctx, fmt.Sprintf("function DynEval() { %s }", source))
+	if !ok {
+		panic(jsvalue.NewString(fmt.Sprintf("SyntaxError: invalid code")))
+	}
+	return result
+}
+
+// evalWithSync parses and evaluates a JS function, syncing globals back to context.
+// Returns (result, true) on success, (nil, false) on parse error.
+func evalWithSync(ctx *jscontext.Context, jsSource string) (*jsvalue.JSValue, bool) {
+	parser := sitter.NewParser()
+	defer parser.Close()
+	lang := sitter.NewLanguage(typescript.LanguageTypescript())
+	if err := parser.SetLanguage(lang); err != nil {
+		return nil, false
+	}
+
+	source := []byte(jsSource)
+	tree := parser.Parse(source, nil)
+	if tree == nil {
+		return nil, false
+	}
+	defer tree.Close()
+
+	hirMod := hir.BuildModuleWithPath(tree.RootNode(), source, "main", "")
+
+	for _, d := range hirMod.Declarations {
+		if fd, ok := d.(*hir.FuncDecl); ok {
+			interp := newInterpreter(ctx)
+			result := interp.evalFuncDecl(fd.Params, fd.Body, nil)
+			syncGlobalsToContext(interp, ctx)
+			return result, true
+		}
+		if ed, ok := d.(*hir.ExportDecl); ok {
+			if fd, ok := ed.Decl.(*hir.FuncDecl); ok {
+				interp := newInterpreter(ctx)
+				result := interp.evalFuncDecl(fd.Params, fd.Body, nil)
+				syncGlobalsToContext(interp, ctx)
+				return result, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// syncGlobalsToContext copies interpreter globals back to the context's global object.
+// This ensures that variable declarations made inside vm code persist on the context.
+func syncGlobalsToContext(interp *Interpreter, ctx *jscontext.Context) {
+	if ctx == nil {
+		return
+	}
+	builtins := jsvalue.Globals()
+	for name, val := range interp.globals {
+		if _, isBuiltin := builtins[name]; isBuiltin {
+			continue
+		}
+		ctx.Set(name, val)
+	}
+}
+
 // parseToHIR parses a JS function declaration and returns the function as a JSValue.
 func parseToHIR(jsSource string, ctx *jscontext.Context) (*jsvalue.JSValue, error) {
 	parser := sitter.NewParser()

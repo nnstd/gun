@@ -27,6 +27,10 @@ func New() *Context {
 	return &Context{global: jsvalue.NewObject()}
 }
 
+func NewFromGlobal(global *jsvalue.JSValue) *Context {
+	return &Context{global: global}
+}
+
 func (c *Context) Global() *jsvalue.JSValue     { return c.global }
 func (c *Context) Get(name string) *jsvalue.JSValue      { return c.global.Get(name) }
 func (c *Context) Set(name string, val *jsvalue.JSValue) { c.global.Set(name, val) }

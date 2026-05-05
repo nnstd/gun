@@ -1873,6 +1873,9 @@ func (l *Lowerer) AddAliasedImport(pkg, alias string) {
 func (l *Lowerer) SetNeedsGlobalSync() {
 	l.needsGlobalSync = true
 }
+func (l *Lowerer) SourcePath() string {
+	return l.sourcePath
+}
 
 // isValidGoIdent checks if a string is a valid Go identifier.
 func isValidGoIdent(s string) bool {

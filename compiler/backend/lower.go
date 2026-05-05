@@ -74,6 +74,7 @@ type Lowerer struct {
 	asyncTempSymbols    []*symbol.Symbol
 	hasTopLevelAwait    bool
 	topLevelAwaitStmts  []hir.Stmt
+	initFuncName      string // name of the generated initModuleName() function
 	arenaEnabled        bool
 	disableArenaCount   int
 	hasArenaVar         int
@@ -160,6 +161,7 @@ func LowerWithConfig(mod *hir.Module, ctx *context.TranspilerContext, moduleName
 		pkgName:            mod.Package,
 		varTypes:           make(map[string]string),
 		sourcePath:         mod.SourcePath,
+		initFuncName:      initFuncNameFromSource(mod.SourcePath),
 		hasTopLevelAwait:   mod.HasTopLevelAwait,
 		arenaEnabled:       optLevel >= context.O2,
 		cpuProfile:         config.CPUProfile,
@@ -209,19 +211,21 @@ func LowerWithConfig(mod *hir.Module, ctx *context.TranspilerContext, moduleName
 
 	if l.namespaceAlias != "" {
 		l.jsvalueImport()
-		// Declare namespace var at package level.
-		l.decls = append(l.decls, varDecl(l.namespaceAlias, jsValuePtrType(), nil))
-		// Initialize early as empty object so exports.X = value → namespace.Set() works.
-		nsInit := assignStmt(
-			[]ast.Expr{goIdent(l.namespaceAlias)},
-			[]ast.Expr{callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"))},
-		)
-		l.initStmts = append([]ast.Stmt{nsInit}, l.initStmts...)
+		// Declare namespace var at package level, populated with all known
+		// namespace entries at var-time so cross-file require() within the
+		// same Go package gets a populated namespace even when the requiring
+		// file's init() runs before this file's init().
+		nsObjArgs := []ast.Expr{}
+		for exportName, alias := range l.namespaceEntries {
+			if res, ok := l.importedNames[exportName]; ok && res.goSymbol != "" {
+				alias = res.goSymbol
+			}
+			nsObjArgs = append(nsObjArgs, stringLit(exportName), goIdent(alias))
+		}
+		l.decls = append(l.decls, varDecl(l.namespaceAlias, nil,
+			callExpr(selectorExpr(goIdent("jsvalue"), "ObjectFrom"), nsObjArgs...)))
 		// After all init stmts, set namespace entries for dedicated exports.
 		for exportName, alias := range l.namespaceEntries {
-			// Resolve through importedNames: barrel file exports like
-			// "clean" may alias to "Clean" but the actual Go var is
-			// "CleanDefault" (import-resolved from ./functions/clean).
 			if res, ok := l.importedNames[exportName]; ok && res.goSymbol != "" {
 				alias = res.goSymbol
 			}
@@ -248,6 +252,84 @@ func LowerWithConfig(mod *hir.Module, ctx *context.TranspilerContext, moduleName
 					stringLit(exportName),
 					goIdent(alias),
 				)))
+			}
+		}
+		// Register a lazy loader with ModuleState guard so require() triggers
+		// demand-driven init on first access.
+		if l.sourcePath != "" {
+			l.addImport("github.com/nnstd/gun/runtime/module")
+			initStateName := initStateVarName(l.sourcePath)
+			// var _fileInit module.ModuleState
+			l.decls = append(l.decls, &ast.GenDecl{
+				Tok: token.VAR,
+				Specs: []ast.Spec{&ast.ValueSpec{
+					Names: []*ast.Ident{ast.NewIdent(initStateName)},
+					Type: &ast.SelectorExpr{
+						X:   goIdent("module"),
+						Sel: ast.NewIdent("ModuleState"),
+					},
+				}},
+			})
+			jsValueStar := &ast.StarExpr{X: selectorExpr(goIdent("jsvalue"), "JSValue")}
+			// Build the guarded loader body using moduleStateInitStmts helper
+			guardStmts := moduleStateInitStmts(initStateName, l.initFuncName)
+			// For CommonJS compat, prepend jsvalue.Assign for default exports
+			loaderBodyStmts := []ast.Stmt{}
+			if defAlias, ok := l.namespaceEntries["default"]; ok {
+				if res, ok2 := l.importedNames["default"]; ok2 && res.goSymbol != "" {
+					defAlias = res.goSymbol
+				}
+				loaderBodyStmts = append(loaderBodyStmts, exprStmt(callExpr(
+					selectorExpr(goIdent("jsvalue"), "Assign"),
+					goIdent(l.namespaceAlias),
+					goIdent(defAlias),
+				)))
+			}
+			loaderBodyStmts = append(loaderBodyStmts, guardStmts...)
+			loaderBodyStmts = append(loaderBodyStmts, &ast.ReturnStmt{Results: []ast.Expr{goIdent(l.namespaceAlias)}})
+			l.decls = append(l.decls, &ast.GenDecl{
+				Tok: token.VAR,
+				Specs: []ast.Spec{&ast.ValueSpec{
+					Names: []*ast.Ident{ast.NewIdent("_")},
+					Values: []ast.Expr{callExpr(
+						selectorExpr(goIdent("module"), "RegisterModuleLoader"),
+						stringLit(l.sourcePath),
+						&ast.FuncLit{
+							Type: &ast.FuncType{
+								Params: &ast.FieldList{},
+								Results: &ast.FieldList{List: []*ast.Field{
+									{Type: jsValueStar},
+								}},
+							},
+							Body: &ast.BlockStmt{List: loaderBodyStmts},
+						},
+					)},
+				}},
+			})
+			// Also register under bare package name (e.g. "minecraft-data")
+			if bareName := extractBarePkgName(l.sourcePath); bareName != "" && bareName != l.sourcePath {
+				l.decls = append(l.decls, &ast.GenDecl{
+					Tok: token.VAR,
+					Specs: []ast.Spec{&ast.ValueSpec{
+						Names: []*ast.Ident{ast.NewIdent("_")},
+						Values: []ast.Expr{callExpr(
+							selectorExpr(goIdent("module"), "RegisterModuleLoader"),
+							stringLit(bareName),
+							&ast.FuncLit{
+								Type: &ast.FuncType{
+									Params: &ast.FieldList{},
+									Results: &ast.FieldList{List: []*ast.Field{
+										{Type: jsValueStar},
+									}},
+								},
+								Body: &ast.BlockStmt{List: append(
+									append([]ast.Stmt{}, guardStmts...),
+									&ast.ReturnStmt{Results: []ast.Expr{goIdent(l.namespaceAlias)}},
+								)},
+							},
+						)},
+					}},
+				})
 			}
 		}
 	}
@@ -317,7 +399,14 @@ func LowerWithConfig(mod *hir.Module, ctx *context.TranspilerContext, moduleName
 			})
 		}
 	}
-	if len(l.initStmts) > 0 {
+	if len(l.initStmts) > 0 && l.initFuncName != "" {
+		// Generate initModuleName() function containing all init-time code
+		l.decls = append(l.decls, funcDecl(l.initFuncName, fieldList(), nil, &ast.BlockStmt{List: l.initStmts}))
+		// Generate guarded init() fallback for side-effect-only execution
+		initStateName := initStateVarName(l.sourcePath)
+		guardStmts := moduleStateInitStmts(initStateName, l.initFuncName)
+		l.decls = append(l.decls, funcDecl("init", fieldList(), nil, &ast.BlockStmt{List: guardStmts}))
+	} else if len(l.initStmts) > 0 {
 		l.decls = append(l.decls, funcDecl("init", fieldList(), nil, &ast.BlockStmt{List: l.initStmts}))
 	}
 
@@ -541,8 +630,8 @@ func (l *Lowerer) lowerVarDecl(d *hir.VarDecl) {
 			l.jsvalueImport()
 			l.decls = append(l.decls, varDecl(name, jsValuePtrType(), nil))
 		} else if astContainsCreateRequire(value) {
-			// Defer require-based inits to init-time so RegisterModuleLoader
-			// calls (also var-time) in other files have completed first.
+		// Defer require-based inits to initModuleName() so they
+		// run demand-driven via ModuleState, not at var-time.
 			l.jsvalueImport()
 			l.decls = append(l.decls, varDecl(name, jsValuePtrType(), nil))
 			l.initStmts = append(l.initStmts, &ast.AssignStmt{
@@ -1928,8 +2017,8 @@ func (l *Lowerer) fixInitCycles(decls []ast.Decl) []ast.Decl {
 	}
 
 	if len(initStmts) > 0 {
-		initFn := funcDecl("init", fieldList(), nil, &ast.BlockStmt{List: initStmts})
-		result = append(result, initFn)
+		// Merge cycle-breaking init stmts into main initStmts
+		l.initStmts = append(initStmts, l.initStmts...)
 	}
 
 	return result

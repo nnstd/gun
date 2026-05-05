@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/goccy/go-yaml"
 	jsvalue "github.com/nnstd/gun/runtime/builtin"
@@ -60,21 +61,56 @@ func RegisterModuleLoader(name string, loader func() *jsvalue.JSValue) int {
 	return 0
 }
 
+// ModuleState tracks whether a transpiled module's init-time code has run.
+// 0 = pending, 1 = running, 2 = done. Used by generated initModuleName()
+// functions and RegisterModuleLoader closures to implement demand-driven
+// module initialization matching Node.js require() semantics.
+type ModuleState int32
+
+// BeginInit atomically transitions from pending (0) to running (1).
+// Returns true if this caller won the CAS race and should run init.
+// Returns false if already running (circular dep) or done.
+func (ms *ModuleState) BeginInit() bool {
+	return atomic.CompareAndSwapInt32((*int32)(ms), 0, 1)
+}
+
+// FinishInit transitions from running (1) to done (2).
+func (ms *ModuleState) FinishInit() {
+	atomic.StoreInt32((*int32)(ms), 2)
+}
+
+// FailInit resets from running (1) back to pending (0) so a later
+// retry can succeed. Called from recover() if initModuleName() panics.
+func (ms *ModuleState) FailInit() {
+	atomic.StoreInt32((*int32)(ms), 0)
+}
+
 // lookupRegistry reads the registry under the mutex.
 // Falls back to lazy loaders if the module isn't directly registered.
+// The mutex is released before calling the loader to prevent deadlock
+// on circular requires (loader calling back into lookupRegistry).
 func lookupRegistry(name string) (*jsvalue.JSValue, bool) {
 	registryMu.Lock()
-	defer registryMu.Unlock()
 	if v, ok := ModuleRegistry[name]; ok {
+		registryMu.Unlock()
 		return v, true
 	}
-	if loader, ok := moduleLoaders[name]; ok {
-		v := loader()
-		ModuleRegistry[name] = v // cache for future lookups
+	loader, hasLoader := moduleLoaders[name]
+	if hasLoader {
 		delete(moduleLoaders, name)
-		return v, true
 	}
-	return nil, false
+	registryMu.Unlock()
+
+	if !hasLoader {
+		return nil, false
+	}
+	v := loader()
+	if v != nil {
+		registryMu.Lock()
+		ModuleRegistry[name] = v
+		registryMu.Unlock()
+	}
+	return v, v != nil
 }
 
 // Meta holds import.meta properties.
@@ -124,6 +160,19 @@ func normalizeRequirePath(id, base string) string {
 	return id
 }
 
+// resolveModuleExport returns the value that require() should return for a module.
+// For CommonJS compatibility, if the module namespace has a "default" property,
+// return that directly (require() returns module.exports, not a namespace wrapper).
+func resolveModuleExport(mod *jsvalue.JSValue) *jsvalue.JSValue {
+	if mod == nil {
+		return nil
+	}
+	if def, ok := mod.GetOwn("default"); ok && def != nil {
+		return def
+	}
+	return mod
+}
+
 // CreateRequire returns a require function (as *JSValue) anchored at the
 // given filename. The returned function:
 //  1. Strips node: prefix.
@@ -149,13 +198,19 @@ func CreateRequire(filename *jsvalue.JSValue) *jsvalue.JSValue {
 		id = strings.TrimPrefix(id, "node:")
 
 		if mod, ok := lookupRegistry(id); ok {
-			return mod
+			return resolveModuleExport(mod)
 		}
 
 		if strings.HasPrefix(id, ".") || strings.HasPrefix(id, "/") {
 			resolved := normalizeRequirePath(id, base)
 			if mod, ok := lookupRegistry(resolved); ok {
-				return mod
+				return resolveModuleExport(mod)
+			}
+			// Try with .js extension (transpiled modules register with .js suffix)
+			if filepath.Ext(resolved) == "" {
+				if mod, ok := lookupRegistry(resolved + ".js"); ok {
+					return resolveModuleExport(mod)
+				}
 			}
 		}
 
@@ -183,6 +238,9 @@ func CreateRequire(filename *jsvalue.JSValue) *jsvalue.JSValue {
 				if yaml.Unmarshal(data, &v) == nil {
 					return DataToJSValue(NormalizeYAMLValue(v))
 				}
+			}
+			if strings.HasSuffix(c, ".js") || strings.HasSuffix(c, ".mjs") || strings.HasSuffix(c, ".ts") {
+				continue
 			}
 			return jsvalue.NewString(string(data))
 		}

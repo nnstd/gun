@@ -121,3 +121,77 @@ func TestCreateRequireLoadsExtensionlessYAML(t *testing.T) {
 		t.Fatal("expected enabled=true")
 	}
 }
+
+func TestModuleStateBeginInit(t *testing.T) {
+	var ms ModuleState
+	if !ms.BeginInit() {
+		t.Fatal("first BeginInit should succeed")
+	}
+	if ms.BeginInit() {
+		t.Fatal("second BeginInit should fail (state=running)")
+	}
+}
+
+func TestModuleStateFinishInit(t *testing.T) {
+	var ms ModuleState
+	ms.BeginInit()
+	ms.FinishInit()
+	if ms.BeginInit() {
+		t.Fatal("BeginInit after FinishInit should fail (state=done)")
+	}
+}
+
+func TestModuleStateFailInit(t *testing.T) {
+	var ms ModuleState
+	ms.BeginInit()
+	ms.FailInit()
+	if !ms.BeginInit() {
+		t.Fatal("BeginInit after FailInit should succeed (state reset to pending)")
+	}
+}
+
+func TestModuleStateConcurrentBeginInit(t *testing.T) {
+	var ms ModuleState
+	winners := make(chan bool, 10)
+	for i := 0; i < 10; i++ {
+		go func() {
+			winners <- ms.BeginInit()
+		}()
+	}
+	won := 0
+	for i := 0; i < 10; i++ {
+		if <-winners {
+			won++
+		}
+	}
+	if won != 1 {
+		t.Fatalf("expected exactly 1 BeginInit winner, got %d", won)
+	}
+}
+
+func TestLookupRegistryNoMutexDeadlock(t *testing.T) {
+	// Register a module whose loader calls lookupRegistry for another module
+	// (simulating circular require). This should not deadlock.
+	RegisterModuleLoader("test:inner", func() *jsvalue.JSValue {
+		return jsvalue.NewString("inner-value")
+	})
+	RegisterModuleLoader("test:outer", func() *jsvalue.JSValue {
+		inner, ok := lookupRegistry("test:inner")
+		if !ok {
+			return jsvalue.NewString("inner-missing")
+		}
+		return inner
+	})
+	done := make(chan struct{})
+	go func() {
+		v, ok := lookupRegistry("test:outer")
+		if !ok || v == nil {
+			t.Error("expected outer module to resolve")
+		}
+		if v.String() != "inner-value" {
+			t.Errorf("outer module = %q, want inner-value", v.String())
+		}
+		close(done)
+	}()
+	<-done
+}

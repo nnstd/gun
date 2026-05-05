@@ -3,6 +3,7 @@ package compiler
 import (
 	"go/ast"
 	"go/token"
+	"path/filepath"
 
 	tcontext "github.com/nnstd/gun/compiler/context"
 )
@@ -705,10 +706,9 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
 			imp.AddImport("github.com/nnstd/gun/runtime/module")
-			imp.AddImport("github.com/nnstd/gun/runtime/process")
 			return callExpr(selectorExpr(ident("module"), "CreateRequire"),
 				callExpr(selectorExpr(ident("jsvalue"), "NewString"),
-					callExpr(selectorExpr(ident("process"), "GetEntryScript"))))
+					stringLit(imp.SourcePath())))
 		},
 	})
 
@@ -716,9 +716,8 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		Name: "__filename",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			imp.AddImport("github.com/nnstd/gun/runtime/process")
 			return callExpr(selectorExpr(ident("jsvalue"), "NewString"),
-				callExpr(selectorExpr(ident("process"), "GetEntryScript")))
+				stringLit(imp.SourcePath()))
 		},
 	})
 
@@ -726,9 +725,8 @@ func registerIdentifierMappings(ctx *tcontext.TranspilerContext) {
 		Name: "__dirname",
 		Transform: func(imp tcontext.Imports) ast.Expr {
 			imp.AddAliasedImport("github.com/nnstd/gun/runtime/builtin", "jsvalue")
-			imp.AddImport("github.com/nnstd/gun/runtime/process")
 			return callExpr(selectorExpr(ident("jsvalue"), "NewString"),
-				callExpr(selectorExpr(ident("process"), "GetEntryDir")))
+				stringLit(filepath.Dir(imp.SourcePath())))
 		},
 	})
 
@@ -1218,6 +1216,11 @@ func registerModules(ctx *tcontext.TranspilerContext) {
 	ctx.RegisterModule("module", &tcontext.ModuleMapping{
 		GoImportPath: "github.com/nnstd/gun/runtime/module",
 		GoPkgName:    "module",
+		UseAsJSValue: true,
+	})
+	ctx.RegisterModule("vm", &tcontext.ModuleMapping{
+		GoImportPath: "github.com/nnstd/gun/runtime/vm",
+		GoPkgName:    "vm",
 		UseAsJSValue: true,
 	})
 	ctx.RegisterModule("v8", &tcontext.ModuleMapping{

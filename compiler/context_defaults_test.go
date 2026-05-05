@@ -65,6 +65,7 @@ type testImports struct{}
 func (testImports) AddImport(path string)               {}
 func (testImports) AddAliasedImport(path, alias string) {}
 func (testImports) SetNeedsGlobalSync()                 {}
+func (testImports) SourcePath() string                  { return "" }
 
 func TestRegisterDefaultBuiltinsIncludesFetch(t *testing.T) {
 	ctx := tcontext.New()
